@@ -191,6 +191,11 @@ npm start
 The app keeps its data in `%APPDATA%\Prism V2`. A machine that already ran Prism has that
 folder copied over once on first launch, so chats, keys and memory carry on here.
 
+> Upgrading from an older Prism? Its installer may have put a `prism` command on PATH that
+> still points at the **old** installation (and its own data folder) — `prism web` would then
+> serve stale chats. Run the command from this folder instead
+> (`node tools/prism-cli.mjs web …`), or point that shim at this checkout.
+
 In **Settings → OpenCode Go**, paste the key — the model picker then offers the Go
 catalog (per-chat model choice, reasoning effort, and the group label "OpenCode Go"
 in the model stage).
