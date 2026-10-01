@@ -8835,10 +8835,9 @@ body.has-lightbox{overflow:hidden}
 .mini .thread-list{gap:0}
 .mini .thread-list > * + *{margin-top:22px}
 
-/* Prism V2: the small gray brain before "Thought" */
-.message-thinking-icon{flex:none;display:block;width:13px;height:13px;color:rgba(var(--fg-rgb),.34)}
-.message-thinking-icon svg{display:block;width:100%;height:100%;overflow:visible}
-.message-thinking.is-live .message-thinking-icon{color:rgba(var(--fg-rgb),.55);animation:brain-pulse 1.7s ease-in-out infinite}
+/* Prism V2: the 🧠 before "Thought", kept quiet until the model is actually thinking */
+.message-thinking-icon{flex:none;display:block;font-size:13px;line-height:1;filter:grayscale(1);opacity:.5;transition:filter .2s ease,opacity .2s ease}
+.message-thinking.is-live .message-thinking-icon{filter:grayscale(.4);opacity:.95;animation:brain-pulse 1.7s ease-in-out infinite}
 @keyframes brain-pulse{0%,100%{opacity:.6;transform:scale(.96)}50%{opacity:1;transform:scale(1.05)}}
 
 /* Prism V2: +N / -M lines on a card that wrote or edited a file */

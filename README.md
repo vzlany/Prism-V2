@@ -28,7 +28,7 @@ What V2 adds on top of Prism:
 - **Auto reconnect** — a dropped connection is retried a few times before the error and its
   Retry button appear.
 - **Thinking that stays readable** — earlier Thought boxes from a multi-step turn stay on
-  screen (with a small gray brain), their clocks stop with the turn, and the box no longer
+  screen (with a small 🧠), their clocks stop with the turn, and the box no longer
   scroll-jumps while the model is still writing. Steps of one turn sit close together
   instead of leaving blank bands between them.
 - **Screen pictures** — a running tool card loops a white snake around its border, file

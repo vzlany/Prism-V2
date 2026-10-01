@@ -26,7 +26,7 @@ class ThinkingView {
   this.icon = document.createElement('span');
   this.icon.className = 'message-thinking-icon';
   this.icon.setAttribute('aria-hidden', 'true');
-  this.icon.innerHTML = Glyphs.brain || '';
+  this.icon.textContent = '\u{1F9E0}';
   this.name = document.createElement('span');
   this.name.className = 'message-thinking-name';
   const chevron = document.createElement('span');
