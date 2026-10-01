@@ -101,6 +101,7 @@ window.openghost = {
   read: key => invoke('store:read', key),
   write: (key, value) => invoke('store:write', key, value),
   remove: key => invoke('store:remove', key),
+  onChange: callback => on('store:changed', callback),
  },
  tools: {
   run: (id, name, args, cwd) => invoke('tool:run', id, name, args, cwd),

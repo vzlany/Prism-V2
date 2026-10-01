@@ -13,6 +13,13 @@ contextBridge.exposeInMainWorld('openghost', {
   read: key => ipcRenderer.invoke('store:read', key),
   write: (key, value) => ipcRenderer.invoke('store:write', key, value),
   remove: key => ipcRenderer.invoke('store:remove', key),
+  // Another process (prism web) wrote the index: the list re-reads it.
+  onChange: callback => ipcRenderer.on('store:changed', () => callback()),
+ },
+ presence: {
+  // The desktop's running turns are mirrored to presence.json, so `prism web` (the phone)
+  // sees the same busy chats the app shows.
+  set: (id, info) => ipcRenderer.send('presence:set', id, info),
  },
  tools: {
   run: (id, name, args, cwd) => ipcRenderer.invoke('tool:run', id, name, args, cwd),

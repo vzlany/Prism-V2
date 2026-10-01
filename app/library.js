@@ -128,6 +128,37 @@ class Library {
   return this.chats.find(chat => chat.id === id) || null;
  }
 
+ // Another process (the desktop app, a second browser window) rewrote the index: fold in
+ // the projects and chats it made, settle titles that changed there, and drop nothing that
+ // is still being worked on locally. Unsaved local changes are kept: an entry the disk
+ // knows is only adopted when it is newer than what this page has.
+ async reload() {
+  const index = await this.store.read(INDEX).catch(() => null);
+  if (!index) return 0;
+  const folders = (Array.isArray(index.folders) ? index.folders : []).filter(folder => typeof folder?.path === 'string');
+  const chats = (Array.isArray(index.chats) ? index.chats : []).filter(chat => chat?.id && typeof chat.folder === 'string');
+  let changes = 0;
+  for (const folder of folders) {
+   const mine = this.folders.find(item => samePath(item.path, folder.path));
+   if (!mine) { this.folders.push(folder); changes++; }
+   else if ((folder.added || 0) > (mine.added || 0) && !Number.isFinite(mine.order)) { Object.assign(mine, folder); changes++; }
+  }
+  const disk = new Map(chats.map(chat => [chat.id, chat]));
+  for (const chat of this.chats) {
+   const fresh = disk.get(chat.id);
+   if (fresh && (fresh.updated || 0) > (chat.updated || 0)) { Object.assign(chat, fresh); changes++; }
+  }
+  for (const chat of chats) {
+   if (this.chats.some(mine => mine.id === chat.id)) continue;
+   this.chats.push(chat);
+   changes++;
+  }
+  // A chat can arrive before its folder entry: make sure the folder exists for the list.
+  for (const chat of this.chats) if (!folders.some(folder => samePath(folder.path, chat.folder))) this.folder({ path: chat.folder });
+  if (changes) this.changed();
+  return changes;
+ }
+
  inFolder(folder) {
   return this.chats.filter(chat => samePath(chat.folder, folder.path));
  }

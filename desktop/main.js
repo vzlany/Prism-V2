@@ -110,6 +110,53 @@ async function removeStore(key) {
  await fs.promises.rm(file, { force: true });
 }
 
+// The app and `prism web` share the store folder but run as separate processes: a watcher
+// tells this window when the other one wrote the index, so a project made in one place
+// shows up in the other without a restart, and vice versa.
+function watchStore(win) {
+ try {
+  const dir = storeDir();
+  fs.mkdirSync(dir, { recursive: true });
+  let timer = 0, stamp = '';
+  const notify = () => {
+   let next = '';
+   try {
+    const stat = fs.statSync(path.join(dir, 'index.json'));
+    next = `${stat.mtimeMs}:${stat.size}`;
+   } catch {}
+   if (!next || next === stamp) return;
+   stamp = next;
+   if (!win.isDestroyed()) win.webContents.send('store:changed');
+  };
+  fs.watch(dir, { recursive: true }, () => {
+   clearTimeout(timer);
+   timer = setTimeout(notify, 350);
+  });
+ } catch {}
+}
+
+// The turns this window is running are mirrored into presence.json; `prism web` reads it and
+// shows the phone the same busy chats the app shows. The file is kept fresh while runs live
+// so a reader can tell a live run from one left behind by a closed app.
+const presenceRuns = new Map();
+let presenceTimer = 0;
+function flushPresence() {
+ presenceTimer = 0;
+ const file = path.join(app.getPath('userData'), 'presence.json');
+ fs.promises.writeFile(file, JSON.stringify({ at: Date.now(), runs: [...presenceRuns.values()] })).catch(() => {});
+}
+function touchPresence() {
+ clearTimeout(presenceTimer);
+ presenceTimer = setTimeout(flushPresence, 250);
+}
+ipcMain.on('presence:set', (event, id, info) => {
+ if (!fromApp(event) || !id) return;
+ if (info) presenceRuns.set(id, { id, ...info, at: Date.now() });
+ else presenceRuns.delete(id);
+ touchPresence();
+});
+setInterval(() => { if (presenceRuns.size) touchPresence(); }, 5000);
+
 function external(url) {
  if (/^(https?|mailto):/i.test(url)) shell.openExternal(url);
 }
@@ -279,6 +326,7 @@ if (process.argv.includes('--create-shortcut')) {
   // Installed builds put the `prism` command in the terminal for the current user.
   if (CliCommand.install()) console.log('The prism command is now available in terminals');
   win = createWindow();
+  watchStore(win);
   Updater.start();
   MCP.init().catch(() => {});
   win.on('closed', () => {

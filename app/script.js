@@ -59,6 +59,11 @@ const library = new Library(ChatStore, syncAll);
 window.addEventListener('pagehide', () => library.flush());
 const chat = new Chat({ main, thread, bottom: threadBottom, settings, library, onChange: syncAll, onList: list => threadScrollbar.observe(list) });
 const lockScreen = new LockScreen({ main, chat, composer, onOpen: () => composerInput.focus({ preventScroll: true }) });
+// The store folder is shared with the desktop app and any other `prism web` window: when
+// one of them makes a project or a chat, this window folds it into the list right away.
+window.openghost?.store?.onChange?.(() => {
+ library.reload().then(() => chat.rebind()).catch(() => {});
+});
 const lockCard = new LockCard({ chat, library, scroller: document.querySelector('.chats-scroll') });
 new WelcomeGhost({ main, root: document.querySelector('.welcome'), input: composerInput });
 folderPill = new FolderPill({ button: document.querySelector('.composer-folder'), library, chat });

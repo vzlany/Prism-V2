@@ -21,7 +21,10 @@ What V2 adds on top of Prism:
   line under the composer.
 - **Live runs everywhere** — `prism web` publishes which conversations are working, so a
   phone shows the same busy ghost as the desktop, the reply appears when it lands, and a
-  small meter left of the composer counts the parallel runs that are alive.
+  small meter left of the composer counts the parallel runs that are alive. The store is
+  watched on both sides: a project or chat made in the app appears in `prism web` right
+  away (and the other way round), and the app mirrors its own running turns into the same
+  busy picture the phone sees.
 - **OpenCode prices and models** — the `~$` readout is priced from OpenCode's catalog
   (models.opencode.ai), with cache reads/writes and context tiers, cached locally. The
   model list re-reads the Go catalog in the background, so models OpenCode adds or retires

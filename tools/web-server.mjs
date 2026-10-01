@@ -5,7 +5,7 @@
 // all keep working. Close the terminal to stop the server.
 //
 //   node tools/web-server.mjs [--port 8787] [--host 127.0.0.1] [--profile work] [--no-open]
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import { dirname, extname, join, normalize, resolve } from "node:path";
@@ -99,9 +99,27 @@ const busy = error => {
 server.on("error", busy);
 wss.on("error", busy);
 // Which conversation is working on which page, so every other page (a phone waking up,
-// a second window) can show the same busy ghost the page that started it sees.
+// a second window) can show the same busy ghost the page that started it sees. The desktop
+// app cannot talk to this server directly, so it mirrors its runs into presence.json and
+// they are merged in here.
 const presence = new Map();
-const presenceList = () => [...presence.values()];
+let desktopPresence = [];
+const PRESENCE_STALE = 20000;
+function readDesktopPresence() {
+ try {
+  const text = readFileSync(join(USER_DATA, "presence.json"), "utf8").replace(/^\uFEFF/, "");
+  const data = JSON.parse(text);
+  const now = Date.now();
+  return (Array.isArray(data?.runs) ? data.runs : []).filter(run => run?.id && now - (Number(run.at) || 0) < PRESENCE_STALE);
+ } catch {
+  return [];
+ }
+}
+const presenceList = () => {
+ const list = [...presence.values()];
+ for (const run of desktopPresence) if (!presence.has(run.id)) list.push(run);
+ return list;
+};
 function broadcastPresence() {
  const list = presenceList();
  for (const client of wss.clients) {
@@ -109,6 +127,51 @@ function broadcastPresence() {
   try { client.send(JSON.stringify({ t: "event", channel: "presence:event", args: [list] })); } catch {}
  }
 }
+// The store folder is shared with the desktop app (and a second browser): when the index
+// changes somewhere else, every page is told so its project and chat lists stay live.
+let indexStamp = "";
+function indexSignature() {
+ try {
+  const stat = statSync(join(USER_DATA, "store", "index.json"));
+  return `${stat.mtimeMs}:${stat.size}`;
+ } catch {
+  return "";
+ }
+}
+function broadcastStore() {
+ for (const client of wss.clients) {
+  if (client.readyState !== 1) continue;
+  try { client.send(JSON.stringify({ t: "event", channel: "store:changed", args: [] })); } catch {}
+ }
+}
+try {
+ mkdirSync(join(USER_DATA, "store"), { recursive: true });
+ indexStamp = indexSignature();
+ let watchTimer = 0;
+ watch(join(USER_DATA, "store"), { recursive: true }, () => {
+  clearTimeout(watchTimer);
+  watchTimer = setTimeout(() => {
+   const next = indexSignature();
+   if (!next || next === indexStamp) return;
+   indexStamp = next;
+   broadcastStore();
+  }, 350);
+ });
+ let presenceTimer = 0;
+ // The desktop app writes this file; it may not exist before its first turn, so a stub is
+ // made for the watcher to hold on to.
+ try {
+  const file = join(USER_DATA, "presence.json");
+  if (!existsSync(file)) writeFileSync(file, JSON.stringify({ at: 0, runs: [] }));
+  watch(file, () => {
+   clearTimeout(presenceTimer);
+   presenceTimer = setTimeout(() => {
+    desktopPresence = readDesktopPresence();
+    broadcastPresence();
+   }, 250);
+  });
+ } catch {}
+} catch {}
 wss.on("connection", ws => {
  const data = { id: ++connections };
  data.send = (channel, ...eventArgs) => { try { ws.send(JSON.stringify({ t: "event", channel, args: eventArgs })); } catch {} };

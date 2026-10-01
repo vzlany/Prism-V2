@@ -8,7 +8,12 @@
 
 const bridge = window.openghost?.presence || null;
 let runs = new Map();
+let lastSnapshot = [];
 const listeners = new Set();
+// Desktop mirrors carry their own timestamp; one that stopped being refreshed (the app was
+// closed mid-turn) expires here so no phantom busy ghost is left behind.
+const STALE = 25000;
+const fresh = entry => !entry.at || Date.now() - Number(entry.at) < STALE;
 
 const emit = () => {
  for (const callback of [...listeners]) {
@@ -17,15 +22,17 @@ const emit = () => {
 };
 
 const read = snapshot => {
+ lastSnapshot = Array.isArray(snapshot) ? snapshot : [];
  const next = new Map();
- for (const entry of Array.isArray(snapshot) ? snapshot : []) {
-  if (entry && entry.id) next.set(entry.id, entry);
+ for (const entry of lastSnapshot) {
+  if (entry && entry.id && fresh(entry)) next.set(entry.id, entry);
  }
  runs = next;
  emit();
 };
 
 bridge?.onEvent?.(read);
+setInterval(() => { if (runs.size) read(lastSnapshot); }, 10000);
 
 window.Presence = {
  on(callback) {

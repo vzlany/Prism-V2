@@ -713,6 +713,15 @@ class Chat {
   this.onChange();
  }
 
+ // Another process (the desktop app, a second window) rewrote the index: the conversations
+ // already loaded take the fresh records, so titles and flags changed there are used here.
+ rebind() {
+  for (const [id, conv] of this.conversations) {
+   const fresh = this.library.chat(id);
+   if (fresh) conv.record = fresh;
+  }
+ }
+
  stop() {
   if (this.active?.turn) this.abort(this.active);
  }
