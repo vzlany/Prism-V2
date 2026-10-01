@@ -1197,9 +1197,10 @@ class Chat {
     view.el.append(new MediaSlider(pictures).el);
     if (conv === this.active) this.followBottom();
    }
-   // A written or edited file becomes an attachment under the message: preview, download.
+   // A written or edited file gets Preview and Download on the card itself: the file is one
+   // box, not a card plus a second chip repeating its name.
    if (!conv.subagent && (name === 'write_file' || name === 'edit_file') && String(typeof output === 'string' ? output : output?.text).slice(0, 6) !== 'Error:') {
-    try { window.Artifacts?.attach(view.el, { path: args.path, cwd }); } catch {}
+    try { window.Artifacts?.actions?.(card, { path: args.path, cwd }); } catch {}
    }
    return output;
   } catch (error) {
@@ -1539,7 +1540,7 @@ class Chat {
    if (call.function?.name === 'write_file' || call.function?.name === 'edit_file') {
     try {
      const written = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-     if (written.path) window.Artifacts?.attach(el, { path: written.path, cwd });
+     if (written.path) window.Artifacts?.actions?.(card, { path: written.path, cwd });
     } catch {}
    }
   }

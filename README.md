@@ -34,7 +34,8 @@ What V2 adds on top of Prism:
   instead of leaving blank bands between them.
 - **Screen pictures** — two white snakes glide around a running tool card's frame at one
   constant speed, half a loop apart; file writes and edits show green `+N` / red `−M` line
-  counts, and the `screenshot` tool captures the whole screen or one window through
+  counts and carry Preview and Download on the card itself (one box per file, no second
+  chip), and the `screenshot` tool captures the whole screen or one window through
   Electron itself, so it works without ffmpeg and antivirus has no script to flag.
 - **Copy that works everywhere** — including a phone on plain http, where the browser
   clipboard is unavailable; the fallback still copies and the buttons answer.

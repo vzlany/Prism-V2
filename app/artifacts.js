@@ -49,17 +49,16 @@ function previewModal(name, text) {
 }
 
 window.Artifacts = {
- attach(container, { path, cwd }) {
-  if (!container || !path || !window.openghost?.tools) return;
+ // Preview and Download live inside the write/edit card itself, so a file the agent touched
+ // is one box, not a card plus a second file chip saying the same name.
+ actions(card, { path, cwd }) {
+  if (!card?.addAction || !path || !window.openghost?.tools) return;
   const name = nameOf(path);
-  const chip = document.createElement('div');
-  chip.className = 'artifact';
-  chip.innerHTML = `<span class="artifact-icon">${Glyphs.file}</span><span class="artifact-name" title="${escapeHtml(path)}">${escapeHtml(name)}</span><button type="button" class="artifact-btn" data-act="preview">Preview</button><button type="button" class="artifact-btn" data-act="download">Download</button>`;
-  chip.querySelector('[data-act="preview"]').addEventListener('click', async () => {
+  card.addAction(I18n.t('artifact.preview'), async () => {
    const text = await read(path, cwd);
    previewModal(name, text == null ? '(could not read the file)' : text);
   });
-  chip.querySelector('[data-act="download"]').addEventListener('click', async () => {
+  card.addAction(I18n.t('artifact.download'), async () => {
    const text = await read(path, cwd);
    if (text == null) return;
    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
@@ -70,7 +69,6 @@ window.Artifacts = {
    link.click();
    setTimeout(() => URL.revokeObjectURL(url), 4000);
   });
-  container.append(chip);
  },
 };
 })();

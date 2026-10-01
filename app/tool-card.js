@@ -113,18 +113,24 @@ class ToolCard {
   this.head.setAttribute('aria-expanded', String(this.open));
  }
 
- // A small action inside the head, e.g. "Open" on a subagent card: clicking it opens the
- // conversation that work belongs to without folding the card.
- addOpen(label, onClick) {
-  const open = element('span', 'tool-open', label);
-  open.setAttribute('role', 'button');
-  open.tabIndex = 0;
-  open.title = label;
+ // A small action inside the head, e.g. "Open" on a subagent card or Preview/Download on a
+ // file card: clicking it acts without folding the card.
+ addAction(label, onClick) {
+  const action = element('span', 'tool-action', label);
+  action.setAttribute('role', 'button');
+  action.tabIndex = 0;
+  action.title = label;
   const go = event => { event.stopPropagation(); event.preventDefault(); onClick(); };
-  open.addEventListener('click', go);
-  open.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') go(event); });
-  this.head.insertBefore(open, this.chevron);
-  return open;
+  action.addEventListener('click', go);
+  action.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') go(event); });
+  this.head.insertBefore(action, this.chevron);
+  return action;
+ }
+
+ addOpen(label, onClick) {
+  const action = this.addAction(label, onClick);
+  action.classList.add('tool-open');
+  return action;
  }
 }
 

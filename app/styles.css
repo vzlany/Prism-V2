@@ -8797,8 +8797,8 @@ body.has-lightbox{overflow:hidden}
 .composer-tags{display:flex;align-items:center;flex-wrap:wrap}
 
 /* Prism V2: the Open action on a subagent card */
-.tool-open{margin-left:6px;padding:2px 9px;border-radius:999px;background:rgba(var(--fg-rgb),.07);color:rgba(var(--fg-rgb),.72);font-size:11px;line-height:1.6;cursor:pointer;white-space:nowrap;transition:background-color .15s ease,color .15s ease}
-.tool-open:hover,.tool-open:focus-visible{background:rgba(var(--fg-rgb),.13);color:rgba(var(--fg-rgb),.95)}
+.tool-action{margin-left:6px;padding:2px 9px;border-radius:999px;background:rgba(var(--fg-rgb),.07);color:rgba(var(--fg-rgb),.72);font-size:11px;line-height:1.6;cursor:pointer;white-space:nowrap;transition:background-color .15s ease,color .15s ease}
+.tool-action:hover,.tool-action:focus-visible{background:rgba(var(--fg-rgb),.13);color:rgba(var(--fg-rgb),.95)}
 .tool.is-running .tool-open{background:rgba(138,180,255,.16);color:#cfe0ff}
 
 

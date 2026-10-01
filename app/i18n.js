@@ -117,6 +117,8 @@ const STRINGS = {
   'approve.allow': 'Allow',
   'approve.deny': 'Deny',
   'approve.more': '{count} more lines',
+  'artifact.preview': 'Preview',
+  'artifact.download': 'Download',
   'compact.running': 'Compacting the conversation',
   'compact.done': 'Conversation compacted',
   'compact.failed': 'Couldn’t compact the conversation',
