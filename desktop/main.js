@@ -155,7 +155,6 @@ ipcMain.on('presence:set', (event, id, info) => {
  else presenceRuns.delete(id);
  touchPresence();
 });
-setInterval(() => { if (presenceRuns.size) touchPresence(); }, 5000);
 
 function external(url) {
  if (/^(https?|mailto):/i.test(url)) shell.openExternal(url);

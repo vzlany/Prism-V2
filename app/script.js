@@ -21,6 +21,7 @@ let folderPill = null;
 let modelStage = null;
 let instructionsPill = null;
 let effortSlider = null;
+let liveView = null;
 
 new SmoothHeight(composerField, composerInput);
 // Keeps the room above the composer and the composer's own top edge in two custom properties,
@@ -91,11 +92,27 @@ const parallelMeter = new ParallelMeter({ button: document.querySelector('.compo
 // ghost here: the list has to be repainted when presence arrives, not only on local changes.
 // When such a run finishes, the chat is read again so its answer appears without a reload.
 let presenceBusy = new Set();
+// The chat on screen running on another device: its live card sits at the end of the thread
+// and is rebuilt from the presence updates. When it ends the real conversation is read.
+function syncLive() {
+ const conv = chat.active;
+ const info = conv && !conv.turn ? window.Presence?.info?.(conv.id) : null;
+ if (conv && info?.parts?.length) {
+  if (!liveView) liveView = new LiveView();
+  if (liveView.el.parentElement !== conv.list) conv.list.append(liveView.el);
+  liveView.update(info);
+  if (chat.follow) chat.followBottom();
+ } else if (liveView) {
+  liveView.el.remove();
+  liveView = null;
+ }
+}
 window.Presence?.on?.(() => {
  const now = new Set(window.Presence.list().map(entry => entry.id));
  for (const id of presenceBusy) if (!now.has(id)) chat.refresh(id).catch(() => {});
  presenceBusy = now;
  if (chatList) chatList.render();
+ syncLive();
 });
 chatList = new ChatList({
   root: document.querySelector('.chats'),
@@ -297,6 +314,7 @@ function syncAll() {
   modelStage?.sync();
   instructionsPill?.sync();
   effortSlider?.lock(chat.busy);
+  syncLive();
 }
 
 async function send() {

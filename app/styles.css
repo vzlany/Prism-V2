@@ -8855,3 +8855,13 @@ body.has-lightbox{overflow:hidden}
 
 /* Prism V2: the Free chip sits under the model's meta line */
 .model-free{margin-left:0;align-self:flex-end}
+
+/* Prism V2: a chat running on another device, drawn live in the thread */
+.live-card{margin-top:10px;padding:10px 12px 12px;border-radius:16px;background:rgba(var(--fg-rgb),.028);box-shadow:inset 0 0 0 1px rgba(var(--fg-rgb),.07)}
+.live-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;color:var(--fg-secondary)}
+.live-ghost{flex:none;display:block;width:18px;height:18px;color:rgba(var(--fg-rgb),.75)}
+.live-ghost ghost-thinking{display:block;width:100%;height:100%}
+.live-label{font-weight:600;color:rgba(var(--fg-rgb),.72)}
+.live-who{margin-left:auto;font-size:11px;color:var(--fg-tertiary)}
+.live-body > * + *{margin-top:6px}
+.live-body .message-thinking{margin-top:2px}

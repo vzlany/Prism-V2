@@ -909,12 +909,71 @@ class Chat {
 
  begin(conv, config) {
   const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  return conv.turn = { id, controller: new AbortController(), config, started: Date.now(), part: null, parts: [], next: null, queue: [], approvals: new Set(), tool: '', text: false };
+  const turn = conv.turn = { id, controller: new AbortController(), config, started: Date.now(), part: null, parts: [], next: null, queue: [], approvals: new Set(), tool: '', text: false, liveAt: 0, liveTimer: 0, liveBeat: 0 };
+  // A slow beat keeps the mirror fresh while the turn lives, so a reader can tell a live run
+  // from one left behind by a closed app.
+  turn.liveBeat = setInterval(() => this.publishLive(conv, turn), 4000);
+  return turn;
+ }
+
+ // What the running turn looks like right now, small enough to mirror to the web: its last
+ // thoughts, its tool cards with their state, and the answer being written. A device
+ // watching the same chat (the phone on `prism web`) draws this as a live card.
+ liveSnapshot(conv, turn) {
+  const clip = (text, max) => String(text || '').slice(0, max);
+  const tail = (text, max) => {
+   const value = String(text || '');
+   return value.length > max ? `…${value.slice(-max)}` : value;
+  };
+  const parts = [];
+  for (const part of turn.parts) {
+   const { entry, view } = part;
+   if (entry.thinking) parts.push({ kind: 'thinking', text: tail(entry.thinking, 2400), live: Boolean(view.thinking?.live) });
+   for (const card of view.el.querySelectorAll(':scope > .tool')) {
+    const state = card.classList.contains('is-error') ? 'error' : card.classList.contains('is-done') ? 'done' : 'running';
+    parts.push({
+     kind: 'tool',
+     title: card.querySelector('.tool-title')?.textContent || '',
+     summary: card.querySelector('.tool-summary')?.textContent || '',
+     state,
+     output: tail(card.querySelector('.tool-output')?.textContent || '', 1200),
+    });
+   }
+   if (entry.content && entry.content.trim()) parts.push({ kind: 'text', text: clip(entry.content, 8000) });
+  }
+  const last = parts[parts.length - 1] || null;
+  const status = last?.kind === 'text' ? 'writing' : last?.kind === 'tool' && last.state === 'running' ? 'working' : 'thinking';
+  const title = this.library.chat(conv.id)?.title || conv.record?.title || I18n.t('chat.new');
+  // Keep the payload small: keep the newest parts that fit in the budget.
+  const kept = [];
+  let budget = 20000;
+  for (let i = parts.length - 1; i >= 0 && kept.length < 20; i--) {
+   const size = (parts[i].text || '').length + (parts[i].output || '').length + (parts[i].title || '').length + (parts[i].summary || '').length;
+   if (budget - size < 0 && kept.length) break;
+   budget -= size;
+   kept.unshift(parts[i]);
+  }
+  return { state: 'running', title: String(title).slice(0, 120), model: this.modelOf(conv), started: turn.started, status, parts: kept };
+ }
+
+ // At most one publish every ~700ms; the tail timer keeps the last change from being lost.
+ publishLive(conv, turn) {
+  if (!window.Presence?.publish || !turn) return;
+  clearTimeout(turn.liveTimer);
+  const wait = 700 - (performance.now() - (turn.liveAt || 0));
+  if (wait > 0) {
+   turn.liveTimer = setTimeout(() => this.publishLive(conv, turn), wait);
+   return;
+  }
+  if (conv.turn !== turn) return;
+  turn.liveAt = performance.now();
+  try { window.Presence.publish(conv.id, this.liveSnapshot(conv, turn)); } catch {}
  }
 
  run(conv, prompt, config, bubble) {
   const turn = this.begin(conv, config);
   window.Presence?.publish(conv.id, { state: 'running', title: String(prompt.text || '').slice(0, 80), model: this.modelOf(conv), started: Date.now() });
+  this.publishLive(conv, turn);
   const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text };
   conv.messages.push(entry);
   if (bubble) this.nodes.set(entry, bubble);
@@ -926,6 +985,7 @@ class Chat {
  resume(conv, config) {
   const turn = this.begin(conv, config);
   window.Presence?.publish(conv.id, { state: 'running', title: String(conv.record?.title || '').slice(0, 80), model: this.modelOf(conv), started: Date.now() });
+  this.publishLive(conv, turn);
   this.openPart(conv, turn);
   this.onChange();
   return this.drive(conv, turn);
@@ -1101,6 +1161,7 @@ class Chat {
      part.entry.content = join(base, stream.content);
      this.dismissGhost(view);
      view.stream.push(part.entry.content);
+     this.publishLive(conv, turn);
     },
     onReasoning: delta => {
      if (!delta) return;
@@ -1108,6 +1169,7 @@ class Chat {
      part.entry.thinking = (part.entry.thinking || '') + delta;
      view.thinking?.write(part.entry.thinking, true);
      if (conv === this.active) this.followBottom();
+     this.publishLive(conv, turn);
     },
    });
   } catch (error) {
@@ -1181,6 +1243,7 @@ class Chat {
   const card = name === 'ask_user' ? null : new ToolCard({ ...AgentTools.describe(name, args, cwd), tool: name });
   if (card) view.el.append(card.el);
   if (conv === this.active) this.followBottom();
+  this.publishLive(conv, turn);
   const id = turn.tool = `${conv.id}-${++this.tools}`;
   // A subagent card carries a way into the conversation the subagent works in.
   if (card && name === 'subagent') card.addOpen(I18n.t('subagent.open'), () => {
@@ -1195,6 +1258,7 @@ class Chat {
    }
    const output = await AgentTools.run(name, args, { id, cwd });
    card?.setResult(typeof output === 'string' ? output : output?.text);
+   this.publishLive(conv, turn);
    // Pictures a tool brought back belong in the chat too, not only in the model's context:
    // a screenshot or a look at a file should simply appear, with no link to copy.
    if (output && typeof output === 'object' && output.images?.length) {
@@ -1214,6 +1278,7 @@ class Chat {
    return output;
   } catch (error) {
    card?.setResult(error.message, true);
+   this.publishLive(conv, turn);
    return `Error: ${error.message}`;
   } finally {
    turn.tool = '';
@@ -1255,6 +1320,7 @@ class Chat {
   view.el.__entry = entry;
   turn.part = { view, entry };
   turn.parts.push(turn.part);
+  this.publishLive(conv, turn);
  }
 
  closePart(conv, { view, entry }) {
@@ -1272,6 +1338,7 @@ class Chat {
    view.el.classList.remove('is-streaming');
    if (!hasText && !hasThinking && !hasBody) collapse(view.el);
   });
+  if (conv.turn) this.publishLive(conv, conv.turn);
  }
 
  async end(conv, turn, error, finish) {
@@ -1281,6 +1348,13 @@ class Chat {
   if (turn.started) entry.duration = Math.max(1, Math.round((Date.now() - turn.started) / 1000));
   for (const pending of turn.approvals) pending.card.settle('deny');
   conv.turn = null;
+  // The live mirror stops the moment the turn is over — even if the closing animation is
+  // still waiting on animation frames that a hidden window never runs.
+  clearTimeout(turn.liveTimer);
+  clearInterval(turn.liveBeat);
+  turn.liveTimer = 0;
+  turn.liveBeat = 0;
+  window.Presence?.publish(conv.id, null);
   if (turn.switch && this.library.chat(conv.id)) {
    this.library.update(conv.id, { model: turn.switch });
    this.settings.setModel(turn.switch);
@@ -1321,7 +1395,6 @@ class Chat {
    const summary = String(entry.content || '').replace(/\s+/g, ' ').trim().slice(0, 300);
    window.openghost?.notify?.(title, outcome, summary);
    window.ParallelRuns?.update(conv.id, { status: outcome, snippet: summary.slice(0, 140) });
-   window.Presence?.publish(conv.id, null);
    // A chime when a task ends, an approval card or question waits, or something breaks.
    // Subagents stay silent (several run at once) and so do the quiet internal turns a model
    // switch makes.
