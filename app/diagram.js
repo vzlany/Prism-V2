@@ -4159,7 +4159,8 @@ class DiagramView {
  }
 
  async copy(button) {
-  try { await navigator.clipboard.writeText(this.good || this.source); } catch { return; }
+  const ok = await (window.Clip?.text ? window.Clip.text(this.good || this.source) : Promise.resolve(false));
+  if (!ok) return;
   button.classList.add('is-done');
   clearTimeout(button.doneTimer);
   button.doneTimer = setTimeout(() => button.classList.remove('is-done'), COPIED_TIME);

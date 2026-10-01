@@ -110,25 +110,13 @@ chatList = new ChatList({
 });
 document.querySelector('.titlebar-name').innerHTML = `${Glyphs.ghost}<span>Prism V2</span>`;
 
-// Live status under the composer: tokens used in this chat against the model's window.
-{
- const node = document.querySelector('.composer-status-tokens');
- const human = value => (value >= 1000000 ? `${(value / 1000000).toFixed(2)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}K` : String(value || 0));
- setInterval(() => {
-  if (!node) return;
-  try {
-   const context = chat.context();
-   const tokens = context.tokens || 0;
-   const windowSize = settings.windowOf(context.model || settings.model) || 0;
-   const percent = windowSize ? Math.min(100, Math.round((tokens / windowSize) * 100)) : 0;
-   const cache = context.cache;
-   const cached = cache && cache.read + cache.write > 0 ? ` · cache ${human(cache.read)} read${cache.write ? ` / ${human(cache.write)} write` : ''}` : '';
-   const cost = window.Prices?.cost(context.model, context.spend);
-   const spent = cost != null && cost > 0 ? ` · ~${Prices.format(cost)}` : '';
-   node.textContent = tokens ? `${human(tokens)} / ${human(windowSize)} tokens · ${percent}% · ${context.messages.length} messages${cached}${spent}` : '';
-  } catch {}
- }, 1500);
-}
+// The conversation's size, context window and price live in the circle left of the composer.
+new ContextCircle({
+ button: document.querySelector('.context-circle'),
+ panel: document.querySelector('.context-panel'),
+ chat,
+ settings,
+});
 const modeButton = document.querySelector('.composer-mode');
 const browserToggle = document.querySelector('.browser-toggle');
 let browserPanel = null;
@@ -269,9 +257,8 @@ function syncComposer() {
 const DRAFT = 'openghost.draft.';
 const draftKey = () => DRAFT + (chat.active?.id || 'new');
 let draftTimer = 0;
-function saveDraft() {
+function saveDraft(key = draftKey()) {
  const text = composerText.text();
- const key = draftKey();
  if (text.trim()) localStorage.setItem(key, text);
  else localStorage.removeItem(key);
 }
@@ -326,12 +313,15 @@ composerInput.addEventListener('input', syncComposer);
 
 composerInput.addEventListener('input', () => {
  clearTimeout(draftTimer);
- draftTimer = setTimeout(saveDraft, 700);
+ // The key is taken now: a chat switched before the timer fires still gets its own draft.
+ const key = draftKey();
+ draftTimer = setTimeout(() => saveDraft(key), 500);
 });
-window.addEventListener('pagehide', saveDraft);
+window.addEventListener('pagehide', () => saveDraft());
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveDraft(); });
 setInterval(() => {
  if (composerText.text().trim()) saveDraft();
-}, 4000);
+}, 3000);
 
 composerInput.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && chat.busy && !event.isComposing && !document.querySelector(':popover-open, dialog[open]')) {

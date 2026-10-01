@@ -48,6 +48,13 @@
       </div>
       <div class="welcome" aria-hidden="true"><div class="welcome-flight"></div></div>
       <div class="composer">
+        <button type="button" class="context-circle" hidden aria-haspopup="dialog" aria-label="Conversation context">
+          <svg class="context-ring" viewBox="0 0 44 44" aria-hidden="true">
+            <circle class="context-track" cx="22" cy="22" r="18"/>
+            <circle class="context-fill" cx="22" cy="22" r="18"/>
+          </svg>
+          <span class="context-percent"></span>
+        </button>
         <div class="composer-tags">
           <button type="button" class="composer-instructions" hidden></button>
           <button type="button" class="composer-folder"></button>
@@ -76,9 +83,10 @@
           </div>
         </div>
       </div>
-      <div class="composer-status"><span class="composer-status-tokens"></span></div>
     </main>
   </div>
+
+  <div class="context-panel" popover="auto" role="dialog" aria-label="Conversation statistics"></div>
 
   <div class="effort-panel" popover="manual" role="dialog" aria-label="Effort" data-i18n-attr="aria-label:effort">
     <div class="effort-name" aria-hidden="true"></div>
@@ -188,6 +196,7 @@
   <script src="effects.js"></script>
   <script src="sounds.js"></script>
   <script src="presence.js"></script>
+  <script src="clip.js"></script>
   <script src="liquid-glass.js"></script>
   <script src="icon-button.js"></script>
   <script src="sidebar-toggle.js"></script>
@@ -223,6 +232,7 @@
   <script src="lightbox.js"></script>
   <script src="media-slider.js"></script>
   <script src="settings.js"></script>
+  <script src="context-circle.js"></script>
   <script src="effort-paint.js"></script>
   <script src="effort-morph.js"></script>
   <script src="effort-slider.js"></script>

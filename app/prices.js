@@ -123,6 +123,12 @@ window.Prices = {
   const entry = lookup(id);
   return entry && Number.isFinite(entry.input) && Number.isFinite(entry.output) ? entry : null;
  },
+ // A model the catalog prices at zero — or whose name says so — wears the Free chip in the picker.
+ free(id) {
+  const entry = lookup(id);
+  if (entry) return entry.input === 0 && entry.output === 0;
+  return /-free($|:)/i.test(String(id || ''));
+ },
  // What a chat's collected usage costs at those rates, or null when the model has no prices.
  cost(model, spend) {
   const price = window.Prices.of(model);

@@ -171,11 +171,8 @@ class SelectionMenu {
  }
 
  async copyText(button) {
-  try {
-   await navigator.clipboard.writeText(this.text);
-  } catch {
-   return;
-  }
+  const ok = await (window.Clip?.text ? window.Clip.text(this.text) : Promise.resolve(false));
+  if (!ok) return;
   button.classList.add('is-copied');
   clearTimeout(button.copiedTimer);
   button.copiedTimer = setTimeout(() => button.classList.remove('is-copied'), 1400);

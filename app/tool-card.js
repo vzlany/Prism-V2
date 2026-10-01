@@ -36,9 +36,20 @@ class ToolCard {
   const icon = element('span', 'tool-icon');
   icon.innerHTML = Glyphs[ICONS[info?.kind] || 'terminal'] || '';
   this.summary = element('span', 'tool-summary', this.summaryOf());
+  // How many lines a write or an edit touched: green +N and red −M beside the file name.
+  const count = text => {
+   const clean = String(text ?? '').replace(/\r\n/g, '\n').replace(/\n$/, '');
+   return clean ? clean.split('\n').length : 0;
+  };
+  this.added = count(info?.added);
+  this.removed = count(info?.removed);
+  this.stat = element('span', 'tool-stat');
+  if (this.removed) this.stat.append(element('span', 'tool-stat-num is-del', `−${this.removed}`));
+  if (this.added) this.stat.append(element('span', 'tool-stat-num is-add', `+${this.added}`));
+  this.stat.hidden = !this.added && !this.removed;
   this.status = element('span', 'tool-status');
   this.chevron = element('span', 'tool-chevron');
-  this.head.append(icon, element('span', 'tool-title', this.titleOf()), this.summary, this.status, this.chevron);
+  this.head.append(icon, element('span', 'tool-title', this.titleOf()), this.summary, this.stat, this.status, this.chevron);
   this.body = element('div', 'tool-body');
   this.inner = element('div', 'tool-body-inner');
   this.body.append(this.inner);

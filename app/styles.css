@@ -8368,8 +8368,6 @@ a.settings-button {
 .mcp-status.is-error{color:#e08f8f}
 
 /* Prism V2: token status under the composer */
-.composer-status{display:flex;justify-content:center;gap:10px;margin:-6px auto 6px;width:min(var(--composer-max-width),100% - 2 * var(--composer-side-gap));font-size:11px;color:var(--fg-primary);pointer-events:none}
-.composer-status-tokens{white-space:nowrap}
 
 
 /* Prism V2: the thinking panel above an answer */
@@ -8822,3 +8820,57 @@ body.has-lightbox{overflow:hidden}
 .tool-open{margin-left:6px;padding:2px 9px;border-radius:999px;background:rgba(var(--fg-rgb),.07);color:rgba(var(--fg-rgb),.72);font-size:11px;line-height:1.6;cursor:pointer;white-space:nowrap;transition:background-color .15s ease,color .15s ease}
 .tool-open:hover,.tool-open:focus-visible{background:rgba(var(--fg-rgb),.13);color:rgba(var(--fg-rgb),.95)}
 .tool.is-running .tool-open{background:rgba(138,180,255,.16);color:#cfe0ff}
+
+
+/* Prism V2: tables stay inside the reply column and wrap instead of running off the edge */
+.md-table{max-width:100%}
+.md-table table{width:100%;table-layout:fixed}
+.md-table th,.md-table td{white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+.markdown > .md-table.md-wide{width:100%;margin-left:0}
+
+/* Prism V2: steps of one turn sit close together; turns keep their distance */
+.thread-list{gap:0}
+.thread-list > * + *{margin-top:28px}
+.thread-list > .message.is-assistant + .message.is-assistant{margin-top:8px}
+.mini .thread-list{gap:0}
+.mini .thread-list > * + *{margin-top:22px}
+
+/* Prism V2: the small gray brain before "Thought" */
+.message-thinking-icon{flex:none;display:block;width:13px;height:13px;color:rgba(var(--fg-rgb),.34)}
+.message-thinking-icon svg{display:block;width:100%;height:100%;overflow:visible}
+.message-thinking.is-live .message-thinking-icon{color:rgba(var(--fg-rgb),.55);animation:brain-pulse 1.7s ease-in-out infinite}
+@keyframes brain-pulse{0%,100%{opacity:.6;transform:scale(.96)}50%{opacity:1;transform:scale(1.05)}}
+
+/* Prism V2: +N / -M lines on a card that wrote or edited a file */
+.tool-stat{flex:none;display:inline-flex;gap:6px;margin-left:2px;font-family:var(--mono-font);font-size:11px;font-weight:650}
+.tool-stat[hidden]{display:none}
+.tool-stat-num.is-add{color:rgb(128,218,134)}
+.tool-stat-num.is-del{color:rgb(255,128,128)}
+
+/* Prism V2: the conversation's gauge, outside the left edge of the composer */
+.context-circle{position:absolute;z-index:3;right:-64px;bottom:18px;display:grid;place-items:center;width:54px;height:54px;padding:0;border:0;border-radius:50%;outline:none;background:var(--composer-bg);box-shadow:inset 0 0 0 1px var(--composer-border),0 10px 26px rgba(0,0,0,.32);color:var(--fg-secondary);cursor:pointer;anchor-name:--context;transition:transform .2s var(--motion-easing),box-shadow .2s ease}
+.context-circle[hidden]{display:none}
+.context-circle:hover{transform:scale(1.06)}
+.context-circle:focus-visible{box-shadow:inset 0 0 0 1px var(--composer-border),0 0 0 2px var(--focus-ring)}
+.context-ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
+.context-track{fill:none;stroke:rgba(var(--fg-rgb),.10);stroke-width:3.5}
+.context-fill{fill:none;stroke:rgba(var(--fg-rgb),.85);stroke-width:3.5;stroke-linecap:round;transition:stroke-dashoffset .6s var(--motion-easing),stroke .3s ease}
+.context-circle.is-mid .context-fill{stroke:rgb(255,196,120)}
+.context-circle.is-high .context-fill{stroke:rgb(255,128,128)}
+.context-percent{position:relative;font-size:12.5px;font-weight:650;color:rgba(var(--fg-rgb),.78);font-variant-numeric:tabular-nums}
+.context-panel{position:fixed;position-anchor:--context;position-area:left center;position-try-fallbacks:flip-inline,flip-block;inset:auto;margin:0 12px 0 0;padding:10px 12px;width:262px;background:var(--composer-bg);border:0;border-radius:14px;box-shadow:inset 0 0 0 1px var(--composer-border),0 18px 48px rgba(0,0,0,.45);color:rgba(var(--fg-rgb),.85);font-size:12px}
+.context-head{font-size:12px;color:var(--fg-secondary);margin:0 2px 8px}
+.context-row{display:flex;align-items:baseline;gap:10px;padding:3px 2px}
+.context-label{flex:none;color:var(--fg-tertiary)}
+.context-value{margin-left:auto;text-align:right;font-family:var(--mono-font);font-size:11.5px;color:rgba(var(--fg-rgb),.85)}
+@media (max-width:900px){
+ .context-circle{right:2px;bottom:calc(100% + 12px);width:44px;height:44px}
+ .context-percent{font-size:10px}
+ .context-panel{position-area:bottom span-left;position-try-fallbacks:flip-block,flip-inline;margin:12px 0 0}
+}
+
+/* Prism V2: the Free chip in the model picker */
+.model-free{flex:none;margin-left:8px;padding:1px 7px;border-radius:999px;background:rgba(120,220,150,.13);color:rgb(150,230,170);font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase}
+
+/* Prism V2: the Free chip sits under the model's meta line */
+.model-free{margin-left:0;align-self:flex-end}

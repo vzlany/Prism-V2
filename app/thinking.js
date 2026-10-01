@@ -23,12 +23,16 @@ class ThinkingView {
   this.head = document.createElement('button');
   this.head.type = 'button';
   this.head.className = 'message-thinking-head';
+  this.icon = document.createElement('span');
+  this.icon.className = 'message-thinking-icon';
+  this.icon.setAttribute('aria-hidden', 'true');
+  this.icon.innerHTML = Glyphs.brain || '';
   this.name = document.createElement('span');
   this.name.className = 'message-thinking-name';
   const chevron = document.createElement('span');
   chevron.className = 'message-thinking-chevron';
   chevron.setAttribute('aria-hidden', 'true');
-  this.head.append(this.name, chevron);
+  this.head.append(this.icon, this.name, chevron);
   this.body = document.createElement('div');
   this.body.className = 'message-thinking-body';
   this.inner = document.createElement('div');
@@ -117,6 +121,7 @@ class ThinkingView {
   const extended = this.extended;
   // Extended: no header, no folding — the reasoning just stays on screen, as in a terminal.
   this.el.classList.toggle('is-extended', extended);
+  this.el.classList.toggle('is-live', !!this.live);
   this.head.hidden = extended;
   this.place();
   this.el.classList.toggle('is-open', extended || this.open);

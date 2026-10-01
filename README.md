@@ -15,19 +15,28 @@ What V2 adds on top of Prism:
 
 - **Sounds** — the chimes OpenCode ships (`alert-`, `bip-bop-`, `staplebops-`, `nope-`,
   `yup-`), chosen per event in Settings → Interface: task finished, question asked, errors.
+- **The conversation gauge** — a ring left of the composer shows how much of the model's
+  context this chat has used; pressing it opens tokens in/out, cache traffic, message count
+  and the price so far. It replaces the thin status line under the composer.
 - **Live runs everywhere** — `prism web` publishes which conversations are working, so a
   phone shows the same busy ghost as the desktop, the reply appears when it lands, and a
   small meter left of the composer counts the parallel runs that are alive.
-- **OpenCode prices** — the `~$` readout under the composer is priced from OpenCode's
-  catalog (models.opencode.ai), with cache reads/writes and context tiers, cached locally.
+- **OpenCode prices and models** — the `~$` readout is priced from OpenCode's catalog
+  (models.opencode.ai), with cache reads/writes and context tiers, cached locally. The
+  model list re-reads the Go catalog in the background, so models OpenCode adds or retires
+  appear and disappear on their own, and free ones wear a **Free** chip.
 - **Auto reconnect** — a dropped connection is retried a few times before the error and its
   Retry button appear.
 - **Thinking that stays readable** — earlier Thought boxes from a multi-step turn stay on
-  screen, their clocks stop with the turn, and the box no longer scroll-jumps while the
-  model is still writing.
-- **Screen pictures** — a running tool card loops a white snake around its border, and the
-  `screenshot` tool captures the whole screen or one window through Electron itself, so it
-  works without ffmpeg and antivirus has no script to flag.
+  screen (with a small gray brain), their clocks stop with the turn, and the box no longer
+  scroll-jumps while the model is still writing. Steps of one turn sit close together
+  instead of leaving blank bands between them.
+- **Screen pictures** — a running tool card loops a white snake around its border, file
+  writes and edits show green `+N` / red `−M` line counts, and the `screenshot` tool
+  captures the whole screen or one window through Electron itself, so it works without
+  ffmpeg and antivirus has no script to flag.
+- **Copy that works everywhere** — including a phone on plain http, where the browser
+  clipboard is unavailable; the fallback still copies and the buttons answer.
 
 ## MCP servers
 

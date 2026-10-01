@@ -130,6 +130,13 @@ class ModelStage {
  }
 
  sync() {
+  // The catalog can grow or shrink while the app runs (OpenCode adds and retires models):
+  // a different set of models means the rows are rebuilt, so the list always matches it.
+  const signature = this.settings.models.map(model => model.id).join('|');
+  if (signature !== this.signature) {
+   this.signature = signature;
+   this.build();
+  }
   const locked = this.chat.busy;
   this.button.setAttribute('label', I18n.t('model.current', { name: this.name(this.chat.model) }));
   this.button.toggleAttribute('disabled', locked);
@@ -155,14 +162,15 @@ class ModelStage {
    }
    for (const model of models.filter(item => item.provider === provider)) {
     const name = model.name || model.id, info = meta(model);
+    const free = Boolean(window.Prices?.free?.(model.id));
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'model-row';
     row.dataset.model = model.id;
     row.dataset.provider = provider;
     row.setAttribute('role', 'option');
-    row.setAttribute('aria-label', `${name}, ${info}`);
-    row.innerHTML = `<span class="model-text" aria-hidden="true"><span class="model-name">${letters(name)}</span><span class="model-meta">${escapeHtml(info)}</span></span><span class="model-mark" aria-hidden="true"></span>`;
+    row.setAttribute('aria-label', `${name}, ${info}${free ? `, ${I18n.t('model.free')}` : ''}`);
+    row.innerHTML = `<span class="model-text" aria-hidden="true"><span class="model-name">${letters(name)}</span><span class="model-meta">${escapeHtml(info)}</span>${free ? `<span class="model-free">${escapeHtml(I18n.t('model.free'))}</span>` : ''}</span><span class="model-mark" aria-hidden="true"></span>`;
     this.rows.push(row);
     slots.push(slot(row));
    }

@@ -139,7 +139,7 @@ const NAMES = {
  'glm-5.1': 'GLM-5.1',
  'glm-5': 'GLM-5',
  'longcat-2.0': 'LongCat 2.0',
- 'longcat-2.5-preview-free': 'LongCat 2.5 Preview (free)',
+ 'longcat-2.5-preview-free': 'LongCat 2.5 Preview',
  'minimax-m3': 'MiniMax M3',
  'minimax-m2.7': 'MiniMax M2.7',
  'minimax-m2.5': 'MiniMax M2.5',
@@ -166,7 +166,7 @@ const NAMES = {
  'hy3': 'Hy3',
  'hy3-preview': 'Hy3 preview',
  'hy': 'Hy',
- 'space-bunny-free': 'Space Bunny (free)',
+ 'space-bunny-free': 'Space Bunny',
  'omen-alpha': 'Omen Alpha',
 };
 
@@ -196,12 +196,13 @@ const pretty = id => NAMES[id] || id.split(/[-_]/).map(part => part.charAt(0).to
 
 function describe(id) {
  const efforts = effortsOf(id);
+ const live = catalog()?.[id];
  return {
   id: `opencode-go:${id}`,
   provider: 'opencode-go',
   api: id,
-  name: pretty(id),
-  context: CONTEXT(id),
+  name: NAMES[id] || live?.name || pretty(id),
+  context: live?.limit?.context || CONTEXT(id),
   vision: visionOf(id),
   efforts,
   defaultEffort: efforts.includes('high') ? 'high' : efforts[efforts.length - 1] || '',

@@ -853,11 +853,8 @@ class Chat {
   if (!button) return;
   const own = button.classList.contains('message-copy');
   const text = own ? this.copyText(button.closest('.message')) : button.closest('.md-code, .md-calc').querySelector('pre').textContent;
-  try {
-   await navigator.clipboard.writeText(text);
-  } catch {
-   return;
-  }
+  const ok = await (window.Clip?.text ? window.Clip.text(text) : navigator.clipboard.writeText(text).then(() => true, () => false));
+  if (!ok) return;
   button.classList.add('is-copied');
   button.setAttribute('aria-label', I18n.t('code.copied'));
   clearTimeout(button.copiedTimer);

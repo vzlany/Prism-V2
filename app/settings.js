@@ -1,7 +1,7 @@
 (() => {
 'use strict';
 
-const STORAGE = { effort: 'deepseek.effort', mode: 'openghost.mode', model: 'openghost.model', catalog: 'openghost.catalog' };
+const STORAGE = { effort: 'deepseek.effort', mode: 'openghost.mode', model: 'openghost.model', catalog: 'openghost.catalog', catalogAt: 'openghost.catalogAt' };
 const KEYS = { openai: 'openai.apiKey', anthropic: 'anthropic.apiKey', deepseek: 'deepseek.apiKey', 'opencode-go': 'opencode-go.apiKey' };
 // The order providers appear in, in the settings and in the model picker.
 const ORDER = ['opencode-go', 'chatgpt', 'openai', 'anthropic', 'deepseek'];
@@ -23,6 +23,10 @@ const LINKS = {
 const MODES = ['ask', 'auto', 'full'];
 const DEFAULT_MODE = 'ask';
 const CHECK_DELAY = 400;
+// How long a provider's model list is trusted. OpenCode adds and drops models on its side,
+// so the catalog is re-read in the background once it is this old, and periodically after.
+const CATALOG_TTL = 6 * 60 * 60 * 1000;
+const CATALOG_EVERY = 30 * 60 * 1000;
 
 const escapeHtml = text => String(text).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -216,6 +220,35 @@ class Settings {
  async refreshAll() {
   await this.syncAccount();
   await Promise.all(Object.keys(KEYS).filter(provider => this.keys[provider]).map(provider => this.checkKey(provider)));
+  this.syncCatalogs();
+ }
+
+ // The live catalog drifts as OpenCode adds and retires models: lists older than the TTL are
+ // re-read quietly, and a slow timer keeps doing it while the app runs. A model that appears
+ // shows up in the picker on its own; one that is gone simply stops being offered.
+ readAt() {
+  try { return JSON.parse(localStorage.getItem(STORAGE.catalogAt) || '{}') || {}; } catch { return {}; }
+ }
+
+ saveAt(provider) {
+  const at = this.readAt();
+  at[provider] = Date.now();
+  try { localStorage.setItem(STORAGE.catalogAt, JSON.stringify(at)); } catch {}
+ }
+
+ syncCatalogs() {
+  clearInterval(this.catalogTimer);
+  const tick = () => {
+   const at = this.readAt();
+   for (const provider of ORDER) {
+    if (!this.connected(provider) || this.account.waiting) continue;
+    if (provider === 'chatgpt' && !this.account.connected) continue;
+    if (Date.now() - (at[provider] || 0) < CATALOG_TTL) continue;
+    this.refresh(provider).catch(() => {});
+   }
+  };
+  tick();
+  this.catalogTimer = setInterval(tick, CATALOG_EVERY);
  }
 
  // A sign-in can lapse while the app runs, so the settings ask how it stands each time they open.
@@ -233,6 +266,7 @@ class Settings {
   if (token !== this.checks[provider]) return false;
   this.catalog[provider] = models.length || provider !== 'deepseek' ? models : KNOWN_DEEPSEEK.slice();
   this.saveCatalog();
+  this.saveAt(provider);
   this.changed();
   return true;
  }
