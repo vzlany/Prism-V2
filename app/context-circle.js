@@ -22,6 +22,7 @@ class ContextCircle {
   this.settings = settings;
   this.fill = button.querySelector('.context-fill');
   this.percent = button.querySelector('.context-percent');
+  this.price = button.querySelector('.context-price');
   this.fill.style.strokeDasharray = `${CIRCUMFERENCE}`;
   this.button.addEventListener('click', () => this.toggle());
   window.addEventListener('prices-changed', () => this.update());
@@ -52,6 +53,12 @@ class ContextCircle {
   this.button.classList.toggle('is-high', tone === 'is-high');
   this.fill.style.strokeDashoffset = `${(CIRCUMFERENCE * (1 - state.percent / 100)).toFixed(2)}`;
   this.percent.textContent = `${state.percent}%`;
+  // The price of this conversation, spelled under the ring: ~$3.05, or nothing when the
+  // model has no prices to go by.
+  const spent = state.cost != null && state.cost > 0 ? `~${window.Prices.format(state.cost)}` : '';
+  this.price.textContent = spent;
+  this.price.hidden = !spent;
+  this.button.setAttribute('aria-label', I18n.t('context.title'));
   this.button.title = I18n.t('context.hint', { used: size(state.tokens), window: size(state.windowSize), percent: state.percent });
   if (this.panel.matches(':popover-open')) this.paint();
  }

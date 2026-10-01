@@ -145,6 +145,17 @@ class ThinkingView {
   if (this.open && this.stick) this.inner.scrollTop = this.inner.scrollHeight;
  }
 
+ // The reasoning is done and a tool is about to run: the row folds back to its "Thought"
+ // header so the work itself is what the eye lands on. A box the user opened by hand
+ // (touched) or the always-open extended style is left alone.
+ fold() {
+  this.live = false;
+  this.stop();
+  if (this.extended || this.touched) { this.sync(); return; }
+  this.open = false;
+  this.sync();
+ }
+
  finish() {
   this.live = false;
   // The clock stops even if the box never showed a word: a hidden box with a live timer was

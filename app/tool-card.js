@@ -5,6 +5,9 @@
 const PREVIEW_LINES = 60;
 const OUTPUT_CHARS = 4000;
 const ICONS = { command: 'terminal', file: 'file', web: 'globe' };
+// Two white dashes, half a loop apart, glide around the card while it runs. An SVG rect is
+// used so the dash travels the whole perimeter at one speed, unlike a rotating gradient.
+const SNAKE = '<svg class="tool-snake" aria-hidden="true"><rect pathLength="100"/></svg>';
 
 function element(tag, className, text) {
  const el = document.createElement(tag);
@@ -31,6 +34,7 @@ class ToolCard {
   this.touched = false;
   const el = this.el = element('div', `tool is-running${this.open ? ' is-open' : ''}`);
   el.setAttribute('role', 'group');
+  el.insertAdjacentHTML('afterbegin', SNAKE);
   this.head = element('button', 'tool-head');
   this.head.type = 'button';
   const icon = element('span', 'tool-icon');

@@ -282,9 +282,21 @@ class Chat {
   this.jumpFrame = 0;
   this.followStep = this.followStep.bind(this);
   this.pinUntil = 0;
+  // When the last follow frame was scheduled: a frame that never ran (a hidden window, a
+  // phone locked mid-reply) must not block every later one.
+  this.followAt = 0;
   this.resize = new ResizeObserver(() => {
-   if (this.follow && this.busy) this.followBottom();
-   else if (this.follow && performance.now() < this.pinUntil) this.pin();
+   if (this.follow) {
+    if (this.busy || performance.now() >= this.pinUntil) this.followBottom();
+    else this.pin();
+   }
+   this.syncBottom();
+  });
+  // Coming back from a hidden page (the phone was locked, the window in the tray) leaves the
+  // scroll where it stopped: a chat that was following the bottom jumps back to it.
+  document.addEventListener('visibilitychange', () => {
+   if (document.hidden || !this.follow) return;
+   this.pin();
    this.syncBottom();
   });
   thread.addEventListener('scroll', () => this.onScroll());
@@ -632,6 +644,7 @@ class Chat {
   cancelAnimationFrame(this.jumpFrame);
   this.followFrame = 0;
   this.jumpFrame = 0;
+  this.followAt = 0;
   this.followMoving = false;
  }
 
@@ -803,12 +816,21 @@ class Chat {
  }
 
  followBottom() {
-  if (!this.follow || this.followFrame || this.jumpFrame) return;
+  if (!this.follow || this.jumpFrame) return;
+  // A frame that was scheduled but never ran (the window went hidden before it fired) is
+  // stale: it is replaced instead of blocking the follow forever.
+  if (this.followFrame && performance.now() - this.followAt < 250) return;
   if (!this.followMoving) {
    this.followPos = this.thread.scrollTop;
    this.followVel = 0;
   }
   this.followLast = performance.now();
+  this.scheduleFollow();
+ }
+
+ scheduleFollow() {
+  cancelAnimationFrame(this.followFrame);
+  this.followAt = performance.now();
   this.followFrame = requestAnimationFrame(this.followStep);
  }
 
@@ -845,7 +867,7 @@ class Chat {
   thread.scrollTop = this.followPos;
   this.lastTop = thread.scrollTop;
   this.followMoving = true;
-  this.followFrame = requestAnimationFrame(this.followStep);
+  this.scheduleFollow();
  }
 
  async onClick(event) {
@@ -1113,6 +1135,8 @@ class Chat {
 
  async useTool(conv, turn, view, call) {
   const name = call.function.name, cwd = conv.record.folder;
+  // The thinking that led here is done: its row folds away as the tool starts working.
+  view.thinking?.fold?.();
   let args;
   try {
    args = JSON.parse(call.function.arguments || '{}') || {};

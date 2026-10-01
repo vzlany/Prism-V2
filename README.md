@@ -15,9 +15,10 @@ What V2 adds on top of Prism:
 
 - **Sounds** — the chimes OpenCode ships (`alert-`, `bip-bop-`, `staplebops-`, `nope-`,
   `yup-`), chosen per event in Settings → Interface: task finished, question asked, errors.
-- **The conversation gauge** — a ring left of the composer shows how much of the model's
-  context this chat has used; pressing it opens tokens in/out, cache traffic, message count
-  and the price so far. It replaces the thin status line under the composer.
+- **The conversation gauge** — a ring right of the composer shows how much of the model's
+  context this chat has used, with the price so far spelled under it; pressing it opens
+  tokens in/out, cache traffic, message count and the price. It replaces the thin status
+  line under the composer.
 - **Live runs everywhere** — `prism web` publishes which conversations are working, so a
   phone shows the same busy ghost as the desktop, the reply appears when it lands, and a
   small meter left of the composer counts the parallel runs that are alive.
@@ -31,10 +32,10 @@ What V2 adds on top of Prism:
   screen (with a small 🧠), their clocks stop with the turn, and the box no longer
   scroll-jumps while the model is still writing. Steps of one turn sit close together
   instead of leaving blank bands between them.
-- **Screen pictures** — a running tool card loops a white snake around its border, file
-  writes and edits show green `+N` / red `−M` line counts, and the `screenshot` tool
-  captures the whole screen or one window through Electron itself, so it works without
-  ffmpeg and antivirus has no script to flag.
+- **Screen pictures** — two white snakes glide around a running tool card's frame at one
+  constant speed, half a loop apart; file writes and edits show green `+N` / red `−M` line
+  counts, and the `screenshot` tool captures the whole screen or one window through
+  Electron itself, so it works without ffmpeg and antivirus has no script to flag.
 - **Copy that works everywhere** — including a phone on plain http, where the browser
   clipboard is unavailable; the fallback still copies and the buttons answer.
 
