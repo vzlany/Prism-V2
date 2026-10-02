@@ -18,10 +18,7 @@ class LiveView {
   ghost.innerHTML = '<ghost-thinking></ghost-thinking>';
   this.label = document.createElement('span');
   this.label.className = 'live-label';
-  this.who = document.createElement('span');
-  this.who.className = 'live-who';
-  this.who.textContent = I18n.t('live.elsewhere');
-  head.append(ghost, this.label, this.who);
+  head.append(ghost, this.label);
   this.body = document.createElement('div');
   this.body.className = 'live-body';
   this.el.append(head, this.body);

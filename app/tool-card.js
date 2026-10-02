@@ -39,8 +39,6 @@ class ToolCard {
   this.head.type = 'button';
   const icon = element('span', 'tool-icon');
   icon.innerHTML = Glyphs[ICONS[info?.kind] || 'terminal'] || '';
-  // A spinning blue circle in front of the tool icon while the tool works.
-  this.spinner = element('span', 'tool-spinner');
   this.summary = element('span', 'tool-summary', this.summaryOf());
   // How many lines a write or an edit touched: green +N and red −M beside the file name.
   const count = text => {
@@ -55,7 +53,12 @@ class ToolCard {
   this.stat.hidden = !this.added && !this.removed;
   this.status = element('span', 'tool-status');
   this.chevron = element('span', 'tool-chevron');
-  this.head.append(this.spinner, icon, element('span', 'tool-title', this.titleOf()), this.summary, this.stat, this.status, this.chevron);
+  // A parallel (subagent) card shows a spinning blue circle before its icon while it works;
+  // ordinary tools already have the snake around the card, so no space is wasted on them.
+  const parallel = info?.tool === 'subagent';
+  this.spinner = parallel ? element('span', 'tool-spinner') : null;
+  const head = this.spinner ? [this.spinner, icon] : [icon];
+  this.head.append(...head, element('span', 'tool-title', this.titleOf()), this.summary, this.stat, this.status, this.chevron);
   this.body = element('div', 'tool-body');
   this.inner = element('div', 'tool-body-inner');
   this.body.append(this.inner);

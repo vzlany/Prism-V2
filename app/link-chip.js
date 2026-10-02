@@ -57,8 +57,10 @@ function find(text) {
 
 function html(url) {
  const link = href(url);
+ const github = /(^|\.)github\.com$/i.test(host(url));
+ const icon = github ? Glyphs.github : '';
  return `<a class="link-chip" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(link)}">`
-  + `<span class="link-chip-icon" data-host="${escapeHtml(host(url))}" aria-hidden="true"></span><span class="link-chip-text">${escapeHtml(label(url))}</span></a>`;
+  + `<span class="link-chip-icon${github ? ' is-github' : ''}" data-host="${escapeHtml(host(url))}" aria-hidden="true">${icon}</span><span class="link-chip-text">${escapeHtml(label(url))}</span></a>`;
 }
 
 function fill(el, text) {
@@ -100,6 +102,7 @@ function load(name) {
 }
 
 function paint(el) {
+ if (el.classList.contains('is-github')) return;
  const entry = load(el.dataset.host || '');
  el.style.setProperty('--favicon', entry.state === 'ok' ? `url("${entry.src}")` : 'none');
  el.style.setProperty('--globe', entry.state === 'fail' ? '1' : '0');

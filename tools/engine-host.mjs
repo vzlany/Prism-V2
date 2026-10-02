@@ -4,7 +4,7 @@
 // behave exactly like they do in the app.
 import { Module, createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, cpSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute as isAbsolutePath, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
@@ -121,6 +121,26 @@ export function createEngineHost({ profile = "" } = {}) {
  handlers.set("tool:cancel", (event, id) => Tools.cancel(id));
  handlers.set("tool:environment", () => Tools.environment());
  handlers.set("folder:pick", () => null);
+ // A path written in a reply: does it exist, and open it (the stand-in shell starts it).
+ const fullPath = (target, cwd) => (isAbsolutePath(target) ? target : (typeof cwd === "string" && cwd ? join(cwd, target) : target));
+ handlers.set("path:info", (event, target, cwd) => {
+  if (typeof target !== "string" || !target) return null;
+  const full = fullPath(target, cwd);
+  try {
+   const stat = statSync(full);
+   return { path: full, exists: true, dir: stat.isDirectory(), image: /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(full), name: full.split(/[\\/]/).pop() || full };
+  } catch {
+   return { path: full, exists: false, dir: false, image: false, name: full.split(/[\\/]/).pop() || full };
+  }
+ });
+ handlers.set("path:open", (event, target, cwd) => typeof target === "string" && target ? electron.shell.openPath(fullPath(target, cwd)) : false);
+ // A folder without picking one: a fresh per-chat workspace, or the shared Public one.
+ handlers.set("workspace:create", (event, kind) => {
+  const base = join(process.env.USERPROFILE || process.env.HOME || ".", "Prism V2");
+  const name = kind === "public" ? "Public" : `Chat ${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}`;
+  const folder = join(base, name);
+  try { mkdirSync(folder, { recursive: true }); return { path: folder, name }; } catch { return null; }
+ });
  handlers.set("window:titlebar", noop);
  handlers.set("profile:info", () => ({ name: profile || "default", profiles: [profile || "default"] }));
  handlers.set("profile:switch", () => false);

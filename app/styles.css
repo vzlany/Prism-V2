@@ -8930,3 +8930,50 @@ body.has-lightbox{overflow:hidden}
 .auto-ip.is-shown{filter:none}
 .auto-device-meta{margin-left:auto;font-size:11px;color:var(--fg-tertiary)}
 .auto-empty{font-size:12px;color:var(--fg-tertiary);margin-top:8px}
+
+/* Prism V2: the model menu — a plain list with provider badges */
+.model-menu{position:fixed;position-anchor:--model;position-area:top span-right;position-try-fallbacks:flip-block;inset:auto;width:min(500px, calc(100vw - 24px));margin:0 0 10px;padding:6px;background:var(--composer-bg);border:0;border-radius:20px;box-shadow:inset 0 0 0 1px var(--composer-border),0 24px 70px rgba(0,0,0,.55);color:rgba(var(--fg-rgb),.88)}
+.model-menu::backdrop{background:rgba(0,0,0,.3)}
+.composer-model{anchor-name:--model}
+.model-menu-list{max-height:min(62vh, 560px);overflow-y:auto;display:flex;flex-direction:column;gap:2px;scrollbar-width:thin;scrollbar-color:rgba(var(--fg-rgb),.15) transparent}
+.model-menu-group{padding:10px 10px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--fg-tertiary)}
+.model-menu-row{display:flex;align-items:center;gap:11px;width:100%;padding:8px 10px;border:0;border-radius:12px;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.model-menu-row:hover,.model-menu-row:focus-visible{background:rgba(var(--fg-rgb),.06);outline:none}
+.model-menu-row.is-current{background:rgba(var(--fg-rgb),.09)}
+.model-menu-badge{flex:none;display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:color-mix(in srgb, var(--badge, #64748b) 32%, transparent);color:#fff;font-size:10.5px;font-weight:700;letter-spacing:-.02em}
+.model-menu-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.model-menu-name{font-size:13.5px;color:rgba(var(--fg-rgb),.92);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.model-menu-meta{font-size:11px;color:var(--fg-tertiary)}
+.model-menu-check{flex:none;color:rgb(var(--success-rgb));font-size:13px}
+.model-menu-empty{padding:14px 12px;font-size:12.5px;color:var(--fg-tertiary)}
+.model-confirm{padding:12px 10px 6px;border-top:1px solid rgba(var(--fg-rgb),.08);margin-top:6px}
+.model-confirm[hidden]{display:none}
+.model-confirm p{margin:0 0 10px;font-size:12.5px;line-height:1.5;color:var(--fg-secondary)}
+.model-confirm-actions{display:flex;gap:8px;justify-content:flex-end}
+@media (max-width: 820px){
+ .model-menu{position-area:top span-left;position-try-fallbacks:flip-block;width:calc(100vw - 16px)}
+ .model-menu-name{font-size:13px}
+}
+
+/* Prism V2: a local path in a reply becomes a link with an icon */
+.path-chip{display:inline-flex;align-items:center;gap:5px;padding:1px 7px 1px 5px;margin:0 1px;border:0;border-radius:8px;background:rgba(var(--fg-rgb),.06);color:rgba(138,180,255,.92);font:inherit;font-size:.94em;line-height:1.5;cursor:pointer;vertical-align:baseline;text-align:left;transition:background-color .15s ease,color .15s ease}
+.path-chip:hover,.path-chip:focus-visible{background:rgba(var(--fg-rgb),.11);color:#cfe0ff;text-decoration:underline;outline:none}
+.path-chip-icon{flex:none;display:block;width:13px;height:13px;color:currentColor;opacity:.9}
+.path-chip-icon svg{display:block;width:100%;height:100%;overflow:visible}
+.path-chip-text{white-space:pre-wrap;word-break:break-all}
+
+/* Prism V2: GitHub links wear the mark instead of a favicon */
+.link-chip-icon.is-github{--favicon:none;--globe:0}
+.link-chip-icon.is-github svg{display:block;width:14px;height:14px;color:currentColor}
+
+/* Prism V2: the Run in parallel panel, dressed like the app's other menus */
+.parallel-panel{border-radius:18px;padding:12px 12px 10px;-webkit-backdrop-filter:blur(14px) saturate(1.1);backdrop-filter:blur(14px) saturate(1.1);box-shadow:inset 0 0 0 1px var(--composer-border),0 22px 60px rgba(0,0,0,.5)}
+.parallel-head{font-size:12.5px;color:rgba(var(--fg-rgb),.85);margin:0 2px 8px;letter-spacing:.01em}
+.parallel-model{padding:6px 7px;border-radius:10px}
+.parallel-model:hover{background:rgba(var(--fg-rgb),.07)}
+.parallel-model input{width:14px;height:14px}
+.parallel-model-name{font-size:13px}
+.parallel-run{border-radius:11px;padding:8px 16px;font-weight:600;background:rgba(var(--fg-rgb),.92);color:#0b0d12;transition:transform .15s var(--motion-easing),background-color .2s ease}
+.parallel-run:hover{background:#fff}
+.parallel-run:active{transform:scale(.97)}
+.parallel-hint{font-size:11px;line-height:1.4}

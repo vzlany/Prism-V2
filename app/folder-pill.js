@@ -65,6 +65,9 @@ class FolderPill {
    ...recents.map(row),
    recents.length ? '' : `<div class="folder-empty">${escapeHtml(I18n.t('folder.noRecent'))}</div>`,
    `<div class="folder-sep" aria-hidden="true"></div>`,
+   `<button type="button" class="folder-item-new" data-workspace="chat">${Glyphs.plus}<span>${escapeHtml(I18n.t('folder.workspace'))}</span></button>`,
+   `<button type="button" class="folder-item-new" data-workspace="public">${Glyphs.folder}<span>${escapeHtml(I18n.t('folder.public'))}</span></button>`,
+   `<div class="folder-sep" aria-hidden="true"></div>`,
    `<button type="button" class="folder-item-new" data-pick-new>${Glyphs.folderAdd}<span>${escapeHtml(I18n.t('folder.choose'))}</span></button>`,
   ].join('');
   this.menu.showPopover?.();
@@ -77,6 +80,15 @@ class FolderPill {
    x.addEventListener('click', forget);
    x.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') forget(event); });
   });
+  for (const button of this.menu.querySelectorAll('[data-workspace]')) {
+   button.addEventListener('click', async () => {
+    const kind = button.dataset.workspace;
+    button.disabled = true;
+    const folder = await window.openghost?.workspace?.(kind).catch(() => null);
+    button.disabled = false;
+    if (folder) this.choose(folder);
+   });
+  }
   this.menu.querySelector('[data-pick-new]')?.addEventListener('click', () => { this.menu.hidePopover?.(); this.pick(true); });
  }
 

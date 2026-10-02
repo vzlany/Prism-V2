@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('openghost', {
  platform: process.platform,
  pickFolder: defaultPath => ipcRenderer.invoke('folder:pick', defaultPath),
  revealFolder: folder => ipcRenderer.invoke('folder:reveal', folder),
+ // A folder without picking one: a fresh per-chat workspace, or the shared Public one.
+ workspace: kind => ipcRenderer.invoke('workspace:create', kind),
  saveFile: (file, name) => ipcRenderer.invoke('file:save', file, name),
  setTitleBar: color => ipcRenderer.send('window:titlebar', color),
  notify: (title, body, summary) => ipcRenderer.send('notify', { title, body, summary }),
@@ -24,6 +26,11 @@ contextBridge.exposeInMainWorld('openghost', {
   get: () => ipcRenderer.invoke('auto:get'),
   set: patch => ipcRenderer.invoke('auto:set', patch),
   clients: () => ipcRenderer.invoke('auto:clients'),
+ },
+ path: {
+  // A path written in a reply: does it exist, and open it.
+  info: (target, cwd) => ipcRenderer.invoke('path:info', target, cwd),
+  open: (target, cwd) => ipcRenderer.invoke('path:open', target, cwd),
  },
  presence: {
   // The desktop's running turns are mirrored to presence.json, so `prism web` (the phone)

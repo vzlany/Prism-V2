@@ -64,6 +64,8 @@ const STRINGS = {
   'folder.recent': 'Recent workspaces',
   'folder.noRecent': 'No folders used yet.',
   'folder.forget': 'Forget this folder',
+  'folder.workspace': 'New chat workspace',
+  'folder.public': 'Public workspace',
   'folder.change': 'Folder {name}, choose another',
   'mode': 'Agent mode',
   'mode.current': 'Agent mode: {name}',

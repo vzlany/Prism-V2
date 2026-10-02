@@ -27,6 +27,10 @@ class Library {
   this.keys = new Map();
   this.titles = new Map();
   this.writes = new Map();
+  // When this window last changed a chat or a folder: a reload from the shared store keeps
+  // such an entry alive briefly (its own save may still be on the way) and drops the rest.
+  this.touched = new Map();
+  this.folderTouched = new Map();
   this.ready = this.load();
  }
 
@@ -73,6 +77,7 @@ class Library {
   if (!folder) {
    folder = { path, name: name || baseName(path), collapsed: false, added: Date.now() };
    this.folders.push(folder);
+   this.folderTouched.set(key(path), Date.now());
    window.RecentFolders?.remember?.({ path: folder.path, name: folder.name });
    this.save();
   }
@@ -154,6 +159,24 @@ class Library {
    this.chats.push(chat);
    changes++;
   }
+  // A chat that is gone from the store was deleted elsewhere: drop it here too, unless this
+  // window changed it a moment ago (its own save may still be on the way).
+  const grace = 8000;
+  for (let i = this.chats.length - 1; i >= 0; i--) {
+   const chat = this.chats[i];
+   if (disk.has(chat.id)) continue;
+   if (Date.now() - (this.touched.get(chat.id) || 0) < grace) continue;
+   this.chats.splice(i, 1);
+   changes++;
+  }
+  for (let i = this.folders.length - 1; i >= 0; i--) {
+   const folder = this.folders[i];
+   if (folders.some(item => samePath(item.path, folder.path))) continue;
+   if (this.chats.some(chat => samePath(chat.folder, folder.path))) continue;
+   if (Date.now() - (this.folderTouched.get(key(folder.path)) || 0) < grace) continue;
+   this.folders.splice(i, 1);
+   changes++;
+  }
   // A chat can arrive before its folder entry: make sure the folder exists for the list.
   for (const chat of this.chats) if (!folders.some(folder => samePath(folder.path, chat.folder))) this.folder({ path: chat.folder });
   if (changes) this.changed();
@@ -168,6 +191,8 @@ class Library {
   const now = Date.now(), known = this.folder(folder);
   const chat = { id: uid(), title: titleFrom(text, attachments), folder: known.path, created: now, updated: now, pinned: false, named: false };
   this.chats.push(chat);
+  this.touched.set(chat.id, now);
+  this.folderTouched.set(key(known.path), now);
   this.changed();
   return chat;
  }
@@ -181,6 +206,7 @@ class Library {
    changes = rest;
   }
   Object.assign(chat, changes);
+  this.touched.set(id, Date.now());
   this.changed();
   return chat;
  }
@@ -211,6 +237,7 @@ class Library {
   const index = this.chats.findIndex(chat => chat.id === id);
   if (index < 0) return;
   this.chats.splice(index, 1);
+  this.touched.delete(id);
   this.forget(id);
   this.emptied = true; // an explicit removal may legitimately leave no chats at all
   this.changed();
@@ -230,7 +257,8 @@ class Library {
   const gone = this.chats.filter(chat => samePath(chat.folder, path));
   this.chats = this.chats.filter(chat => !samePath(chat.folder, path));
   this.folders = this.folders.filter(folder => !samePath(folder.path, path));
-  for (const chat of gone) this.forget(chat.id);
+  for (const chat of gone) { this.touched.delete(chat.id); this.forget(chat.id); }
+  this.folderTouched.delete(key(path));
   this.changed();
   for (const chat of gone) this.store.remove(`chats/${chat.id}`).catch(() => {});
   return gone.map(chat => chat.id);

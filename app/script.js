@@ -71,7 +71,7 @@ const lockCard = new LockCard({ chat, library, scroller: document.querySelector(
 new WelcomeGhost({ main, root: document.querySelector('.welcome'), input: composerInput });
 folderPill = new FolderPill({ button: document.querySelector('.composer-folder'), library, chat, menu: document.querySelector('.folder-menu') });
 instructionsPill = new InstructionsPill({ button: document.querySelector('.composer-instructions'), menu: document.querySelector('.instructions-menu'), chat });
-planButton.addEventListener('click', () => chat.setAgentMode(chat.agentMode === 'plan' ? 'build' : 'plan'));
+planButton?.addEventListener('click', () => chat.setAgentMode(chat.agentMode === 'plan' ? 'build' : 'plan'));
 window.PrismPlan = { approve: () => chat.setAgentMode('build') };
 window.__prismSubagent = (label, prompt, toolId) => chat.deploySubagent(prompt, label, toolId);
 window.__prismChat = chat;
@@ -124,6 +124,12 @@ window.Presence?.on?.(() => {
   setTimeout(() => chat.refresh(id).catch(() => {}), 350);
  }
  presenceBusy = now;
+ // Parallel runs the app started appear in the Runs tab here too (their presence says so).
+ for (const entry of window.Presence.list()) {
+  if (!entry.parallel) continue;
+  const known = (window.ParallelRuns?.runs || []).some(run => run.id === entry.id);
+  if (!known) window.ParallelRuns?.add({ id: entry.id, title: entry.title || '', model: entry.model || '', status: 'running', snippet: '' });
+ }
  // The app picked up a delegated turn: the wait is over and its run is being mirrored.
  for (const [id, conv] of chat.conversations) {
   if (!conv.waiting || !window.Presence.isBusy(id)) continue;
@@ -132,6 +138,7 @@ window.Presence?.on?.(() => {
  }
  if (chatList) chatList.render();
  syncLive();
+ syncComposer();
 });
 
 // The shared store changed on its own (the app, or another window, saved a conversation):
@@ -155,8 +162,13 @@ window.openghost?.store?.onChatChange?.(id => {
 // window and back to the phone like any other run of the app.
 async function runDelegated(request) {
  const id = String(request?.chatId || '');
- console.log('[delegate] request', id);
+ console.log('[delegate] request', id, request?.type || 'run');
  if (!id) return;
+ if (request.type === 'abort') {
+  const running = chat.conversations.get(id);
+  if (running?.turn) chat.abort(running);
+  return;
+ }
  // The website saves the index with a short debounce, so the chat record can land here a
  // moment after the request does: wait for it instead of giving up.
  for (let i = 0; i < 24 && !library.chat(id); i++) {
@@ -251,7 +263,9 @@ function steerMessage(message) {
   composerInput.focus({ preventScroll: true });
 }
 
-new SelectionMenu({
+// Selecting text on a touch screen raises the phone's own copy bar; the little menu would
+// sit on top of it, so it is only wired for mouse and trackpad pointers.
+if (!window.matchMedia('(pointer: coarse)').matches) new SelectionMenu({
   onAsk: (text, box) => {
     const mini = box.closest('.mini')?.__mini;
     if (mini) { mini.quote(text); return; }
@@ -274,12 +288,11 @@ window.addEventListener('prism-quote-message', event => {
 });
 document.querySelector('.composer-add').addEventListener('add', () => attachments.pick());
 settings.show(chat.model);
-modelStage = new ModelStage({
+modelStage = new ModelMenu({
   button: document.querySelector('.composer-model'),
-  root: document.querySelector('.model-stage'),
+  root: document.querySelector('.model-menu'),
   chat,
   settings,
-  input: composerInput,
 });
 effortSlider = new EffortSlider({
   button: document.querySelector('.composer-effort'),
@@ -344,9 +357,10 @@ composer.addEventListener('mousedown', (event) => {
 
 function syncComposer() {
   const hasContent = Boolean(composerText.text().trim()) || Boolean(attachments.count);
-  // While a reply is running the button stops it (empty composer) or steers it (words written).
-  composerSend.mode = chat.busy ? (hasContent ? 'steer' : 'stop') : 'send';
-  composerSend.toggleAttribute('disabled', !hasContent && !chat.busy);
+  // While a reply is running — here or in the app — the button stops it (empty composer) or
+  // steers it (words written).
+  composerSend.mode = chat.working ? (hasContent ? 'steer' : 'stop') : 'send';
+  composerSend.toggleAttribute('disabled', !hasContent && !chat.working);
   composerField.classList.toggle('has-value', composerInput.value !== '');
 }
 
@@ -436,7 +450,7 @@ setInterval(() => {
 }, 3000);
 
 composerInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && chat.busy && !event.isComposing && !document.querySelector(':popover-open, dialog[open]')) {
+  if (event.key === 'Escape' && chat.working && !event.isComposing && !document.querySelector(':popover-open, dialog[open]')) {
     event.preventDefault();
     chat.stop();
     return;

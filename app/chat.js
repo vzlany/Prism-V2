@@ -660,10 +660,7 @@ class Chat {
   if (conv.locked) return false;
   // The same chat cannot answer in two places at once: a run started on another page keeps
   // the turn, and this page waits for it (the reply appears here when it finishes).
-  if (window.Presence?.isBusy?.(conv.id) || conv.waiting) {
-   this.remoteNote(conv);
-   return false;
-  }
+  if (window.Presence?.isBusy?.(conv.id) || conv.waiting) return false;
   // With the desktop app running, the turn goes there: it has the tools, the browser and its
   // own keys, so this page does not need a key of its own to send.
   const delegating = Boolean(window.openghost?.delegate && window.openghost.app?.connected?.());
@@ -728,17 +725,15 @@ class Chat {
   }).catch(() => {});
  }
 
- // Another page (a phone, a second window) is answering this chat right now.
- remoteNote(conv) {
-  const existing = conv.list.querySelector('.thread-note.is-remote');
-  if (existing) existing.remove();
-  const note = document.createElement('div');
-  note.className = 'thread-note is-remote';
-  note.textContent = I18n.t('chat.remoteBusy');
-  conv.list.append(note);
-  if (conv === this.active) this.followBottom();
-  setTimeout(() => note.remove(), 5000);
+ // Whether this chat is working anywhere: here, waiting for the app to pick it up, or on
+ // another device. The send button becomes stop for all of them.
+ get working() {
+  const conv = this.active;
+  return Boolean(conv && (conv.turn || conv.waiting || window.Presence?.isBusy?.(conv.id)));
  }
+
+ // Stops the run wherever it is: a local turn is aborted here, one running in the app (or
+ // another page) is asked to stop through the same bridge that started it.
 
  // A turn that was running on another page has finished: read the conversation again so its
  // answer shows up here without a manual reload.
@@ -765,7 +760,14 @@ class Chat {
  }
 
  stop() {
-  if (this.active?.turn) this.abort(this.active);
+  const conv = this.active;
+  if (!conv) return;
+  if (conv.turn) { this.abort(conv); return; }
+  if (!window.Presence?.isBusy?.(conv.id) && !conv.waiting) return;
+  clearTimeout(conv.waitingTimer);
+  conv.waiting = 0;
+  window.openghost?.delegate?.send?.({ id: `s-${Date.now().toString(36)}`, type: 'abort', chatId: conv.id, at: Date.now() });
+  this.onChange();
  }
 
  abort(conv) {
@@ -989,7 +991,6 @@ class Chat {
   const last = parts[parts.length - 1] || null;
   const status = last?.kind === 'text' ? 'writing' : last?.kind === 'tool' && last.state === 'running' ? 'working' : 'thinking';
   const title = this.library.chat(conv.id)?.title || conv.record?.title || I18n.t('chat.new');
-  // Keep the payload small: keep the newest parts that fit in the budget.
   const kept = [];
   let budget = 20000;
   for (let i = parts.length - 1; i >= 0 && kept.length < 20; i--) {
@@ -998,7 +999,7 @@ class Chat {
    budget -= size;
    kept.unshift(parts[i]);
   }
-  return { state: 'running', title: String(title).slice(0, 120), model: this.modelOf(conv), started: turn.started, status, parts: kept };
+  return { state: 'running', title: String(title).slice(0, 120), model: this.modelOf(conv), started: turn.started, status, parallel: Boolean(conv.subagent || conv.record?.parent), parts: kept };
  }
 
  // At most one publish every ~700ms; the tail timer keeps the last change from being lost.
@@ -1321,12 +1322,11 @@ class Chat {
     view.el.append(new MediaSlider(pictures).el);
     if (conv === this.active) this.followBottom();
    }
-   // A finished file the agent attached (attach_file) becomes a chip with a real download.
+   // A finished file the agent attached (attach_file) is kept for the end of the turn: the
+   // downloads belong after the wrap-up, not in the middle of the work.
    if (output && typeof output === 'object' && output.files?.length) {
-    for (const file of output.files) {
-     try { window.Artifacts?.attach(view.el, { path: file.path, name: file.name, size: file.size, cwd }); } catch {}
-    }
-    if (conv === this.active) this.followBottom();
+    turn.files ||= [];
+    for (const file of output.files) turn.files.push({ ...file, cwd });
    }
    // A written or edited file gets Preview and Download on the card itself: the file is one
    // box, not a card plus a second chip repeating its name.
@@ -1395,6 +1395,8 @@ class Chat {
   view.stream.finish().then(() => {
    view.el.classList.remove('is-streaming');
    if (!hasText && !hasThinking && !hasBody) collapse(view.el);
+   // Paths written in the finished step become links with icons.
+   window.PathChips?.enhance(view.el, conv.record?.folder);
   });
   if (conv.turn) this.publishLive(conv, conv.turn);
  }
@@ -1478,6 +1480,14 @@ class Chat {
    const tools = this.toolbar('assistant', entry.duration || 0), box = last === view && view.el.querySelector('.message-error, .message-note');
    if (box) box.before(tools);
    else last.el.append(tools);
+   // Files the agent attached are shown after the finished answer, so they are what is left
+   // at the bottom of the conversation.
+   if (turn.files?.length) {
+    for (const file of turn.files) {
+     try { window.Artifacts?.attach(last.el, file); } catch {}
+    }
+   }
+   window.PathChips?.enhance(last.el, conv.record?.folder);
   }
   if (!text && !noted) collapse(view.el);
   if (conv === this.active) this.followBottom();
@@ -1588,6 +1598,24 @@ class Chat {
   this.attach(conv);
   const ends = new Map();
   for (const entry of conv.messages) if (entry.role === 'assistant' && entry.content?.trim()) ends.set(entry.turn || entry, entry);
+  // Files attached during a turn are drawn under its last message, not where the tool ran,
+  // so a reloaded chat keeps them at the end of the conversation too.
+  conv.filesByTurn = new Map();
+  for (const entry of conv.messages) {
+   if (entry.role !== 'assistant') continue;
+   for (const step of entry.steps || []) {
+    if (step.role !== 'assistant') continue;
+    for (const call of step.tool_calls || []) {
+     if (call.function?.name !== 'attach_file') continue;
+     try {
+      const args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+      if (!args.path) continue;
+      const turn = entry.turn || entry;
+      conv.filesByTurn.set(turn, [...(conv.filesByTurn.get(turn) || []), args.path]);
+     } catch {}
+    }
+   }
+  }
   // Long chats draw their tail only: the newest messages, everything older on demand.
   const entries = conv.messages.filter(entry => this.drawable(entry));
   const from = Math.max(0, entries.length - WINDOW_MIN);
@@ -1718,13 +1746,6 @@ class Chat {
      if (written.path) window.Artifacts?.actions?.(card, { path: written.path, cwd });
     } catch {}
    }
-   // A file attached with attach_file keeps its chip after a reload too.
-   if (call.function?.name === 'attach_file') {
-    try {
-     const attached = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-     if (attached.path) window.Artifacts?.attach(el, { path: attached.path, cwd });
-    } catch {}
-   }
   }
   // Pictures from tools ride in their own user step, so a chat reloaded from disk has to put
   // them back under the cards instead of losing them the moment the page refreshes.
@@ -1741,7 +1762,15 @@ class Chat {
   }
   if (pictures.length) el.append(new MediaSlider(pictures).el);
   el.__entry = entry;
-  if (last) el.append(this.toolbar('assistant', entry.duration || 0));
+  if (last) {
+   el.append(this.toolbar('assistant', entry.duration || 0));
+   // Files attached during the turn wait at its end (collected in restore).
+   for (const path of conv?.filesByTurn?.get(entry.turn || entry) || []) {
+    try { window.Artifacts?.attach(el, { path, cwd }); } catch {}
+   }
+  }
+  // Paths written in the reply become links with icons (folder, file, image).
+  window.PathChips?.enhance(el, cwd);
   return el;
  }
 

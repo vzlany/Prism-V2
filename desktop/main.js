@@ -422,8 +422,40 @@ function createWindow() {
  return win;
 }
 
-ipcMain.handle('folder:pick', async (event, defaultPath) => {
- const win = BrowserWindow.fromWebContents(event.sender);
+// A path written in a message (a folder the agent made, a file it built): the app can say
+// whether it exists and open it in Explorer, so the reply can carry a real link.
+ipcMain.handle('path:info', async (event, target, cwd) => {
+ if (!fromApp(event) || typeof target !== 'string' || !target) return null;
+ const full = path.isAbsolute(target) ? target : (typeof cwd === 'string' && cwd ? path.join(cwd, target) : target);
+ try {
+  const stat = await fs.promises.stat(full);
+  return { path: full, exists: true, dir: stat.isDirectory(), image: /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(full), name: path.basename(full) };
+ } catch {
+  return { path: full, exists: false, dir: false, image: false, name: path.basename(full) };
+ }
+});
+ipcMain.handle('path:open', (event, target, cwd) => {
+ if (!fromApp(event) || typeof target !== 'string' || !target) return false;
+ const full = path.isAbsolute(target) ? target : (typeof cwd === 'string' && cwd ? path.join(cwd, target) : target);
+ shell.openPath(full).catch(() => {});
+ return true;
+});
+
+// A workspace folder without picking one: a fresh one per chat, or the shared Public one.
+ipcMain.handle('workspace:create', async (event, kind) => {
+ if (!fromApp(event)) return null;
+ const base = path.join(app.getPath('documents'), 'Prism V2');
+ const name = kind === 'public' ? 'Public' : `Chat ${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`;
+ const folder = path.join(base, name);
+ try {
+  await fs.promises.mkdir(folder, { recursive: true });
+  return { path: folder, name };
+ } catch {
+  return null;
+ }
+});
+
+ipcMain.handle('folder:pick', async (event, defaultPath) => { const win = BrowserWindow.fromWebContents(event.sender);
  const result = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory', 'promptToCreate'], ...(typeof defaultPath === 'string' && defaultPath ? { defaultPath } : {}) });
  if (result.canceled || !result.filePaths.length) return null;
  const folder = result.filePaths[0];

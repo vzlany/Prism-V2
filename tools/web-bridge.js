@@ -112,6 +112,12 @@ window.openghost = {
   return { path: clean, name: clean.split(/[\\/]/).pop() || clean };
  },
  revealFolder: () => {},
+ // A folder without picking one: a fresh per-chat workspace, or the shared Public one.
+ workspace: kind => invoke('workspace:create', kind),
+ path: {
+  info: (target, cwd) => invoke('path:info', target, cwd),
+  open: (target, cwd) => invoke('path:open', target, cwd),
+ },
  setTitleBar: () => {},
  notify: (title, body) => {
   try { new Notification(String(title || 'Prism V2'), { body: String(body || ''), icon: '/desktop/icon.png' }); } catch {}

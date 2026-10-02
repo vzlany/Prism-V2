@@ -185,8 +185,9 @@ class ParallelMeter {
  }
 
  count() {
-  const local = window.ParallelRuns.runs.filter(run => run.status === 'running').length;
-  return local + (window.Presence?.count || 0);
+  // Only the runs of the parallel tab count: a plain chat working on another device is not
+  // a parallel run and must not light this bubble.
+  return window.ParallelRuns.runs.filter(run => run.status === 'running').length;
  }
 
  refresh() {
