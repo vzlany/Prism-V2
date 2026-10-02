@@ -331,6 +331,8 @@ const STRINGS = {
   'model.vision': 'Sees photos',
   'model.text': 'No photos',
   'model.free': 'Free',
+  'model.search': 'Search models…',
+  'model.none': 'No models match.',
   'context.title': 'This conversation',
   'context.hint': '{used} of {window} tokens · {percent}% · press for details',
   'context.hintLaps': '{laps} windows filled · peak {used} of {window} · press for details',

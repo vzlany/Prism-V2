@@ -25,6 +25,8 @@ window.Glyphs = {
  globe: svg('<circle cx="60" cy="60" r="22"/><path d="M38.5 60h43M60 38c-6.5 6-10 13.5-10 22s3.5 16 10 22c6.5-6 10-13.5 10-22s-3.5-16-10-22z"/>'),
  // A picture frame with a hill, for image files and image paths.
  image: svg('<rect x="38" y="44" width="44" height="34" rx="6"/><circle cx="51" cy="56" r="4"/><path d="m42 74 12-12 9 8 8-7 11 11"/>'),
+ // A magnifier for the model search box.
+ search: svg('<circle cx="55" cy="55" r="14"/><path d="m65 65 12 12"/>'),
  // GitHub's mark, for links to the repository.
  github: '<svg class="glyph glyph-github" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.55v-2.1c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.12 3.05.74.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.4-5.25 5.69.41.36.78 1.06.78 2.14v3.17c0 .3.2.66.8.55A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5z"/></svg>',
   ghost: `<svg class="glyph glyph-ghost" viewBox="-1 -1 60 62" aria-hidden="true"><path d="${GHOST}" fill="currentColor"/><ellipse cx="17" cy="29.5" rx="3.8" ry="4.1" class="glyph-ghost-eye"/><ellipse cx="41" cy="29.5" rx="3.8" ry="4.1" class="glyph-ghost-eye"/></svg>`,

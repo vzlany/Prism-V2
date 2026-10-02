@@ -63,10 +63,10 @@ class ParallelPanel {
  }
 
  toggle() {
-  if (this.open) this.panel.hidePopover?.();
+  if (this.open) window.PopoverMotion?.hide ? window.PopoverMotion.hide(this.panel) : this.panel.hidePopover?.();
   else {
    this.render();
-   this.panel.showPopover?.();
+   window.PopoverMotion?.show ? window.PopoverMotion.show(this.panel) : this.panel.showPopover?.();
   }
  }
 
@@ -81,10 +81,16 @@ class ParallelPanel {
   }
   this.list.innerHTML = models.map(model => `
    <label class="parallel-model">
+    <span class="parallel-model-icon" data-model="${escapeAttr(model.id)}"></span>
     <input type="checkbox" data-model="${escapeAttr(model.id)}" ${this.selected.has(model.id) ? 'checked' : ''}>
     <span class="parallel-model-name">${escapeHtml(model.name || model.id)}</span>
     <span class="parallel-model-api">${escapeHtml(model.id)}</span>
    </label>`).join('');
+  // Every row wears its model's own little logo, as the picker does.
+  for (const holder of this.list.querySelectorAll('.parallel-model-icon')) {
+   const model = models.find(item => item.id === holder.dataset.model) || { id: holder.dataset.model };
+   holder.replaceWith(window.ModelIcons?.icon?.(model) || holder);
+  }
   for (const input of this.list.querySelectorAll('input[data-model]')) {
    input.addEventListener('change', () => {
     if (input.checked) this.selected.add(input.dataset.model);

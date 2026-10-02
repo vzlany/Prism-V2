@@ -8977,3 +8977,25 @@ body.has-lightbox{overflow:hidden}
 .parallel-run:hover{background:#fff}
 .parallel-run:active{transform:scale(.97)}
 .parallel-hint{font-size:11px;line-height:1.4}
+
+/* Prism V2: real model logos — the coloured monogram shows until the mark loads */
+.model-icon{position:relative;flex:none;display:grid;place-items:center;width:30px;height:30px;border-radius:9px;overflow:hidden;background:color-mix(in srgb, var(--badge, #64748b) 30%, transparent)}
+.model-icon-letter{grid-area:1/1;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:-.02em}
+.model-icon-img{grid-area:1/1;width:18px;height:18px;border-radius:5px;object-fit:contain;background:#fff;box-shadow:0 0 0 1px rgba(255,255,255,.08)}
+.model-icon.has-image{background:rgba(var(--fg-rgb),.05)}
+
+/* Prism V2: the model menu's search field */
+.model-menu-search{display:flex;align-items:center;gap:8px;margin:2px 4px 6px;padding:7px 10px;border-radius:12px;background:rgba(var(--fg-rgb),.05)}
+.model-menu-search-icon{flex:none;display:block;width:14px;height:14px;color:var(--fg-tertiary)}
+.model-menu-search-icon svg{display:block;width:100%;height:100%;overflow:visible}
+.model-menu-search input{flex:1;min-width:0;border:0;outline:none;background:none;color:var(--fg-primary);font:inherit;font-size:13px}
+.model-menu-search input::placeholder{color:var(--fg-tertiary)}
+.model-menu-row{padding-left:9px}
+.model-menu-row .model-icon{width:28px;height:28px}
+.model-menu-row .model-icon-img{width:17px;height:17px}
+
+/* Prism V2: parallel rows with a logo, dressed like the model menu */
+.parallel-model{gap:9px;padding:6px 7px}
+.parallel-model .model-icon{width:24px;height:24px;border-radius:8px}
+.parallel-model .model-icon-img{width:15px;height:15px}
+.parallel-model input[type=checkbox]{width:14px;height:14px;accent-color:#7a8bff}
