@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('openghost', {
   // Settings -> Auto: launch at login, start hidden, run the web server.
   get: () => ipcRenderer.invoke('auto:get'),
   set: patch => ipcRenderer.invoke('auto:set', patch),
+  clients: () => ipcRenderer.invoke('auto:clients'),
  },
  presence: {
   // The desktop's running turns are mirrored to presence.json, so `prism web` (the phone)

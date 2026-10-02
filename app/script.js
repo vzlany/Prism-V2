@@ -370,9 +370,24 @@ function clearDrafts() {
  if (chat.active?.id) localStorage.removeItem(DRAFT + chat.active.id);
 }
 
+// A draft belongs to the conversation it was typed in. Switching chats saves it under that
+// chat's key and starts the new one empty (or with its own draft) — it used to stay in the
+// box and be copied into whatever conversation was opened next.
+let draftChat = null;
+function switchDraft() {
+ const key = draftKey();
+ if (key === draftChat) return;
+ if (draftChat !== null && composerText.text().trim()) saveDraft(draftChat);
+ draftChat = key;
+ composerInput.value = '';
+ composerText.refresh();
+ syncComposer();
+ restoreDraft();
+}
+
 function syncAll() {
   if (!chatList) return;
-  restoreDraft();
+  switchDraft();
   syncComposer();
   folderPill.sync();
   chatList.render();

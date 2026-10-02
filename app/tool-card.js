@@ -39,6 +39,8 @@ class ToolCard {
   this.head.type = 'button';
   const icon = element('span', 'tool-icon');
   icon.innerHTML = Glyphs[ICONS[info?.kind] || 'terminal'] || '';
+  // A spinning blue circle in front of the tool icon while the tool works.
+  this.spinner = element('span', 'tool-spinner');
   this.summary = element('span', 'tool-summary', this.summaryOf());
   // How many lines a write or an edit touched: green +N and red −M beside the file name.
   const count = text => {
@@ -53,7 +55,7 @@ class ToolCard {
   this.stat.hidden = !this.added && !this.removed;
   this.status = element('span', 'tool-status');
   this.chevron = element('span', 'tool-chevron');
-  this.head.append(icon, element('span', 'tool-title', this.titleOf()), this.summary, this.stat, this.status, this.chevron);
+  this.head.append(this.spinner, icon, element('span', 'tool-title', this.titleOf()), this.summary, this.stat, this.status, this.chevron);
   this.body = element('div', 'tool-body');
   this.inner = element('div', 'tool-body-inner');
   this.body.append(this.inner);

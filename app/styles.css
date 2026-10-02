@@ -8913,3 +8913,20 @@ body.has-lightbox{overflow:hidden}
 /* Prism V2: the message a parallel run will send */
 .parallel-message{margin:0 2px 8px;padding:7px 9px;border-radius:9px;background:rgba(var(--fg-rgb),.05);color:rgba(var(--fg-rgb),.72);font-size:11.5px;line-height:1.45;max-height:64px;overflow:hidden}
 .parallel-message[hidden]{display:none}
+
+/* Prism V2: a spinning blue circle before the tool icon while a tool works */
+.tool-spinner{flex:none;width:12px;height:12px;border-radius:50%;border:2px solid rgba(138,180,255,.28);border-top-color:#8ab4ff;opacity:0;animation:tool-spin .8s linear infinite}
+.tool.is-running .tool-spinner{opacity:1}
+@keyframes tool-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.tool.is-running .tool-spinner{animation:none}}
+
+/* Prism V2: the Auto page's web-server list */
+.auto-server{margin-top:4px;font-size:12px;color:var(--fg-secondary)}
+.auto-server .is-on{color:rgb(var(--success-rgb))}
+.auto-server .is-off{color:var(--fg-tertiary)}
+.auto-devices{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.auto-device{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg-secondary)}
+.auto-ip{font-family:var(--mono-font);font-size:11.5px;color:rgba(138,180,255,.9);cursor:pointer;filter:blur(4px);transition:filter .2s ease;user-select:none}
+.auto-ip.is-shown{filter:none}
+.auto-device-meta{margin-left:auto;font-size:11px;color:var(--fg-tertiary)}
+.auto-empty{font-size:12px;color:var(--fg-tertiary);margin-top:8px}

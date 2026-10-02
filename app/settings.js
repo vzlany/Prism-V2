@@ -365,6 +365,7 @@ class Settings {
   if (name === 'effects') this.paintEffects();
   if (name === 'memory') this.paintMemory();
   if (name === 'auto') this.paintAuto();
+  else { clearInterval(this.autoTimer); this.autoTimer = 0; }
   if (name === 'about') this.paintAbout();
  }
 
@@ -386,8 +387,32 @@ class Settings {
    row('settings.auto.login', 'settings.auto.loginHint', toggle('auto-login', auto.login)),
    row('settings.auto.hidden', 'settings.auto.hiddenHint', toggle('auto-hidden', auto.hidden, !auto.login)),
    row('settings.auto.web', 'settings.auto.webHint', `<div class="mcp-add-row">${toggle('auto-web', auto.web)}<input class="settings-key auto-port" type="number" min="1" max="65535" value="${auto.port}" ${auto.web ? '' : 'disabled'}><button type="button" class="settings-button" data-auto-open ${auto.webRunning || auto.web ? '' : 'disabled'}>${escapeHtml(I18n.t('settings.auto.open'))}</button></div>`),
+   row('settings.auto.net', 'settings.auto.netHint', `<div data-auto-net></div>`),
    `<p class="settings-status" data-provider="auto" role="status"></p>`,
   ].join('');
+  // The server's address and who is connected to it, refreshed while the page is open.
+  const net = node.querySelector('[data-auto-net]');
+  const paintNet = async () => {
+   const data = (await window.openghost?.auto?.clients?.().catch(() => null)) || { port: auto.port, clients: [] };
+   const on = auto.webRunning || auto.web;
+   net.innerHTML = [
+    `<div class="auto-server"><span class="${on ? 'is-on' : 'is-off'}">${escapeHtml(I18n.t(on ? 'settings.auto.serverOn' : 'settings.auto.serverOff', { port: data.port || auto.port }))}</span></div>`,
+    data.clients.length
+     ? `<div class="auto-devices">${data.clients.map(entry => `<div class="auto-device"><span class="auto-ip" role="button" tabindex="0" title="${escapeHtml(I18n.t('settings.auto.showIp'))}">${escapeHtml(entry.ip)}</span><span class="auto-device-meta">${escapeHtml(I18n.t('settings.auto.since', { time: new Date(Number(entry.at) || Date.now()).toLocaleTimeString(I18n.lang, { hour: '2-digit', minute: '2-digit' }) }))}</span></div>`).join('')}</div>`
+     : `<div class="auto-empty">${escapeHtml(I18n.t('settings.auto.noDevices'))}</div>`,
+   ].join('');
+   for (const ip of net.querySelectorAll('.auto-ip')) {
+    const reveal = () => ip.classList.toggle('is-shown');
+    ip.addEventListener('click', reveal);
+    ip.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') reveal(); });
+   }
+  };
+  paintNet();
+  clearInterval(this.autoTimer);
+  this.autoTimer = setInterval(() => {
+   const page = this.dialog.querySelector('.settings-page[data-page="auto"]');
+   if (page && !page.hidden && this.dialog.open) paintNet();
+  }, 5000);
   const save = async patch => {
    const next = await window.openghost?.auto?.set?.(patch).catch(() => null);
    if (!next) return;

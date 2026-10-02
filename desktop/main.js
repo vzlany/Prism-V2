@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeTheme, screen, shell, Notification } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, nativeTheme, screen, shell, Notification } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
@@ -256,6 +256,18 @@ ipcMain.handle('auto:get', event => {
  const auto = readAuto();
  return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, port: webPort(auto), webRunning: Boolean(webChild) };
 });
+// The web server lists its live connections in web-clients.json (it may also be running
+// from a terminal, not started by this app): the Auto page shows the port and the devices.
+ipcMain.handle('auto:clients', event => {
+ if (!fromApp(event)) return null;
+ try {
+  const data = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'web-clients.json'), 'utf8'));
+  const clients = (Array.isArray(data?.clients) ? data.clients : []).filter(entry => entry?.ip && Date.now() - (Number(entry.at) || 0) < 120000);
+  return { port: Number(data?.port) || webPort(), host: String(data?.host || ''), at: Number(data?.at) || 0, clients };
+ } catch {
+  return { port: webPort(), host: '', at: 0, clients: [] };
+ }
+});
 ipcMain.handle('auto:set', (event, patch) => {
  if (!fromApp(event)) return null;
  const auto = writeAuto({
@@ -371,6 +383,9 @@ function createWindow() {
   },
  });
  win.once('ready-to-show', () => { if (!HIDDEN) win.show(); });
+ // On Windows the taskbar icon of an unpackaged app otherwise stays Electron's; set it
+ // explicitly as well as through the Start Menu identity shortcut.
+ try { win.setIcon(nativeImage.createFromPath(ICON)); } catch {}
  // Renderer warnings and errors land in the app's log, so a silent delegated run is visible.
  win.webContents.on('console-message', (event, level, message) => {
   const text = message || event?.message || '';

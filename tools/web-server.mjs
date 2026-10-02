@@ -242,10 +242,29 @@ try {
   });
  } catch {}
 } catch {}
-wss.on("connection", ws => {
+// Who is connected right now, so the app's Auto page can list the devices and the port.
+const clients = new Map();
+let clientsTimer = 0;
+function writeClients() {
+ clearTimeout(clientsTimer);
+ clientsTimer = setTimeout(() => {
+  try {
+   writeFileSync(join(USER_DATA, "web-clients.json"), JSON.stringify({ at: Date.now(), port: PORT, host: HOST, clients: [...clients.values()].filter(entry => Date.now() - entry.at < 120000) }));
+  } catch {}
+ }, 300);
+}
+
+wss.on("connection", (ws, req) => {
  const data = { id: ++connections };
  data.send = (channel, ...eventArgs) => { try { ws.send(JSON.stringify({ t: "event", channel, args: eventArgs })); } catch {} };
- console.log(`[${stamp()}] connection ${data.id} opened`);
+ // Who is connected, for the Auto page: the address is shown (blurred) next to the port.
+ const ip = String(req?.socket?.remoteAddress || "").replace(/^::ffff:/, "") || "local";
+ const seen = clients.get(ip) || { ip, count: 0, first: Date.now(), at: Date.now() };
+ seen.count += 1;
+ seen.at = Date.now();
+ clients.set(ip, seen);
+ writeClients();
+ console.log(`[${stamp()}] connection ${data.id} opened (${ip})`);
  // A page that just opened asks for a snapshot right away.
  const mine = new Set();
  data.send("presence:event", presenceList());
@@ -253,6 +272,13 @@ wss.on("connection", ws => {
  ws.on("close", () => {
   for (const id of mine) presence.delete(id);
   if (mine.size) broadcastPresence();
+  const entry = clients.get(ip);
+  if (entry) {
+   entry.count -= 1;
+   entry.at = Date.now();
+   if (entry.count <= 0) clients.delete(ip);
+   writeClients();
+  }
   console.log(`[${stamp()}] connection ${data.id} closed`);
  });
  ws.on("message", async raw => {
