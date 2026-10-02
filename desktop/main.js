@@ -77,6 +77,28 @@ function createShortcut() {
  console.log(ok ? `Shortcut: ${link}` : 'Could not create the shortcut');
 }
 
+// Windows takes the taskbar and toast icon from the identity the window claims (its AppUser
+// Model ID), and that identity is only dressed when a Start Menu shortcut with the same id
+// and the app's icon exists. In a packaged build the installer makes one; a development
+// checkout gets one here, so both the taskbar and the notifications wear Prism's icon
+// instead of Electron's.
+function installIdentityShortcut() {
+ if (process.platform !== 'win32') return;
+ try {
+  const dir = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+  fs.mkdirSync(dir, { recursive: true });
+  shell.writeShortcutLink(path.join(dir, 'Prism V2.lnk'), 'create', {
+   target: process.execPath,
+   args: `"${ROOT}"`,
+   cwd: ROOT,
+   icon: ICON,
+   iconIndex: 0,
+   appUserModelId: app.isPackaged ? APP_ID : `${APP_ID}.dev`,
+   description: 'Prism V2',
+  });
+ } catch {}
+}
+
 const storeDir = () => path.join(app.getPath('userData'), 'store');
 const writes = new Map();
 
@@ -218,7 +240,7 @@ function startWeb(auto = readAuto()) {
  if (webChild || !auto.web) return;
  const script = path.join(ROOT, 'tools', 'web-server.mjs');
  try {
-  webChild = spawn(process.execPath, [script, '--port', String(webPort(auto)), '--host', '0.0.0.0', '--no-open'], {
+  webChild = spawn(process.execPath, [script, '--port', String(webPort(auto)), '--host', '0.0.0.0', '--no-open', ...(PROFILE ? ['--profile', PROFILE] : [])], {
    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
    windowsHide: true,
    stdio: 'ignore',
@@ -290,6 +312,7 @@ function createTray(win) {
 // small file in userData/delegate; it is read, handed to the window and deleted.
 function watchDelegate(win) {
  const dir = path.join(app.getPath('userData'), 'delegate');
+ const seen = new Set();
  const take = () => {
   let names = [];
   try { names = fs.readdirSync(dir).filter(name => name.endsWith('.json')); } catch { return; }
@@ -297,8 +320,10 @@ function watchDelegate(win) {
    const file = path.join(dir, name);
    let request = null;
    try { request = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
-   fs.promises.rm(file, { force: true }).catch(() => {});
-   if (request?.chatId && !win.isDestroyed()) win.webContents.send('turn:request', request);
+   try { fs.rmSync(file, { force: true }); } catch {}
+   if (!request?.chatId || seen.has(request.id || name)) continue;
+   seen.add(request.id || name);
+   if (!win.isDestroyed()) win.webContents.send('turn:request', request);
   }
  };
  try {
@@ -339,9 +364,19 @@ function createWindow() {
    sandbox: true,
    spellcheck: true,
    webviewTag: true,
+   // Prism's own chimes must play even when the window is not focused, and a background
+   // window must keep its timers and animation frames (a long reply used to stall there).
+   autoplayPolicy: 'no-user-gesture-required',
+   backgroundThrottling: false,
   },
  });
  win.once('ready-to-show', () => { if (!HIDDEN) win.show(); });
+ // Renderer warnings and errors land in the app's log, so a silent delegated run is visible.
+ win.webContents.on('console-message', (event, level, message) => {
+  const text = message || event?.message || '';
+  const where = event?.sourceId ? ` (${event.sourceId}:${event.lineNumber})` : '';
+  if (text) console.log(`[renderer] ${text}${where}`);
+ });
  win.webContents.on('will-attach-webview', (event, prefs, params) => {
   if (!Browser.guard(win.webContents, prefs, params)) event.preventDefault();
  });
@@ -484,6 +519,7 @@ if (process.argv.includes('--create-shortcut')) {
  });
  app.whenReady().then(() => {
   Browser.setup();
+  installIdentityShortcut();
   // Installed builds put the `prism` command in the terminal for the current user.
   if (CliCommand.install()) console.log('The prism command is now available in terminals');
   win = createWindow();

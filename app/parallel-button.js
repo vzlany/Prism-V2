@@ -3,7 +3,7 @@
 (() => {
 'use strict';
 
-const GLYPH = '<svg class="icon" viewBox="30 30 60 60" fill="currentColor" aria-hidden="true"><circle class="dot d1" cx="40" cy="60" r="7"/><circle class="dot d2" cx="60" cy="60" r="7"/><circle class="dot d3" cx="80" cy="60" r="7"/></svg>';
+const GLYPH = '<svg class="icon" viewBox="30 30 60 60" fill="currentColor" aria-hidden="true"><g class="glyph"><circle class="dot d1" cx="40" cy="60" r="7"/><circle class="dot d2" cx="60" cy="60" r="7"/><circle class="dot d3" cx="80" cy="60" r="7"/></g></svg>';
 
 const STYLE = `
 :host{width:auto}

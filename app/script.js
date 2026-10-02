@@ -155,22 +155,35 @@ window.openghost?.store?.onChatChange?.(id => {
 // window and back to the phone like any other run of the app.
 async function runDelegated(request) {
  const id = String(request?.chatId || '');
+ console.log('[delegate] request', id);
  if (!id) return;
- await library.reload();
- if (!library.chat(id)) return;
+ // The website saves the index with a short debounce, so the chat record can land here a
+ // moment after the request does: wait for it instead of giving up.
+ for (let i = 0; i < 24 && !library.chat(id); i++) {
+  await library.reload();
+  if (library.chat(id)) break;
+  await new Promise(resolve => setTimeout(resolve, 250));
+ }
+ if (!library.chat(id)) { console.log('[delegate] chat not in the store', id); return; }
  await chat.open(id);
  const conv = chat.conversations.get(id);
- if (!conv || conv.turn || conv.waiting) return;
+ if (!conv || conv.turn || conv.waiting) { console.log('[delegate] chat busy or missing', id); return; }
  for (let i = 0; i < 15; i++) {
   await chat.refresh(id);
   const last = conv.messages[conv.messages.length - 1];
   if (last?.role === 'user') break;
   await new Promise(resolve => setTimeout(resolve, 200));
  }
- if (conv.turn) return;
+ if (conv.turn) { console.log('[delegate] the chat started running on its own', id); return; }
  const record = library.chat(id);
- const config = settings.configFor(settings.resolve(request.model || record?.model || settings.model));
- if (!config.ready) return;
+ // The model the website asked for, or the app's own when that one cannot run here.
+ let config = settings.configFor(settings.resolve(request.model || record?.model || settings.model));
+ if (!config.ready) config = settings.configFor(settings.model);
+ if (!config.ready) {
+  console.log('[delegate] no usable model for', request.model || record?.model || '');
+  return;
+ }
+ console.log(`[delegate] running ${id} with ${config.provider}:${config.model}`);
  chat.resume(conv, config);
  if (conv === chat.active) chat.followBottom();
 }

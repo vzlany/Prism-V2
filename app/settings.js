@@ -147,9 +147,12 @@ class Settings {
   return this.connected(provider) && (provider === 'chatgpt' || this.accepted.has(provider));
  }
 
- // The picker offers the models of every connected provider; with none connected it shows DeepSeek, the app's own default.
+ // The picker offers the models of every connected provider, or the app's shared catalog for
+ // the ones this page has no key for; with neither, DeepSeek, the app's own default.
  collect() {
-  const models = ORDER.filter(provider => this.connected(provider)).flatMap(provider => this.catalog[provider] || []);
+  const models = ORDER
+   .filter(provider => this.connected(provider))
+   .flatMap(provider => this.catalog[provider]?.length ? this.catalog[provider] : (this.shared?.[provider] || []));
   this.models = models.length ? models : KNOWN_DEEPSEEK.slice();
   this.paint();
  }
@@ -371,7 +374,7 @@ class Settings {
   const node = this.autoPage;
   if (!node) return;
   const auto = (await window.openghost?.auto?.get?.().catch(() => null)) || { login: false, hidden: false, web: false, port: 8787, webRunning: false };
-  const row = (labelKey, hintKey, control) => `<div class="settings-row">
+  const row = (labelKey, hintKey, control) => `<div class="settings-row is-wide">
    <div class="settings-text">
     <span class="settings-label">${escapeHtml(I18n.t(labelKey))}</span>
     <p class="settings-hint">${escapeHtml(I18n.t(hintKey))}</p>
