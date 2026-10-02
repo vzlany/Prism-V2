@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('openghost', {
  platform: process.platform,
  pickFolder: defaultPath => ipcRenderer.invoke('folder:pick', defaultPath),
  revealFolder: folder => ipcRenderer.invoke('folder:reveal', folder),
+ saveFile: (file, name) => ipcRenderer.invoke('file:save', file, name),
  setTitleBar: color => ipcRenderer.send('window:titlebar', color),
  notify: (title, body, summary) => ipcRenderer.send('notify', { title, body, summary }),
  store: {
@@ -15,11 +16,22 @@ contextBridge.exposeInMainWorld('openghost', {
   remove: key => ipcRenderer.invoke('store:remove', key),
   // Another process (prism web) wrote the index: the list re-reads it.
   onChange: callback => ipcRenderer.on('store:changed', () => callback()),
+  // One conversation was saved elsewhere: the open thread reads it again.
+  onChatChange: callback => ipcRenderer.on('chat:changed', (event, id) => callback(id)),
+ },
+ auto: {
+  // Settings -> Auto: launch at login, start hidden, run the web server.
+  get: () => ipcRenderer.invoke('auto:get'),
+  set: patch => ipcRenderer.invoke('auto:set', patch),
  },
  presence: {
   // The desktop's running turns are mirrored to presence.json, so `prism web` (the phone)
   // sees the same busy chats the app shows.
   set: (id, info) => ipcRenderer.send('presence:set', id, info),
+ },
+ delegate: {
+  // Turns started on the website and handed to this app to run.
+  onRequest: callback => ipcRenderer.on('turn:request', (event, data) => callback(data)),
  },
  tools: {
   run: (id, name, args, cwd) => ipcRenderer.invoke('tool:run', id, name, args, cwd),

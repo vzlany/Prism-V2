@@ -194,8 +194,31 @@ class ChatList {
   }
   const busy = this.chat.isBusy(chat.id);
   this.busy(item, busy);
+  // A parallel run or subagent sits under the conversation that started it.
+  item.row.classList.toggle('is-child', Boolean(chat.parent));
   // Locking waits for the reply to finish, the same as changing the model.
   item.lock.disabled = busy;
+ }
+
+ // A run started from a chat is drawn as that chat's child, right below it.
+ withChildren(list) {
+  const ids = new Set(list.map(chat => chat.id));
+  const children = new Map();
+  for (const chat of list) {
+   if (!chat.parent || !ids.has(chat.parent)) continue;
+   const kids = children.get(chat.parent) || [];
+   kids.push(chat);
+   children.set(chat.parent, kids);
+  }
+  if (!children.size) return list;
+  const out = [];
+  for (const chat of list) {
+   if (chat.parent && ids.has(chat.parent)) continue;
+   out.push(chat);
+   const kids = children.get(chat.id);
+   if (kids) for (const child of kids.sort((a, b) => (a.created || 0) - (b.created || 0))) out.push(child);
+  }
+  return out;
  }
 
  // A protected chat wears a small padlock instead of the dot, shut while the chat is locked; its title then hides behind a blur.
@@ -342,12 +365,12 @@ class ChatList {
   const lib = this.library, query = this.query.trim().toLowerCase(), seen = new Set();
   // A locked chat's title is sealed, so a search never finds it.
   const match = chat => !query || (this.library.titleOf(chat) || '').toLowerCase().includes(query);
-  const live = lib.chats.filter(chat => !chat.subagent && match(chat));
+  const live = lib.chats.filter(chat => (!chat.subagent || chat.parent) && match(chat));
   const byCreated = (a, b) => (b.created || b.updated || 0) - (a.created || a.updated || 0);
-  const pinned = live.filter(chat => chat.pinned).sort(byCreated);
+  const pinned = this.withChildren(live.filter(chat => chat.pinned).sort(byCreated));
   const manualFolders = lib.folders.some(folder => Number.isFinite(folder.order));
   const folders = lib.folders
-   .map(folder => ({ folder, chats: live.filter(chat => !chat.pinned && key(chat.folder) === key(folder.path)).sort(this.sorterFor(folder.path)) }))
+   .map(folder => ({ folder, chats: this.withChildren(live.filter(chat => !chat.pinned && key(chat.folder) === key(folder.path)).sort(this.sorterFor(folder.path))) }))
    .filter(entry => !query || entry.chats.length || entry.folder.name.toLowerCase().includes(query))
    .sort((a, b) => manualFolders
     ? (a.folder.order ?? Number.MAX_SAFE_INTEGER) - (b.folder.order ?? Number.MAX_SAFE_INTEGER)

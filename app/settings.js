@@ -21,7 +21,9 @@ const LINKS = {
  'opencode-go': ['https://opencode.ai/console', 'opencode.ai/console'],
 };
 const MODES = ['ask', 'auto', 'full'];
-const DEFAULT_MODE = 'ask';
+// The website runs turns through the desktop app when it is there; locally (a headless
+// `prism web`) Full access is the useful default, since the page is the only operator.
+const DEFAULT_MODE = window.openghost?.web ? 'full' : 'ask';
 const CHECK_DELAY = 400;
 // How long a provider's model list is trusted. OpenCode adds and drops models on its side,
 // so the catalog is re-read in the background once it is this old, and periodically after.
@@ -84,6 +86,7 @@ class Settings {
   this.keys = Object.fromEntries(Object.entries(KEYS).map(([provider, key]) => [provider, localStorage.getItem(key) || '']));
   this.account = { connected: false };
   this.catalog = this.readCatalog();
+  this.shared = {};
   this.models = [];
   this.efforts = EFFORTS.slice();
   localStorage.removeItem('deepseek.model');
@@ -113,10 +116,30 @@ class Settings {
 
  saveCatalog() {
   try { localStorage.setItem(STORAGE.catalog, JSON.stringify(this.catalog)); } catch {}
+  // The website (and the phone) reads its models from here: the app has the keys, so its
+  // list is the truth to pick from; a run there is handed back to the app anyway.
+  if (window.openghost?.desktop) {
+   try { window.openghost?.store?.write?.('catalog', { at: Date.now(), providers: this.catalog }); } catch {}
+  }
+ }
+
+ // The desktop app's model catalog, shared through the store: the website offers the same
+ // models and efforts even though it has no keys of its own.
+ async loadShared() {
+  if (!window.openghost?.web) return;
+  try {
+   const data = await window.openghost.store.read('catalog');
+   if (!data?.providers) return;
+   const providers = {};
+   for (const [name, list] of Object.entries(data.providers)) if (Array.isArray(list) && list.length) providers[name] = list;
+   this.shared = providers;
+   this.changed();
+  } catch {}
  }
 
  connected(provider) {
-  return provider === 'chatgpt' ? !!this.account.connected : !!this.keys[provider];
+  if (provider === 'chatgpt') return !!this.account.connected || Boolean(this.shared?.[provider]?.length && window.openghost?.app?.connected?.());
+  return !!this.keys[provider] || Boolean(this.shared?.[provider]?.length && window.openghost?.app?.connected?.());
  }
 
  // The badge turns green only once the provider has taken the key, so a mistyped key never looks connected.
@@ -219,6 +242,7 @@ class Settings {
 
  async refreshAll() {
   await this.syncAccount();
+  await this.loadShared();
   await Promise.all(Object.keys(KEYS).filter(provider => this.keys[provider]).map(provider => this.checkKey(provider)));
   this.syncCatalogs();
  }
@@ -295,7 +319,13 @@ class Settings {
   });
   if (!window.openghost?.auth) this.accountBox.closest('.settings-row').hidden = true;
   this.mcpPage = this.dialog.querySelector('.settings-mcp-page');
+  this.autoPage = this.dialog.querySelector('.settings-auto-page');
   this.tabs = [...this.dialog.querySelectorAll('.settings-tab')];
+  // The Auto page is about this desktop install: a browser has nothing to set there.
+  if (!window.openghost?.desktop) {
+   const autoTab = this.dialog.querySelector('.settings-tab[data-tab="auto"]');
+   if (autoTab) autoTab.hidden = true;
+  }
   this.pages = [...this.dialog.querySelectorAll('.settings-page')];
   for (const tab of this.tabs) tab.addEventListener('click', () => this.showTab(tab.dataset.tab));
  }
@@ -331,7 +361,41 @@ class Settings {
   if (name === 'mcp') this.paintMcp();
   if (name === 'effects') this.paintEffects();
   if (name === 'memory') this.paintMemory();
+  if (name === 'auto') this.paintAuto();
   if (name === 'about') this.paintAbout();
+ }
+
+ // Settings -> Auto: starting with Windows (optionally hidden, straight into the tray) and
+ // running the web server alongside the app.
+ async paintAuto() {
+  const node = this.autoPage;
+  if (!node) return;
+  const auto = (await window.openghost?.auto?.get?.().catch(() => null)) || { login: false, hidden: false, web: false, port: 8787, webRunning: false };
+  const row = (labelKey, hintKey, control) => `<div class="settings-row">
+   <div class="settings-text">
+    <span class="settings-label">${escapeHtml(I18n.t(labelKey))}</span>
+    <p class="settings-hint">${escapeHtml(I18n.t(hintKey))}</p>
+   </div>
+   <div class="settings-control">${control}</div>
+  </div>`;
+  const toggle = (cls, on, disabled = false) => `<label class="mcp-auto"><input type="checkbox" class="${cls}" ${on ? 'checked' : ''} ${disabled ? 'disabled' : ''}>${escapeHtml(I18n.t('settings.auto.enable'))}</label>`;
+  node.innerHTML = [
+   row('settings.auto.login', 'settings.auto.loginHint', toggle('auto-login', auto.login)),
+   row('settings.auto.hidden', 'settings.auto.hiddenHint', toggle('auto-hidden', auto.hidden, !auto.login)),
+   row('settings.auto.web', 'settings.auto.webHint', `<div class="mcp-add-row">${toggle('auto-web', auto.web)}<input class="settings-key auto-port" type="number" min="1" max="65535" value="${auto.port}" ${auto.web ? '' : 'disabled'}><button type="button" class="settings-button" data-auto-open ${auto.webRunning || auto.web ? '' : 'disabled'}>${escapeHtml(I18n.t('settings.auto.open'))}</button></div>`),
+   `<p class="settings-status" data-provider="auto" role="status"></p>`,
+  ].join('');
+  const save = async patch => {
+   const next = await window.openghost?.auto?.set?.(patch).catch(() => null);
+   if (!next) return;
+   this.setStatus('auto', I18n.t('settings.auto.saved'));
+   this.paintAuto();
+  };
+  node.querySelector('.auto-login')?.addEventListener('change', event => save({ login: event.target.checked }));
+  node.querySelector('.auto-hidden')?.addEventListener('change', event => save({ hidden: event.target.checked }));
+  node.querySelector('.auto-web')?.addEventListener('change', event => save({ web: event.target.checked }));
+  node.querySelector('.auto-port')?.addEventListener('change', event => save({ port: Number(event.target.value) || 8787 }));
+  node.querySelector('[data-auto-open]')?.addEventListener('click', () => window.open(`http://localhost:${auto.port}/`, '_blank'));
  }
 
  mcpNote(text, tone = '') {

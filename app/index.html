@@ -101,10 +101,13 @@
 
   <div class="instructions-menu" popover="auto" role="menu"></div>
 
+  <div class="folder-menu" popover="auto" role="menu" aria-label="Folders" data-i18n-attr="aria-label:folder.recent"></div>
+
   <div class="model-stage" popover="manual" role="dialog" aria-label="Model" data-i18n-attr="aria-label:model"></div>
 
   <div class="parallel-panel" popover="manual" role="dialog" aria-label="Run in parallel" data-i18n-attr="aria-label:parallel.title">
     <div class="parallel-head" data-i18n="parallel.title">Run in parallel</div>
+    <div class="parallel-message" hidden></div>
     <div class="parallel-models"></div>
     <div class="parallel-foot"><span class="parallel-hint" data-i18n="parallel.hint"></span><button type="button" class="parallel-run" data-i18n="parallel.run">Run</button></div>
   </div>
@@ -139,6 +142,10 @@
       <button type="button" class="settings-tab" data-tab="memory">
         <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M38 46a22 18 0 1 1 44 0v14a10 10 0 0 1-10 10h-12"/><path d="M60 50v26M60 50l-8-8M60 50l8-8"/></svg>
         <span data-i18n="settings.memory.title">Memory</span>
+      </button>
+      <button type="button" class="settings-tab" data-tab="auto">
+        <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M60 37v22"/><path d="M45 44a21 21 0 1 0 30 0"/></svg>
+        <span data-i18n="settings.auto.tab">Auto</span>
       </button>
       <button type="button" class="settings-tab" data-tab="about">
         <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="60" cy="60" r="23"/><path d="M60 53.5v.5M60 63v13"/></svg>
@@ -176,6 +183,14 @@
       </header>
       <p class="settings-lead" data-i18n="settings.memory.lead">Facts the agent keeps for later turns and other chats. It saves them itself with its memory tool; here you can add or forget them.</p>
       <div class="settings-memory-page"></div>
+    </section>
+    <section class="settings-page" data-page="auto" hidden aria-labelledby="settings-auto-title">
+      <header class="settings-page-header">
+        <h2 class="settings-page-title" id="settings-auto-title" data-i18n="settings.auto.tab">Auto</h2>
+        <close-button class="settings-close"></close-button>
+      </header>
+      <p class="settings-lead" data-i18n="settings.auto.lead">How Prism V2 starts with Windows, and whether the web server runs with it.</p>
+      <div class="settings-auto-page"></div>
     </section>
     <section class="settings-page" data-page="about" hidden aria-labelledby="settings-about-title">
       <header class="settings-page-header">
@@ -253,6 +268,7 @@
   <script src="chat-list.js"></script>
   <script src="live-view.js"></script>
   <script src="sidebar-resizer.js"></script>
+  <script src="recent-folders.js"></script>
   <script src="folder-pill.js"></script>
   <script src="instructions-pill.js"></script>
   <script src="mode-picker.js"></script>

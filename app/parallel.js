@@ -47,6 +47,7 @@ class ParallelPanel {
   this.selected = new Set();
   this.busy = false;
   this.list = panel.querySelector('.parallel-models');
+  this.message = panel.querySelector('.parallel-message');
   this.runButton = panel.querySelector('.parallel-run');
   button.addEventListener('parallel-toggle', () => this.toggle());
   this.runButton.addEventListener('click', () => this.start());
@@ -72,6 +73,12 @@ class ParallelPanel {
  render() {
   const models = this.settings.models || [];
   if (!this.selected.size) for (const model of models.slice(0, 2)) this.selected.add(model.id);
+  // The message that will be sent to every model, so the panel says what it is about to do.
+  const text = this.composerText?.text?.().trim() || '';
+  if (this.message) {
+   this.message.hidden = !text;
+   this.message.textContent = text ? I18n.t('parallel.message', { text: text.length > 180 ? `${text.slice(0, 180)}…` : text }) : '';
+  }
   this.list.innerHTML = models.map(model => `
    <label class="parallel-model">
     <input type="checkbox" data-model="${escapeAttr(model.id)}" ${this.selected.has(model.id) ? 'checked' : ''}>

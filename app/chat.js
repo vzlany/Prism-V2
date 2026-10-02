@@ -7,7 +7,11 @@ const BOTTOM_SHOW = 120;
 const JUMP = { base: 420, perPixel: 0.05, max: 950 };
 // A chat opens with only its newest part drawn; older messages load in batches as you scroll up.
 const WINDOW_MIN = 45;
-const WINDOW_BATCH = 30;
+const WINDOW_BATCH = 45;
+// How many extra entries are quietly drawn ahead of a scroll, and how close to the top a
+// scroll has to get before the next batch is asked for.
+const PRERENDER = 135;
+const LOAD_AHEAD = 700;
 const COPIED_TIME = 1600;
 const FINISH_NOTES = ['length', 'content_filter', 'insufficient_system_resource'];
 const LEAVE = { duration: 260, easing: 'cubic-bezier(0.32, 0.72, 0, 1)', fill: 'forwards' };
@@ -385,7 +389,7 @@ class Chat {
  }
 
  isBusy(id) {
-  return !!this.conversations.get(id)?.turn || !!window.Presence?.isBusy?.(id);
+  return !!this.conversations.get(id)?.turn || !!this.conversations.get(id)?.waiting || !!window.Presence?.isBusy?.(id);
  }
 
  isUnread(id) {
@@ -422,7 +426,7 @@ class Chat {
   const record = this.library.create({ folder, text: label || promptText, attachments: [] });
   // The card that started it can open it: the tool run's id leads back to this conversation.
   if (toolId) (this.subagents ||= new Map()).set(toolId, record.id);
-  this.library.update(record.id, { model: this.modelOf(parent), subagent: true, named: true, title: String(label || 'Subagent task').slice(0, 80) });
+  this.library.update(record.id, { model: this.modelOf(parent), subagent: true, named: true, title: String(label || 'Subagent task').slice(0, 80), parent: parent.record.id });
   const conv = new Conversation(record);
   conv.subagent = true;
   conv.folder = { path: folder.path, name: folder.name };
@@ -442,16 +446,19 @@ class Chat {
  }
 
  // Sends the same prompt to several models at once: one chat per model, all running together.
+ // With the desktop app running, every one of them is handed to the app instead.
  async runParallel(folder, models, text) {
   const ids = [];
+  const delegating = Boolean(window.openghost?.delegate && window.openghost.app?.connected?.());
   for (const entry of models) {
    const record = this.library.create({ folder, text, attachments: [] });
-   this.library.update(record.id, { model: `${entry.providerID}:${entry.id}` });
+   this.library.update(record.id, { model: `${entry.providerID}:${entry.id}`, parent: this.active?.record ? this.active.id : '' });
    const conv = new Conversation(record);
    conv.folder = { path: folder.path, name: folder.name };
    this.conversations.set(record.id, conv);
    this.attach(conv);
-   this.run(conv, { text, attachments: [] }, this.config(conv), null);
+   if (delegating) this.delegate(conv, { text, attachments: [] });
+   else this.run(conv, { text, attachments: [] }, this.config(conv), null);
    window.ParallelRuns?.add({ id: record.id, title: record.title, model: entry.name || entry.id, status: 'running', snippet: '' });
    ids.push(record.id);
   }
@@ -653,11 +660,14 @@ class Chat {
   if (conv.locked) return false;
   // The same chat cannot answer in two places at once: a run started on another page keeps
   // the turn, and this page waits for it (the reply appears here when it finishes).
-  if (window.Presence?.isBusy?.(conv.id)) {
+  if (window.Presence?.isBusy?.(conv.id) || conv.waiting) {
    this.remoteNote(conv);
    return false;
   }
-  if (!config.ready) {
+  // With the desktop app running, the turn goes there: it has the tools, the browser and its
+  // own keys, so this page does not need a key of its own to send.
+  const delegating = Boolean(window.openghost?.delegate && window.openghost.app?.connected?.());
+  if (!config.ready && !delegating) {
    this.settings.open(I18n.t('settings.key.needed'), config.provider);
    return false;
   }
@@ -676,6 +686,10 @@ class Chat {
   this.follow = true;
   if (conv.turn) {
    this.interject(conv, prompt);
+  } else if (delegating) {
+   // The desktop app is running: the turn goes there, with its tools and keys, and this page
+   // watches it like any other run happening elsewhere (live card, then the saved answer).
+   this.delegate(conv, prompt);
   } else {
    const bubble = this.userMessage(prompt);
    conv.list.append(bubble);
@@ -684,6 +698,34 @@ class Chat {
   }
   this.followBottom();
   return true;
+ }
+
+ // Hand a prompt to the desktop app: the user's message is written to the shared store (so
+ // the app opens the chat with it already there) and a request is dropped for it to run.
+ delegate(conv, prompt) {
+  const bubble = this.userMessage(prompt);
+  conv.list.append(bubble);
+  this.main.classList.remove('is-empty');
+  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text };
+  conv.messages.push(entry);
+  this.nodes.set(entry, bubble);
+  conv.waiting = Date.now();
+  clearTimeout(conv.waitingTimer);
+  conv.waitingTimer = setTimeout(() => {
+   if (conv.waiting && window.Presence?.isBusy?.(conv.id)) return;
+   conv.waiting = 0;
+   const note = document.createElement('div');
+   note.className = 'message-note';
+   note.textContent = I18n.t('chat.delegateTimeout');
+   conv.list.append(note);
+   this.onChange();
+  }, 25000);
+  this.onChange();
+  userContent(prompt).then(content => {
+   entry.content = content;
+   this.library.saveMessages(conv.id, conv.messages, conv.tokens, conv.spend || null);
+   window.openghost.delegate.send({ id: `d-${Date.now().toString(36)}`, chatId: conv.id, at: Date.now(), model: conv.record?.model || this.modelOf(conv) });
+  }).catch(() => {});
  }
 
  // Another page (a phone, a second window) is answering this chat right now.
@@ -933,6 +975,9 @@ class Chat {
     const state = card.classList.contains('is-error') ? 'error' : card.classList.contains('is-done') ? 'done' : 'running';
     parts.push({
      kind: 'tool',
+     // The real tool, so the mirror draws the very same card (icon, title, kind).
+     tool: card.dataset.toolName || '',
+     toolKind: card.dataset.toolKind || 'command',
      title: card.querySelector('.tool-title')?.textContent || '',
      summary: card.querySelector('.tool-summary')?.textContent || '',
      state,
@@ -1240,8 +1285,14 @@ class Chat {
     handed = true;
    }
   }
-  const card = name === 'ask_user' ? null : new ToolCard({ ...AgentTools.describe(name, args, cwd), tool: name });
-  if (card) view.el.append(card.el);
+  const described = name === 'ask_user' ? null : AgentTools.describe(name, args, cwd);
+  const card = described ? new ToolCard({ ...described, tool: name }) : null;
+  if (card) {
+   view.el.append(card.el);
+   // The live mirror reads these back, so a card on another device wears the same icon.
+   card.el.dataset.toolKind = described.kind || 'command';
+   card.el.dataset.toolName = name;
+  }
   if (conv === this.active) this.followBottom();
   this.publishLive(conv, turn);
   const id = turn.tool = `${conv.id}-${++this.tools}`;
@@ -1268,6 +1319,13 @@ class Chat {
      note: '',
     }));
     view.el.append(new MediaSlider(pictures).el);
+    if (conv === this.active) this.followBottom();
+   }
+   // A finished file the agent attached (attach_file) becomes a chip with a real download.
+   if (output && typeof output === 'object' && output.files?.length) {
+    for (const file of output.files) {
+     try { window.Artifacts?.attach(view.el, { path: file.path, name: file.name, size: file.size, cwd }); } catch {}
+    }
     if (conv === this.active) this.followBottom();
    }
    // A written or edited file gets Preview and Download on the card itself: the file is one
@@ -1348,13 +1406,13 @@ class Chat {
   if (turn.started) entry.duration = Math.max(1, Math.round((Date.now() - turn.started) / 1000));
   for (const pending of turn.approvals) pending.card.settle('deny');
   conv.turn = null;
-  // The live mirror stops the moment the turn is over — even if the closing animation is
-  // still waiting on animation frames that a hidden window never runs.
+  // The mirror's heartbeat stops at once, but "the turn is over" is only told after the chat
+  // has been written: a device watching would otherwise reload the conversation before the
+  // last thoughts and tool cards were saved, and they would never appear.
   clearTimeout(turn.liveTimer);
   clearInterval(turn.liveBeat);
   turn.liveTimer = 0;
   turn.liveBeat = 0;
-  window.Presence?.publish(conv.id, null);
   if (turn.switch && this.library.chat(conv.id)) {
    this.library.update(conv.id, { model: turn.switch });
    this.settings.setModel(turn.switch);
@@ -1370,9 +1428,11 @@ class Chat {
   });
   await Promise.all(queued);
   if (conv.record && this.library.chat(conv.id)) {
-   this.save(conv);
+   await this.save(conv);
    if (turn.text && !conv.record.named) this.name(conv, turn.config);
   }
+  // The chat is on disk now: other devices may read it and see the finished turn whole.
+  window.Presence?.publish(conv.id, null);
   if (conv !== this.active) conv.unread = true;
   this.dismissGhost(view);
   this.onChange();
@@ -1500,9 +1560,11 @@ class Chat {
  }
 
  save(conv) {
-  if (!this.library.chat(conv.id)) return;
-  this.library.saveMessages(conv.id, conv.messages, conv.tokens, conv.spend || null);
+  if (!this.library.chat(conv.id)) return Promise.resolve();
+  conv.savedAt = Date.now();
+  const write = this.library.saveMessages(conv.id, conv.messages, conv.tokens, conv.spend || null);
   this.library.update(conv.id, { updated: Date.now() });
+  return write;
  }
 
  async name(conv, config) {
@@ -1532,6 +1594,37 @@ class Chat {
   conv.window = { entries, ends, from };
   for (let index = from; index < entries.length; index++) this.renderEntry(conv, entries[index]);
   settle(conv.list);
+  this.prerender(conv);
+ }
+
+ // While the reader sits near the bottom, older batches are drawn quietly in the background,
+ // so scrolling up finds whole messages ready instead of waiting for them to render under
+ // the finger. Rendering stops as soon as the reader scrolls away or the budget is spent.
+ prerender(conv) {
+  if (!conv?.window) return;
+  conv.prerenderLeft = PRERENDER;
+  const step = () => {
+   if (conv !== this.active || !conv.window || conv.window.from <= 0 || conv.prerenderLeft <= 0) return;
+   if (this.thread.scrollTop > LOAD_AHEAD) return;
+   const start = Math.max(0, conv.window.from - WINDOW_BATCH);
+   const count = conv.window.from - start;
+   const height = this.thread.scrollHeight;
+   const frag = document.createDocumentFragment();
+   for (let index = start; index < conv.window.from; index++) this.renderEntry(conv, conv.window.entries[index], frag);
+   conv.list.insertBefore(frag, conv.list.firstElementChild);
+   conv.window.from = start;
+   conv.prerenderLeft -= count;
+   settle(conv.list);
+   if (this.follow) this.pin();
+   else { this.thread.scrollTop += this.thread.scrollHeight - height; this.lastTop = this.thread.scrollTop; }
+   if (conv.window.from > 0) this.idle(step);
+  };
+  this.idle(step);
+ }
+
+ idle(fn) {
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(fn, { timeout: 500 });
+  else setTimeout(fn, 150);
  }
 
  // Whether an entry is worth drawing on the screen: words, reasoning, or a tool it called.
@@ -1560,7 +1653,7 @@ class Chat {
  // One batch of older messages above the viewport, keeping the reading position steady.
  loadOlder() {
   const conv = this.active;
-  if (!conv?.window || conv.window.from <= 0 || this.thread.scrollTop > 420) return;
+  if (!conv?.window || conv.window.from <= 0 || this.thread.scrollTop > LOAD_AHEAD) return;
   const start = Math.max(0, conv.window.from - WINDOW_BATCH);
   const height = this.thread.scrollHeight, top = this.thread.scrollTop;
   const frag = document.createDocumentFragment();
@@ -1623,6 +1716,13 @@ class Chat {
     try {
      const written = call.function.arguments ? JSON.parse(call.function.arguments) : {};
      if (written.path) window.Artifacts?.actions?.(card, { path: written.path, cwd });
+    } catch {}
+   }
+   // A file attached with attach_file keeps its chip after a reload too.
+   if (call.function?.name === 'attach_file') {
+    try {
+     const attached = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+     if (attached.path) window.Artifacts?.attach(el, { path: attached.path, cwd });
     } catch {}
    }
   }

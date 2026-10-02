@@ -1,8 +1,9 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, screen, shell, Notification } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeTheme, screen, shell, Notification } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 const Tools = require('./tools');
 const Browser = require('./browser');
 const LLM = require('./llm');
@@ -25,6 +26,8 @@ const PROFILE = (() => {
  const value = at >= 0 ? String(process.argv[at + 1] || '').trim() : '';
  return /^[a-z0-9-]{1,24}$/.test(value.toLowerCase()) ? value.toLowerCase() : '';
 })();
+// Settings -> Auto can start the app with Windows, optionally straight into the tray.
+const HIDDEN = process.argv.includes('--hidden');
 function inheritLegacyData() {
  const target = PROFILE ? `${DATA_ROOT}-${PROFILE}` : DATA_ROOT;
  const legacy = path.join(app.getPath('appData'), PROFILE ? `Prism-${PROFILE}` : 'Prism');
@@ -45,7 +48,7 @@ function inheritLegacyData() {
  }
 }
 inheritLegacyData();
-app.setPath('userData', PROFILE ? `${DATA_ROOT}-${PROFILE}` : DATA_ROOT);
+if (PROFILE) app.setPath('userData', PROFILE ? `${DATA_ROOT}-${PROFILE}` : DATA_ROOT);
 const ROOT = path.join(__dirname, '..');
 // Windows takes the .ico; macOS and Linux take the .png.
 const ICON = path.join(__dirname, process.platform === 'win32' ? 'icon.ico' : 'icon.png');
@@ -118,19 +121,30 @@ function watchStore(win) {
   const dir = storeDir();
   fs.mkdirSync(dir, { recursive: true });
   let timer = 0, stamp = '';
-  const notify = () => {
-   let next = '';
-   try {
-    const stat = fs.statSync(path.join(dir, 'index.json'));
-    next = `${stat.mtimeMs}:${stat.size}`;
-   } catch {}
-   if (!next || next === stamp) return;
-   stamp = next;
-   if (!win.isDestroyed()) win.webContents.send('store:changed');
-  };
-  fs.watch(dir, { recursive: true }, () => {
+  const chatTimers = new Map();
+  fs.watch(dir, { recursive: true }, (event, name) => {
+   const file = String(name || '').replace(/\\/g, '/');
+   const chat = /(?:^|\/)chats\/([a-z0-9_-]+)\.json$/i.exec(file);
+   if (chat) {
+    const id = chat[1];
+    clearTimeout(chatTimers.get(id));
+    chatTimers.set(id, setTimeout(() => {
+     chatTimers.delete(id);
+     if (!win.isDestroyed()) win.webContents.send('chat:changed', id);
+    }, 150));
+    return;
+   }
    clearTimeout(timer);
-   timer = setTimeout(notify, 350);
+   timer = setTimeout(() => {
+    let next = '';
+    try {
+     const stat = fs.statSync(path.join(dir, 'index.json'));
+     next = `${stat.mtimeMs}:${stat.size}`;
+    } catch {}
+    if (!next || next === stamp) return;
+    stamp = next;
+    if (!win.isDestroyed()) win.webContents.send('store:changed');
+   }, 120);
   });
  } catch {}
 }
@@ -155,6 +169,144 @@ ipcMain.on('presence:set', (event, id, info) => {
  else presenceRuns.delete(id);
  touchPresence();
 });
+
+// A heartbeat so `prism web` knows the app is running and can hand it the turns started on
+// the website (and only then: without the app, the web runs them itself).
+function beatApp() {
+ const file = path.join(app.getPath('userData'), 'app.json');
+ fs.promises.writeFile(file, JSON.stringify({ at: Date.now(), version: app.getVersion(), pid: process.pid })).catch(() => {});
+}
+beatApp();
+setInterval(beatApp, 10000);
+
+// --------------------------------------------------------------- Settings -> Auto + tray
+// Launching with Windows (optionally hidden, straight into the tray), and running the web
+// server with the app so the phone can reach it without a terminal.
+function autoFile() {
+ return path.join(app.getPath('userData'), 'store', 'auto.json');
+}
+function readAuto() {
+ try { return JSON.parse(fs.readFileSync(autoFile(), 'utf8')) || {}; } catch { return {}; }
+}
+function writeAuto(patch) {
+ const next = { ...readAuto(), ...patch };
+ try {
+  fs.mkdirSync(path.dirname(autoFile()), { recursive: true });
+  fs.writeFileSync(autoFile(), JSON.stringify(next));
+ } catch {}
+ return next;
+}
+function applyAuto(auto = readAuto()) {
+ try {
+  app.setLoginItemSettings({
+   openAtLogin: Boolean(auto.login),
+   path: process.execPath,
+   args: auto.login && auto.hidden ? ['--hidden'] : [],
+  });
+ } catch {}
+}
+let webChild = null;
+function webPort(auto = readAuto()) {
+ return Math.max(1, Math.min(65535, Number(auto.port) || 8787));
+}
+function stopWeb() {
+ if (!webChild) return;
+ try { webChild.kill(); } catch {}
+ webChild = null;
+}
+function startWeb(auto = readAuto()) {
+ if (webChild || !auto.web) return;
+ const script = path.join(ROOT, 'tools', 'web-server.mjs');
+ try {
+  webChild = spawn(process.execPath, [script, '--port', String(webPort(auto)), '--host', '0.0.0.0', '--no-open'], {
+   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+   windowsHide: true,
+   stdio: 'ignore',
+  });
+  webChild.on('exit', () => { webChild = null; });
+  console.log(`[auto] web server on port ${webPort(auto)}`);
+ } catch (error) {
+  console.log('[auto] could not start the web server:', error.message);
+ }
+}
+ipcMain.handle('auto:get', event => {
+ if (!fromApp(event)) return null;
+ const auto = readAuto();
+ return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, port: webPort(auto), webRunning: Boolean(webChild) };
+});
+ipcMain.handle('auto:set', (event, patch) => {
+ if (!fromApp(event)) return null;
+ const auto = writeAuto({
+  ...(typeof patch?.login === 'boolean' ? { login: patch.login } : {}),
+  ...(typeof patch?.hidden === 'boolean' ? { hidden: patch.hidden } : {}),
+  ...(typeof patch?.web === 'boolean' ? { web: patch.web } : {}),
+  ...(patch?.port !== undefined ? { port: webPort({ port: patch.port }) } : {}),
+ });
+ applyAuto(auto);
+ if (auto.web) { stopWeb(); startWeb(auto); }
+ else stopWeb();
+ return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, port: webPort(auto), webRunning: Boolean(webChild) };
+});
+
+let tray = null;
+function showWindow(win) {
+ if (!win || win.isDestroyed()) return;
+ if (win.isMinimized()) win.restore();
+ win.show();
+ win.focus();
+}
+function createTray(win) {
+ try {
+  tray = new Tray(ICON);
+  tray.setToolTip('Prism V2');
+  const refresh = () => {
+   if (!tray || tray.isDestroyed()) return;
+   const runs = presenceRuns.size;
+   tray.setToolTip(runs ? `Prism V2 — ${runs} working` : 'Prism V2');
+   tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open Prism', click: () => showWindow(win) },
+    { label: 'Open web', click: () => {
+     const auto = readAuto();
+     if (!webChild) startWeb({ ...auto, web: true });
+     shell.openExternal(`http://localhost:${webPort(auto)}/`);
+    } },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() },
+   ]));
+  };
+  refresh();
+  setInterval(refresh, 10000);
+  tray.on('click', () => {
+   if (!win || win.isDestroyed()) return;
+   if (win.isVisible() && win.isFocused()) win.hide();
+   else showWindow(win);
+  });
+ } catch (error) {
+  console.log('[tray] could not create the tray icon:', error.message);
+ }
+}
+
+// The other half of that bridge: turns the website asked this app to run. Each request is a
+// small file in userData/delegate; it is read, handed to the window and deleted.
+function watchDelegate(win) {
+ const dir = path.join(app.getPath('userData'), 'delegate');
+ const take = () => {
+  let names = [];
+  try { names = fs.readdirSync(dir).filter(name => name.endsWith('.json')); } catch { return; }
+  for (const name of names) {
+   const file = path.join(dir, name);
+   let request = null;
+   try { request = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+   fs.promises.rm(file, { force: true }).catch(() => {});
+   if (request?.chatId && !win.isDestroyed()) win.webContents.send('turn:request', request);
+  }
+ };
+ try {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.watch(dir, () => setTimeout(take, 150));
+  take();
+ } catch {}
+}
 
 function external(url) {
  if (/^(https?|mailto):/i.test(url)) shell.openExternal(url);
@@ -189,7 +341,7 @@ function createWindow() {
    webviewTag: true,
   },
  });
- win.once('ready-to-show', () => win.show());
+ win.once('ready-to-show', () => { if (!HIDDEN) win.show(); });
  win.webContents.on('will-attach-webview', (event, prefs, params) => {
   if (!Browser.guard(win.webContents, prefs, params)) event.preventDefault();
  });
@@ -230,6 +382,16 @@ ipcMain.handle('folder:pick', async (event, defaultPath) => {
 });
 
 ipcMain.handle('folder:reveal', (event, folder) => typeof folder === 'string' && shell.openPath(folder));
+// A file the agent attached: "Download" asks where to keep it and copies the real bytes.
+ipcMain.handle('file:save', async (event, file, name) => {
+ if (!fromApp(event) || typeof file !== 'string') return null;
+ const win = BrowserWindow.fromWebContents(event.sender);
+ const label = String(name || path.basename(file) || 'file').replace(/[\\/:*?"<>|]/g, '-');
+ const result = await dialog.showSaveDialog(win, { defaultPath: path.join(app.getPath('downloads'), label) });
+ if (result.canceled || !result.filePath) return null;
+ await fs.promises.copyFile(file, result.filePath);
+ return result.filePath;
+});
 ipcMain.handle('store:read', (event, key) => readStore(key));
 ipcMain.handle('store:write', (event, key, value) => writeStore(key, value));
 ipcMain.handle('store:remove', (event, key) => removeStore(key));
@@ -326,6 +488,10 @@ if (process.argv.includes('--create-shortcut')) {
   if (CliCommand.install()) console.log('The prism command is now available in terminals');
   win = createWindow();
   watchStore(win);
+  watchDelegate(win);
+  createTray(win);
+  applyAuto();
+  startWeb();
   Updater.start();
   MCP.init().catch(() => {});
   win.on('closed', () => {
@@ -339,6 +505,7 @@ if (process.argv.includes('--create-shortcut')) {
  app.on('before-quit', event => {
   Tools.cancelAll();
   MCP.stopAll();
+  stopWeb();
   if (!writes.size) return;
   event.preventDefault();
   Promise.allSettled([...writes.values()]).then(() => app.quit());

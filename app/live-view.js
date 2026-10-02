@@ -6,7 +6,6 @@
 'use strict';
 
 const STATUS = { thinking: 'live.thinking', working: 'live.working', writing: 'live.writing' };
-const FILE_LIKE = /(\b(edit|write|read|file)\b|\.(md|txt|json|js|mjs|ts|tsx|java|py|rb|go|rs|c|cpp|h|css|html|yml|yaml|xml|toml|sh|ps1)\b)/i;
 
 class LiveView {
  constructor() {
@@ -55,8 +54,8 @@ class LiveView {
    return { kind: 'thinking', el: view.el, view };
   }
   if (part.kind === 'tool') {
-   const kind = FILE_LIKE.test(`${part.title || ''} ${part.summary || ''}`) ? 'file' : 'command';
-   const card = new ToolCard({ kind, title: part.title || I18n.t('live.tool'), text: part.summary || '' });
+   // Same card the app draws: the tool name and kind ride in the mirror.
+   const card = new ToolCard({ kind: part.toolKind || 'command', tool: part.tool || '', title: part.title || I18n.t('live.tool'), text: part.summary || '' });
    return { kind: 'tool', el: card.el, card, done: false };
   }
   const content = document.createElement('div');

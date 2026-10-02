@@ -7,8 +7,10 @@
 'use strict';
 
 const bridge = window.openghost?.presence || null;
+const PAGE = Math.random().toString(36).slice(2, 10);
 let runs = new Map();
 let lastSnapshot = [];
+const own = new Set();
 const listeners = new Set();
 // Desktop mirrors carry their own timestamp; one that stopped being refreshed (the app was
 // closed mid-turn) expires here so no phantom busy ghost is left behind.
@@ -25,7 +27,10 @@ const read = snapshot => {
  lastSnapshot = Array.isArray(snapshot) ? snapshot : [];
  const next = new Map();
  for (const entry of lastSnapshot) {
-  if (entry && entry.id && fresh(entry)) next.set(entry.id, entry);
+  if (!entry || !entry.id || !fresh(entry)) continue;
+  next.set(entry.id, entry);
+  // A run published by this very page is ours: it must not be treated as "elsewhere".
+  if (entry.origin === PAGE) own.add(entry.id);
  }
  runs = next;
  emit();
@@ -39,14 +44,20 @@ window.Presence = {
   listeners.add(callback);
   return () => listeners.delete(callback);
  },
- // This page's own turns: tell the server so other devices see them too.
+ // This page's own turns: tell the server so other devices see them too. The origin tag
+ // lets the page tell its own runs from the ones happening elsewhere.
  publish(id, info) {
   if (!bridge || !id) return;
-  try { bridge.set(id, info ? { id, ...info } : null); } catch {}
+  try { bridge.set(id, info ? { id, origin: PAGE, ...info } : null); } catch {}
+  if (!info) setTimeout(() => own.delete(id), 3000);
  },
  // Conversations running on another page; the local ones are already known to Chat.
  isBusy(id) {
   return runs.has(id);
+ },
+ // Whether the run for this chat was started by this page rather than another device.
+ ours(id) {
+  return own.has(id) || runs.get(id)?.origin === PAGE;
  },
  get count() {
   let count = 0;

@@ -77,6 +77,9 @@ const SCHEMAS = [
   new_string: { type: 'string', description: 'The text to put instead' },
   replace_all: { type: 'boolean', description: 'Replace every occurrence instead of exactly one' },
  }, ['path', 'old_string', 'new_string']),
+ fn('attach_file', 'Attach a finished file to the chat so the user can download it: a build, an installer, an export, an archive — any file, text or binary. Call it whenever you produced something the user should keep (for example the new version of a program you just built), then mention the attachment in your reply.', {
+  path: { type: 'string', description: 'The file to attach' },
+ }, ['path']),
  fn('video_frames', 'Look inside a video: takes still frames from it and shows them to you as pictures, with the duration, the resolution and whether there is sound. Frames are spread evenly over the whole video or over start to end, or taken at exact times. The built-in decoder reads mp4, mov, webm and mkv with H.264, VP8, VP9 or AV1. Start with a few frames over the whole video, then look closer at the moments that matter. To split a video into image files, pass save_to.', {
   path: { type: 'string', description: 'Video file, relative to the project folder or absolute' },
   count: { type: 'integer', description: 'How many frames, 8 by default. You see at most 24; with save_to up to 600 are saved' },
@@ -293,7 +296,7 @@ function browserApproval(name, args, ask) {
 function needsApproval(name, args, { mode, cwd }) {
  if (mode === 'full') return false;
  if (mcpAuto.has(name)) return false;
- if (name === 'memory_save' || name === 'memory_forget' || name === 'ask_user' || name === 'subagent' || name === 'notify' || name === 'wait') return false;
+ if (name === 'memory_save' || name === 'memory_forget' || name === 'ask_user' || name === 'subagent' || name === 'notify' || name === 'wait' || name === 'attach_file') return false;
  const ask = mode !== 'auto';
  if (name.startsWith('browser_')) return browserApproval(name, args, ask);
  switch (name) {
@@ -327,6 +330,7 @@ function describe(name, args, cwd) {
   case 'git': return { kind: 'command', title: I18n.t('approve.git'), code: `git ${gitArgs(args.args).map(arg => /\s/.test(arg) ? `"${arg}"` : arg).join(' ')}` };
   case 'write_file': return { kind: 'file', title: I18n.t('approve.write'), path, added: String(args.content || '') };
   case 'edit_file': return { kind: 'file', title: I18n.t('approve.edit'), path, removed: String(args.old_string || ''), added: String(args.new_string || '') };
+  case 'attach_file': return { kind: 'file', title: I18n.t('approve.attach'), path };
   case 'read_file': return { kind: 'file', title: I18n.t('approve.read'), path };
   case 'list_files': return { kind: 'file', title: I18n.t('approve.list'), path };
   case 'video_frames': return args.save_to
@@ -493,6 +497,7 @@ function format(name, args, result) {
   case 'list_files': return `${result.path}\n${result.text || '(empty folder)'}${result.more ? '\n[More entries not shown. List a subfolder.]' : ''}`;
   case 'video_frames': return frames(result);
   case 'screenshot': return { text: `A picture of ${result.window ? `the window "${result.window}"` : 'the screen'} (${result.screen || 'captured'}), saved to ${result.path}. It follows as a picture.`, images: [{ label: result.window ? `Window · ${result.window}` : `Screen · ${result.screen || 'captured'}`, url: result.image }] };
+  case 'attach_file': return { text: `${result.name} (${result.size}) is attached below — the user can download it from there.`, files: [{ path: result.path, name: result.name, size: result.size }] };
   case 'clipboard': return result.text || '';
   case 'http_request': return `${result.status ?? '?'} ${result.type || ''} (${result.size || '?'})\n${result.headers ? `${result.headers}\n` : ''}${result.text ?? '(the body is not text)'}${result.cut ? '\n[Cut here.]' : ''}`;
   case 'open_path':

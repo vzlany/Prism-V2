@@ -11,37 +11,104 @@ non-commercial use, as long as the copyright notice stays in place and the copy 
 presented as the official OpenGhost. This fork is named Prism V2 and is not affiliated.
 For a public or commercial build, strip the ghost art and restyle first.
 
-What V2 adds on top of Prism:
+## What Prism V2 has that Prism does not
+
+A full comparison with the original [Prism](https://github.com/lithIV/prism) (1.5.0). Everything
+here is in this repository; nothing else was removed.
+
+### Running on the desktop app and on the phone
+
+- **The website runs its turns in the app.** When the desktop app is running, a message sent
+  from `prism web` (the phone) is handed to the app through a small file bridge: the app runs
+  the turn with its tools, browser, skills and keys, streams it in its own window, and the
+  phone follows the same run live. Without the app, the web falls back to running turns
+  itself, so a headless `prism web` still works.
+- **Live mirror of the running turn.** The phone sees the same thing the app does while it
+  works: the Thought box growing, the tool cards running (white snake included, same icon and
+  title), and the answer being written — as a live card at the end of the thread that is
+  replaced by the saved conversation when the turn ends.
+- **Instant sync both ways.** The shared store is watched on both sides (index and every
+  conversation file), so a project, a chat, a rename or a finished reply shows up in the other
+  place right away, and an open thread refreshes the moment the other process writes it.
+- **Windows tray icon** — open the app, open the web, quit; the tooltip says how many turns
+  are working.
+- **Settings → Auto** — start with Windows, start hidden (straight into the tray), and start
+  the web server with the app on the port you choose (default 8787, reachable from your
+  network).
+
+### Models, prices and effort
+
+- **OpenCode's own pricing** — the `~$` readout uses OpenCode's catalog
+  (models.opencode.ai) with cache reads/writes, reasoning tokens and context tiers, cached
+  locally with a fallback.
+- **The model list keeps itself current** — the Go catalog is re-read in the background
+  (6 h TTL, 30 min checks), so models OpenCode adds or retires appear and disappear on their
+  own; free models wear a **Free** chip.
+- **The same models everywhere** — the app shares its catalog through the store, so the phone
+  offers every model and every thinking effort the app has, even though it holds no keys.
+- **Run in parallel from the phone too** — the parallel button works on the web, hands each
+  run to the app, and the Runs tab marks them completed as they finish. The panel shows the
+  message about to be sent, and the button wears OpenCode's breathing-dots indicator.
+- **Parallel runs are children in the list** — every run (and subagent) started from a
+  conversation is drawn under it in the sidebar, indented, with its own busy ghost.
+
+### Chat and interface
 
 - **Sounds** — the chimes OpenCode ships (`alert-`, `bip-bop-`, `staplebops-`, `nope-`,
   `yup-`), chosen per event in Settings → Interface: task finished, question asked, errors.
-- **The conversation gauge** — a ring right of the composer shows how much of the model's
-  context this chat has used, with the price so far spelled under it; pressing it opens
-  tokens in/out, cache traffic, message count and the price. It replaces the thin status
-  line under the composer.
-- **Live runs everywhere** — `prism web` publishes which conversations are working, so a
-  phone shows the same busy ghost as the desktop, the reply appears when it lands, and a
-  small meter left of the composer counts the parallel runs that are alive. The store is
-  watched on both sides: a project or chat made in the app appears in `prism web` right
-  away (and the other way round), and the app mirrors its own running turns into the same
-  busy picture the phone sees.
-- **OpenCode prices and models** — the `~$` readout is priced from OpenCode's catalog
-  (models.opencode.ai), with cache reads/writes and context tiers, cached locally. The
-  model list re-reads the Go catalog in the background, so models OpenCode adds or retires
-  appear and disappear on their own, and free ones wear a **Free** chip.
-- **Auto reconnect** — a dropped connection is retried a few times before the error and its
-  Retry button appear.
+- **The conversation gauge** — a ring right of the composer with the price so far spelled
+  under it; pressing it opens tokens in/out, cache traffic, message count and the price. Once
+  a chat has filled the window, the ring keeps its fill and gets deeper with every further
+  window (spinning dashes) instead of resetting when the chat compacts; the panel shows the
+  live size and the peak. It replaces Prism's thin status line.
 - **Thinking that stays readable** — earlier Thought boxes from a multi-step turn stay on
-  screen (with a small 🧠), their clocks stop with the turn, and the box no longer
-  scroll-jumps while the model is still writing. Steps of one turn sit close together
-  instead of leaving blank bands between them.
+  screen (with a gray 🧠), their clocks stop with the turn and survive a reload, and the box
+  no longer scroll-jumps while the model writes. A Thought row folds away the moment a tool
+  starts. Steps of one turn sit close together instead of leaving blank bands.
+- **Tables fit** — long tables wrap inside the reply column instead of running off the edge.
+- **File cards** — writes and edits show green `+N` / red `−M` line counts, carry Preview and
+  Download on the card itself (one box per file), and **`attach_file`** lets the agent hand
+  over any finished file — a build, an installer, an archive — as a chip with a real binary
+  download (the desktop asks where to save; the web streams it).
 - **Screen pictures** — two white snakes glide around a running tool card's frame at one
-  constant speed, half a loop apart; file writes and edits show green `+N` / red `−M` line
-  counts and carry Preview and Download on the card itself (one box per file, no second
-  chip), and the `screenshot` tool captures the whole screen or one window through
-  Electron itself, so it works without ffmpeg and antivirus has no script to flag.
+  constant speed, half a loop apart; the `screenshot` tool captures the whole screen or one
+  window through Electron itself, so it works without ffmpeg and antivirus has no script to
+  flag.
 - **Copy that works everywhere** — including a phone on plain http, where the browser
   clipboard is unavailable; the fallback still copies and the buttons answer.
+- **New Folder menu** — the last five workspaces, each forgettable with an ×, and a last entry
+  that opens the folder picker.
+- **Phone comfort** — older messages are prerendered in the background so scrolling up finds
+  whole messages ready; model names wrap and shrink instead of being cut off; drafts autosave
+  per chat and are restored after a reload; the web defaults to Full access.
+- **Auto reconnect** — a dropped connection is retried a few times before the error and its
+  Retry button appear.
+
+### Under the hood
+
+- **Prism V2 naming and data** — the product, installer, About page and prompts say Prism V2;
+  data lives in `%APPDATA%\Prism V2` with a one-time copy of an existing Prism folder; the
+  updater points at this repository; the old `prism` command may still point at an older
+  install (run `node tools/prism-cli.mjs web …` from this folder, or fix that shim).
+
+## What Prism already had
+
+- **Memory** — the agent saves durable facts with its `memory_save` tool; Settings → Memory
+  lists them and lets you add or forget.
+- **Profiles** — separate workspaces (chats, memory, keys, MCP config); `prism --profile work`.
+- **Subagents** — the agent hands a self-contained job to a background copy of itself.
+- **Plan & Build** — a composer switch that keeps the agent reading and proposing until you
+  approve; the `ask_user` tool asks with lettered options.
+- **Instruction files** — one instruction file per folder (AGENTS.md, CLAUDE.md, any `.md`),
+  plus the workspace's `.prism` folder for instructions, skills and MCP notes.
+- **Claude skills** — `SKILL.md` folders are listed to the agent and followed when a task
+  matches.
+- **Attachments, files and the built-in browser** — drag files in, preview and download what
+  the agent writes, and let it drive Chromium inside the app.
+- **MCP servers, Discord notifications, drag-to-sort, thinking effort, stop & steer, long
+  chats that stay light, window that fits your screen, updates.**
+- **`prism web`, `prism discord`, `prism import`** — the phone-facing web mode, the Discord
+  bridge and the OpenCode chat importer.
 
 ## MCP servers
 

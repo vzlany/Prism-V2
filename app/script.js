@@ -58,6 +58,8 @@ const threadBottom = document.querySelector('.thread-bottom');
 new LiquidGlass(threadBottom, { width: 36, height: 36 });
 const library = new Library(ChatStore, syncAll);
 window.addEventListener('pagehide', () => library.flush());
+// The app's model catalog arrives (or leaves) with its heartbeat: the picker follows.
+window.openghost?.app?.onStatus?.(() => { settings.loadShared?.().catch(() => {}); });
 const chat = new Chat({ main, thread, bottom: threadBottom, settings, library, onChange: syncAll, onList: list => threadScrollbar.observe(list) });
 const lockScreen = new LockScreen({ main, chat, composer, onOpen: () => composerInput.focus({ preventScroll: true }) });
 // The store folder is shared with the desktop app and any other `prism web` window: when
@@ -67,7 +69,7 @@ window.openghost?.store?.onChange?.(() => {
 });
 const lockCard = new LockCard({ chat, library, scroller: document.querySelector('.chats-scroll') });
 new WelcomeGhost({ main, root: document.querySelector('.welcome'), input: composerInput });
-folderPill = new FolderPill({ button: document.querySelector('.composer-folder'), library, chat });
+folderPill = new FolderPill({ button: document.querySelector('.composer-folder'), library, chat, menu: document.querySelector('.folder-menu') });
 instructionsPill = new InstructionsPill({ button: document.querySelector('.composer-instructions'), menu: document.querySelector('.instructions-menu'), chat });
 planButton.addEventListener('click', () => chat.setAgentMode(chat.agentMode === 'plan' ? 'build' : 'plan'));
 window.PrismPlan = { approve: () => chat.setAgentMode('build') };
@@ -109,11 +111,70 @@ function syncLive() {
 }
 window.Presence?.on?.(() => {
  const now = new Set(window.Presence.list().map(entry => entry.id));
- for (const id of presenceBusy) if (!now.has(id)) chat.refresh(id).catch(() => {});
+ // A run this page started is not "elsewhere": its conversation is already live on screen,
+ // and re-reading it from disk would rebuild the whole thread for nothing.
+ for (const id of presenceBusy) {
+  if (now.has(id)) continue;
+  // A parallel run that was busy and now is not has finished in the app: mark it so.
+  const run = (window.ParallelRuns?.runs || []).find(item => item.id === id);
+  if (run && run.status === 'running') window.ParallelRuns.update(id, { status: 'completed' });
+  if (window.Presence.ours(id)) continue;
+  // A short beat: the app tells "over" the moment the chat is written, and the file is read
+  // here through the server — this covers the tail of that write.
+  setTimeout(() => chat.refresh(id).catch(() => {}), 350);
+ }
  presenceBusy = now;
+ // The app picked up a delegated turn: the wait is over and its run is being mirrored.
+ for (const [id, conv] of chat.conversations) {
+  if (!conv.waiting || !window.Presence.isBusy(id)) continue;
+  clearTimeout(conv.waitingTimer);
+  conv.waiting = 0;
+ }
  if (chatList) chatList.render();
  syncLive();
 });
+
+// The shared store changed on its own (the app, or another window, saved a conversation):
+// the open chat is read again at once, unless this page wrote it itself a moment ago.
+const chatSync = new Map();
+window.openghost?.store?.onChatChange?.(id => {
+ const conv = chat.conversations.get(id);
+ if (!conv || conv.turn || conv.waiting) return;
+ clearTimeout(chatSync.get(id));
+ chatSync.set(id, setTimeout(() => {
+  chatSync.delete(id);
+  const current = chat.conversations.get(id);
+  if (!current || current.turn || current.waiting || window.Presence?.isBusy?.(id)) return;
+  if (Date.now() - (current.savedAt || 0) < 1500) return;
+  chat.refresh(id).catch(() => {});
+ }, 200));
+});
+
+// A turn started on the website, handed to this app: the page wrote the user's message into
+// the shared store first, so the chat is read again and then run here — it streams in this
+// window and back to the phone like any other run of the app.
+async function runDelegated(request) {
+ const id = String(request?.chatId || '');
+ if (!id) return;
+ await library.reload();
+ if (!library.chat(id)) return;
+ await chat.open(id);
+ const conv = chat.conversations.get(id);
+ if (!conv || conv.turn || conv.waiting) return;
+ for (let i = 0; i < 15; i++) {
+  await chat.refresh(id);
+  const last = conv.messages[conv.messages.length - 1];
+  if (last?.role === 'user') break;
+  await new Promise(resolve => setTimeout(resolve, 200));
+ }
+ if (conv.turn) return;
+ const record = library.chat(id);
+ const config = settings.configFor(settings.resolve(request.model || record?.model || settings.model));
+ if (!config.ready) return;
+ chat.resume(conv, config);
+ if (conv === chat.active) chat.followBottom();
+}
+window.openghost?.delegate?.onRequest?.(request => { runDelegated(request).catch(() => {}); });
 chatList = new ChatList({
   root: document.querySelector('.chats'),
   library,

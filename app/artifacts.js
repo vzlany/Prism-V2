@@ -5,10 +5,14 @@
 
 const escapeHtml = text => String(text ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
 const nameOf = path => String(path || '').split(/[\\/]/).pop() || 'file';
+// A tool call may name the file relative to the project folder; previews and downloads need
+// the real path, whatever the current working directory of the app happens to be.
+const isAbsolute = path => /^([a-zA-Z]:[\\/]|\\\\|\/)/.test(String(path || ''));
+const full = (path, cwd) => (path && cwd && !isAbsolute(path) ? `${String(cwd).replace(/[\\/]+$/, '')}\\${String(path).replace(/^[\\/]+/, '')}` : path);
 
 async function read(path, cwd) {
  try {
-  const out = await window.openghost?.tools?.run?.(`art-${Date.now().toString(36)}`, 'read_file', { path }, cwd);
+  const out = await window.openghost?.tools?.run?.(`art-${Date.now().toString(36)}`, 'read_file', { path: full(path, cwd) }, cwd);
   if (typeof out === 'string') return out;
   if (out && typeof out.text === 'string') return out.text;
   return null;
@@ -53,22 +57,40 @@ window.Artifacts = {
  // is one box, not a card plus a second file chip saying the same name.
  actions(card, { path, cwd }) {
   if (!card?.addAction || !path || !window.openghost?.tools) return;
-  const name = nameOf(path);
+  const name = nameOf(path), real = full(path, cwd);
   card.addAction(I18n.t('artifact.preview'), async () => {
-   const text = await read(path, cwd);
-   previewModal(name, text == null ? '(could not read the file)' : text);
+   const text = await read(real, cwd);
+   previewModal(name, text == null ? I18n.t('artifact.binary') : text);
   });
-  card.addAction(I18n.t('artifact.download'), async () => {
-   const text = await read(path, cwd);
-   if (text == null) return;
-   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-   const url = URL.createObjectURL(blob);
-   const link = document.createElement('a');
-   link.href = url;
-   link.download = name;
-   link.click();
-   setTimeout(() => URL.revokeObjectURL(url), 4000);
+  card.addAction(I18n.t('artifact.download'), () => download(real, name));
+ },
+
+ // A finished file the agent attached with attach_file: a small chip under the card with the
+ // name, its size, a Preview when it is text, and a Download that copies the real bytes.
+ attach(container, { path, name, size, cwd }) {
+  if (!container || !path) return;
+  const label = name || nameOf(path), real = full(path, cwd);
+  const chip = document.createElement('div');
+  chip.className = 'artifact';
+  chip.innerHTML = `<span class="artifact-icon">${Glyphs.file}</span><span class="artifact-name" title="${escapeHtml(real)}">${escapeHtml(label)}</span>${size ? `<span class="artifact-size">${escapeHtml(size)}</span>` : ''}<button type="button" class="artifact-btn" data-act="preview">${escapeHtml(I18n.t('artifact.preview'))}</button><button type="button" class="artifact-btn" data-act="download">${escapeHtml(I18n.t('artifact.download'))}</button>`;
+  chip.querySelector('[data-act="preview"]').addEventListener('click', async () => {
+   const text = await read(real, cwd);
+   previewModal(label, text == null ? I18n.t('artifact.binary') : text);
   });
+  chip.querySelector('[data-act="download"]').addEventListener('click', async () => {
+   const button = chip.querySelector('[data-act="download"]');
+   const saved = await download(real, label);
+   if (!saved) return;
+   button.classList.add('is-copied');
+   setTimeout(() => button.classList.remove('is-copied'), 1600);
+  });
+  container.append(chip);
  },
 };
+
+// A download that keeps the file's bytes: the desktop asks where to save it, the web streams
+// it from the server with its own name.
+function download(path, name) {
+ return Promise.resolve(window.openghost?.saveFile?.(path, name)).then(saved => saved || null);
+}
 })();

@@ -5,10 +5,10 @@
 // all keep working. Close the terminal to stop the server.
 //
 //   node tools/web-server.mjs [--port 8787] [--host 127.0.0.1] [--profile work] [--no-open]
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { existsSync, createReadStream, mkdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
-import { dirname, extname, join, normalize, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { WebSocketServer } from "ws";
@@ -76,6 +76,20 @@ const server = createServer((req, res) => {
   res.end(body);
  };
  if (url.pathname === "/ws") { res.writeHead(426); res.end("websocket only"); return; }
+ if (url.pathname === "/file") {
+  // A file the agent attached, streamed as it is (any type) with its own name.
+  const file = url.searchParams.get("path") || "";
+  const name = String(url.searchParams.get("name") || basename(file)).replace(/[\r\n"]/g, "");
+  if (!isAbsolute(file) || !existsSync(file) || !statSync(file).isFile()) return send(404, "no such file", "text/plain");
+  res.writeHead(200, {
+   "content-type": "application/octet-stream",
+   "content-disposition": `attachment; filename="${name}"`,
+   "content-length": statSync(file).size,
+   "cache-control": "no-store",
+  });
+  createReadStream(file).on("error", () => res.destroy()).pipe(res);
+  return;
+ }
  if (url.pathname === "/web-bridge.js") return send(200, readFileSync(join(ROOT, "tools", "web-bridge.js")), "text/javascript; charset=utf-8");
  if (url.pathname === "/" || url.pathname === "/index.html") return send(200, page(), "text/html; charset=utf-8");
  const safe = normalize(url.pathname).replace(/^(\.\.[/\\])+/, "");
@@ -127,6 +141,45 @@ function broadcastPresence() {
   try { client.send(JSON.stringify({ t: "event", channel: "presence:event", args: [list] })); } catch {}
  }
 }
+// The desktop app cannot talk to this server directly, so it drops a heartbeat into
+// userData/app.json. While that is fresh, pages may hand their turns to the app instead of
+// running them in the browser, and the app streams them like any other turn.
+const APP_STALE = 25000;
+const appFile = () => join(USER_DATA, "app.json");
+function appStatus() {
+ try {
+  const data = JSON.parse(readFileSync(appFile(), "utf8").replace(/^\uFEFF/, ""));
+  return { connected: Date.now() - (Number(data?.at) || 0) < APP_STALE, at: Number(data?.at) || 0, version: data?.version || "" };
+ } catch {
+  return { connected: false, at: 0, version: "" };
+ }
+}
+function broadcastApp() {
+ const status = appStatus();
+ for (const client of wss.clients) {
+  if (client.readyState !== 1) continue;
+  try { client.send(JSON.stringify({ t: "event", channel: "app:status", args: [status] })); } catch {}
+ }
+}
+// A turn started on the website: a small request per chat, picked up and deleted by the app.
+function delegate(request) {
+ if (!request?.chatId) return false;
+ try {
+  mkdirSync(join(USER_DATA, "delegate"), { recursive: true });
+  const id = `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  writeFileSync(join(USER_DATA, "delegate", `${id}.json`), JSON.stringify({ id, at: Date.now(), ...request }));
+  return true;
+ } catch {
+  return false;
+ }
+}
+try {
+ const file = appFile();
+ if (!existsSync(file)) writeFileSync(file, JSON.stringify({ at: 0, version: "" }));
+ watch(file, () => broadcastApp());
+ setInterval(() => broadcastApp(), 10000);
+} catch {}
+
 // The store folder is shared with the desktop app (and a second browser): when the index
 // changes somewhere else, every page is told so its project and chat lists stay live.
 let indexStamp = "";
@@ -148,14 +201,31 @@ try {
  mkdirSync(join(USER_DATA, "store"), { recursive: true });
  indexStamp = indexSignature();
  let watchTimer = 0;
- watch(join(USER_DATA, "store"), { recursive: true }, () => {
+ const chatTimers = new Map();
+ watch(join(USER_DATA, "store"), { recursive: true }, (event, name) => {
+  const file = String(name || "").replace(/\\/g, "/");
+  // A single conversation was saved: tell the pages about that chat at once, so an open
+  // thread updates the moment the other process writes it.
+  const chat = /(?:^|\/)chats\/([a-z0-9_-]+)\.json$/i.exec(file);
+  if (chat) {
+   const id = chat[1];
+   clearTimeout(chatTimers.get(id));
+   chatTimers.set(id, setTimeout(() => {
+    chatTimers.delete(id);
+    for (const client of wss.clients) {
+     if (client.readyState !== 1) continue;
+     try { client.send(JSON.stringify({ t: "event", channel: "chat:changed", args: [id] })); } catch {}
+    }
+   }, 150));
+   return;
+  }
   clearTimeout(watchTimer);
   watchTimer = setTimeout(() => {
    const next = indexSignature();
    if (!next || next === indexStamp) return;
    indexStamp = next;
    broadcastStore();
-  }, 350);
+  }, 120);
  });
  let presenceTimer = 0;
  // The desktop app writes this file; it may not exist before its first turn, so a stub is
@@ -179,6 +249,7 @@ wss.on("connection", ws => {
  // A page that just opened asks for a snapshot right away.
  const mine = new Set();
  data.send("presence:event", presenceList());
+ data.send("app:status", [appStatus()]);
  ws.on("close", () => {
   for (const id of mine) presence.delete(id);
   if (mine.size) broadcastPresence();
@@ -200,6 +271,14 @@ wss.on("connection", ws => {
      if (info && id) { mine.add(id); presence.set(id, { id, ...info }); }
      else if (id) { mine.delete(id); presence.delete(id); }
      broadcastPresence();
+     return;
+    }
+    if (msg.channel === "delegate:add") {
+     const [request] = msg.args || [];
+     const ok = Boolean(appStatus().connected) && delegate(request);
+     if (ok) console.log(`[${stamp()}] turn delegated to the app: ${request?.chatId}`);
+     else console.log(`[${stamp()}] delegate refused (app ${appStatus().connected ? "busy" : "not running"})`);
+     data.send("delegate:status", [String(request?.id || ""), ok]);
      return;
     }
     host.emit(msg.channel, ...(msg.args || []));

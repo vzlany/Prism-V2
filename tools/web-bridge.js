@@ -4,7 +4,7 @@
 'use strict';
 if (window.openghost) return;
 
-const state = { ws: null, pending: new Map(), listeners: new Map(), seq: 0 };
+const state = { ws: null, pending: new Map(), listeners: new Map(), seq: 0, appConnected: false };
 let ready = null;
 
 // A quiet socket gets dropped by the browser or the network after a while, and the server
@@ -79,6 +79,9 @@ const on = (channel, callback) => {
  list.push(callback);
  state.listeners.set(channel, list);
 };
+// The server tells every page whether the desktop app is running; turns started here are
+// handed to it while it is.
+on('app:status', status => { state.appConnected = Boolean(status?.connected); });
 
 connect();
 
@@ -86,6 +89,22 @@ window.openghost = {
  web: true,
  desktop: false,
  platform: 'web',
+ // Downloads an attached file from the server, bytes intact whatever its type.
+ saveFile: (path, name) => {
+  return new Promise(resolve => {
+   try {
+    const link = document.createElement('a');
+    link.href = `/file?path=${encodeURIComponent(path)}${name ? `&name=${encodeURIComponent(name)}` : ''}`;
+    link.download = name || '';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    resolve(name || path);
+   } catch {
+    resolve(null);
+   }
+  });
+ },
  pickFolder: () => {
   const path = window.prompt('Folder path for this chat:');
   if (!path) return null;
@@ -102,6 +121,7 @@ window.openghost = {
   write: (key, value) => invoke('store:write', key, value),
   remove: key => invoke('store:remove', key),
   onChange: callback => on('store:changed', callback),
+  onChatChange: callback => on('chat:changed', callback),
  },
  tools: {
   run: (id, name, args, cwd) => invoke('tool:run', id, name, args, cwd),
@@ -146,6 +166,20 @@ window.openghost = {
  },
  app: {
   version: () => invoke('app:version'),
+  // Whether the desktop app is running (its heartbeat is fresh): when it is, the website
+  // hands it the turns so they run there, with its tools, and stream back here.
+  connected: () => state.appConnected,
+  onStatus: callback => on('app:status', callback),
+ },
+ auto: {
+  // The Auto page is desktop-only; a browser has nothing to set.
+  get: async () => null,
+  set: async () => null,
+ },
+ // A turn started on this page, for the app to run.
+ delegate: {
+  send: request => send('delegate:add', request),
+  onStatus: callback => on('delegate:status', callback),
  },
  presence: {
   set: (id, info) => send('presence:set', id, info),

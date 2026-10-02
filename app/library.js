@@ -73,6 +73,7 @@ class Library {
   if (!folder) {
    folder = { path, name: name || baseName(path), collapsed: false, added: Date.now() };
    this.folders.push(folder);
+   window.RecentFolders?.remember?.({ path: folder.path, name: folder.name });
    this.save();
   }
   return folder;

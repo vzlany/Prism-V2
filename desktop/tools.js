@@ -196,6 +196,16 @@ async function readFile(id, { path: file, offset, limit }, cwd) {
  return { path: full, text, start, end: start - 1 + slice.length, total: lines.length, cut };
 }
 
+// A finished file the user should keep (a build, an installer, an export): it is attached to
+// the chat with a name, size and a Download that copies the real bytes, text or binary.
+async function attachFile(id, { path: file }, cwd) {
+ const full = resolvePath(cwd, file);
+ let stat;
+ try { stat = await fs.promises.stat(full); } catch { return { error: `No file at ${file}` }; }
+ if (!stat.isFile()) return { error: `${file} is not a file` };
+ return { path: full, name: path.basename(full), size: formatSize(stat.size), bytes: stat.size };
+}
+
 async function writeFile(id, { path: file, content }, cwd) {
  if (typeof content !== 'string') return { error: 'content must be a string' };
  const full = resolvePath(cwd, file);
@@ -487,6 +497,7 @@ const TOOLS = {
  video_frames: videoFrames,
  write_file: writeFile,
  edit_file: editFile,
+ attach_file: attachFile,
  list_files: listFiles,
  git: runGit,
  fetch_url: fetchUrl,

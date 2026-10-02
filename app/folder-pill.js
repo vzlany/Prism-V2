@@ -31,18 +31,60 @@ function edit(oldText, next) {
 }
 
 class FolderPill {
- constructor({ button, library, chat }) {
+ constructor({ button, library, chat, menu }) {
   this.button = button;
   this.library = library;
   this.chat = chat;
+  this.menu = menu || null;
   this.shown = null;
   this.picking = null;
   this.token = 0;
   button.innerHTML = `<span class="composer-folder-icons">${Glyphs.folderAdd}${Glyphs.folder}</span><span class="composer-folder-label"><span class="composer-folder-text"></span><span class="composer-folder-ghosts"></span></span>`;
   this.label = button.querySelector('.composer-folder-text');
   this.ghosts = button.querySelector('.composer-folder-ghosts');
-  button.addEventListener('click', () => this.pick());
+  button.addEventListener('click', () => this.openMenu());
   this.sync();
+ }
+
+ // The New Folder menu: the last workspaces used, each with an X to forget it, and a last
+ // entry that opens the folder picker for a new one.
+ openMenu() {
+  if (!this.menu) { this.pick(); return; }
+  if (this.menu.matches(':popover-open')) { this.menu.hidePopover?.(); return; }
+  const recents = window.RecentFolders?.list?.(5) || [];
+  const row = folder => `
+   <div class="folder-item" data-path="${escapeHtml(folder.path)}">
+    <button type="button" class="folder-item-pick" title="${escapeHtml(folder.path)}">
+     <span class="folder-item-name">${escapeHtml(folder.name || folder.path)}</span>
+     <span class="folder-item-path">${escapeHtml(folder.path)}</span>
+    </button>
+    <span class="folder-item-x" role="button" tabindex="0" title="${escapeHtml(I18n.t('folder.forget'))}" aria-label="${escapeHtml(I18n.t('folder.forget'))}">×</span>
+   </div>`;
+  this.menu.innerHTML = [
+   `<div class="folder-head">${escapeHtml(I18n.t('folder.recent'))}</div>`,
+   ...recents.map(row),
+   recents.length ? '' : `<div class="folder-empty">${escapeHtml(I18n.t('folder.noRecent'))}</div>`,
+   `<div class="folder-sep" aria-hidden="true"></div>`,
+   `<button type="button" class="folder-item-new" data-pick-new>${Glyphs.folderAdd}<span>${escapeHtml(I18n.t('folder.choose'))}</span></button>`,
+  ].join('');
+  this.menu.showPopover?.();
+  this.menu.querySelectorAll('.folder-item').forEach(item => {
+   const path = item.dataset.path;
+   const folder = { path, name: (window.RecentFolders?.list?.(5) || []).find(entry => entry.path === path)?.name || path.split(/[\\/]/).pop() || path };
+   item.querySelector('.folder-item-pick').addEventListener('click', () => this.choose(folder));
+   const x = item.querySelector('.folder-item-x');
+   const forget = event => { event.stopPropagation(); window.RecentFolders?.forget?.(path); this.openMenu(); };
+   x.addEventListener('click', forget);
+   x.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') forget(event); });
+  });
+  this.menu.querySelector('[data-pick-new]')?.addEventListener('click', () => { this.menu.hidePopover?.(); this.pick(true); });
+ }
+
+ choose(folder) {
+  this.menu?.hidePopover?.();
+  window.RecentFolders?.remember?.(folder);
+  this.library.folder(folder);
+  this.chat.setFolder({ path: folder.path, name: folder.name });
  }
 
  sync() {
@@ -118,7 +160,10 @@ class FolderPill {
 
  pick(quick = false) {
   this.picking ||= this.library.pick(quick).then(folder => {
-   if (folder) this.chat.setFolder(folder);
+   if (folder) {
+    window.RecentFolders?.remember?.(folder);
+    this.chat.setFolder(folder);
+   }
    return folder;
   }).finally(() => { this.picking = null; });
   return this.picking;
