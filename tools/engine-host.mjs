@@ -3,7 +3,7 @@
 // (app paths, ipcMain, shell, notifications), so tools, models, MCP servers and memory
 // behave exactly like they do in the app.
 import { Module, createRequire } from "node:module";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, cpSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, cpSync } from "node:fs";
 import { dirname, isAbsolute as isAbsolutePath, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";

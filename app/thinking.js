@@ -133,29 +133,11 @@ class ThinkingView {
   const was = this.live;
   this.live = Boolean(live);
   this.el.hidden = !text;
-  this.text = text || '';
+  this.inner.textContent = text || '';
   if (live && !was) this.start();
   else if (!live && was) this.stop();
   if (live && !this.touched) this.open = this.extended || window.Effects?.thinkingMode !== 'closed';
   this.sync();
-  this.paint();
- }
-
- // Reasoning is markdown too (OpenCode shows it that way): **bold**, `code`, * lists and
- // fenced blocks read as written. At most one render per ~60ms, then one when it ends; a
- // timer rather than a frame, so a hidden or throttled tab still draws it.
- paint() {
-  if (this.painted === this.text || this.frame) return;
-  this.frame = setTimeout(() => { this.frame = 0; this.flush(); }, 60);
- }
-
- flush() {
-  clearTimeout(this.frame);
-  this.frame = 0;
-  if (this.painted === this.text) return;
-  this.painted = this.text;
-  if (window.StreamView?.render) StreamView.render(this.inner, this.text);
-  else this.inner.textContent = this.text;
   this.scroll();
  }
 
@@ -179,7 +161,6 @@ class ThinkingView {
   // The clock stops even if the box never showed a word: a hidden box with a live timer was
   // how a Thought row could keep counting after the answer had already arrived.
   this.stop();
-  this.flush();
   if (this.el.hidden) { this.sync(); return; }
   if (!this.touched) this.open = this.extended || window.Effects?.thinkingMode === 'open';
   this.sync();

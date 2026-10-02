@@ -6,7 +6,8 @@
 
 // Local Windows paths: a drive or a relative run of names, with backslashes. Forward-slash
 // text (URLs, prose) is left alone, so nothing that is not a path is turned into one.
-const CANDIDATE = /(?:[A-Za-z]:[\\/]|\.{1,2}[\\/])?[\w.\-]+(?:[\\/][\w.\-]+)+[\\/]?/g;
+const CANDIDATE = /(?:[A-Za-z]:[\\/]|\.{1,2}[\\/])?[\w.\-]+(?:[\\/][\w.\-]+)+[\\/]?/;
+const CANDIDATE_ALL = new RegExp(CANDIDATE.source, 'g');
 const MIN = 5;
 const MAX = 240;
 const cache = new Map();
@@ -16,8 +17,8 @@ const key = (cwd, path) => `${cwd || ''}|${path}`;
 function candidates(text) {
  const out = [];
  let match;
- CANDIDATE.lastIndex = 0;
- while ((match = CANDIDATE.exec(text))) {
+ CANDIDATE_ALL.lastIndex = 0;
+ while ((match = CANDIDATE_ALL.exec(text))) {
   let raw = match[0], lead = 0;
   while (raw && /[\s.,;:!?)\]}>"'`]/.test(raw[0])) { raw = raw.slice(1); lead++; }
   raw = raw.replace(/[\s.,;:!?)\]}>"'`]+$/, '');
