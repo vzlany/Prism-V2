@@ -20,6 +20,9 @@ const FAMILIES = [
 ];
 
 const cache = new Map();
+// A family that could not be fetched is remembered only for a while: the network may come
+// back, and a menu opened offline should still get its logos later.
+const FAIL_TTL = 10 * 60 * 1000;
 const fallback = model => {
  const id = String(model?.api || model?.id || ''), name = String(model?.name || '');
  for (const [rule, text, color, domain] of FAMILIES) if (rule.test(id) || rule.test(name)) return { text, color, domain };
@@ -30,6 +33,7 @@ const fallback = model => {
 const sources = domain => [
  `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`,
  `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico`,
+ `https://${domain}/favicon.ico`,
 ];
 
 function probe(src) {
@@ -43,21 +47,24 @@ function probe(src) {
 }
 
 function load(domain) {
- if (cache.has(domain)) return cache.get(domain);
- const entry = { src: '', waiters: [] };
- cache.set(domain, entry);
- (async () => {
-  for (const candidate of sources(domain)) {
-   if (await probe(candidate)) { entry.src = candidate; break; }
-  }
-  for (const waiter of entry.waiters) waiter(entry.src);
-  entry.waiters.length = 0;
- })();
- return entry;
+ const entry = cache.get(domain);
+ if (entry && (entry.src || Date.now() - entry.at < FAIL_TTL)) return entry;
+ const next = { src: '', at: Date.now(), waiters: [] };
+ cache.set(domain, next);
+ // All sources are tried at once: the first mark that loads wins, so a slow service never
+ // holds the others back.
+ Promise.all(sources(domain).map(src => probe(src).then(ok => (ok ? src : ''), () => '')))
+  .then(results => {
+   next.src = results.find(Boolean) || '';
+   for (const waiter of next.waiters) waiter(next.src);
+   next.waiters.length = 0;
+  });
+ return next;
 }
 
-// The badge element a menu row shows: a coloured monogram, replaced by the real logo as soon
-// as it loads (once per family, then instant everywhere).
+// The badge element a menu row shows: the family's own mark, or its initials in the family's
+// colour while the mark is on its way (and for families with no mark at all). No plate
+// behind it, so the logo sits on the menu itself.
 function icon(model) {
  const info = fallback(model);
  const wrap = document.createElement('span');
@@ -69,7 +76,7 @@ function icon(model) {
  wrap.append(letter);
  if (info.domain) {
   const show = src => {
-   if (!src || !wrap.isConnected) return;
+   if (!src) return;
    const img = document.createElement('img');
    img.className = 'model-icon-img';
    img.alt = '';
@@ -78,6 +85,8 @@ function icon(model) {
    wrap.classList.add('has-image');
   };
   const entry = load(info.domain);
+  // The element is inserted into the menu a moment after it is built, so a cached logo is
+  // attached right away rather than waiting for a connection that will never be checked.
   if (entry.src) show(entry.src);
   else entry.waiters.push(show);
  }
