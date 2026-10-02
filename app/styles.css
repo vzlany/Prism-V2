@@ -8979,9 +8979,13 @@ body.has-lightbox{overflow:hidden}
 .parallel-hint{font-size:11px;line-height:1.4}
 
 /* Prism V2: real model logos � the coloured monogram shows until the mark loads */
-.model-icon{position:relative;flex:none;display:grid;place-items:center;width:22px;height:22px;background:none}
+.model-icon{position:relative;flex:none;display:grid;place-items:center;width:22px;height:22px;background:none;overflow:hidden;border-radius:5px}
 .model-icon-letter{grid-area:1/1;color:var(--badge, #94a3b8);font-size:10px;font-weight:750;letter-spacing:-.02em;line-height:1}
 .model-icon-img{grid-area:1/1;width:18px;height:18px;object-fit:contain;background:none;border-radius:0;box-shadow:none}
+/* A favicon carries its own square background: it is clipped like a small app icon. */
+.model-icon-img.is-app{width:100%;height:100%;object-fit:cover;transform:scale(1.16);border-radius:5px}
+/* A logo drawn as `currentColor` comes out black in an <img>: flipped to white on the menu. */
+.model-icon-img.is-dark{filter:brightness(0) invert(1)}
 .model-icon.has-image{background:none}
 
 /* Prism V2: the model menu's search field */

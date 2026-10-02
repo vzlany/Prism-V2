@@ -8,6 +8,7 @@ const TITLE_MAX = 60;
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const baseName = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
 const samePath = (a, b) => a.toLowerCase() === b.toLowerCase();
+const key = path => String(path || '').toLowerCase();
 
 function titleFrom(text, attachments) {
  const lines = text.split('\n').map(part => part.trim()).filter(Boolean);
@@ -72,13 +73,14 @@ class Library {
   this.onChange();
  }
 
- folder({ path, name }) {
+ folder({ path, name, temp }) {
   let folder = this.folders.find(item => samePath(item.path, path));
   if (!folder) {
    folder = { path, name: name || baseName(path), collapsed: false, added: Date.now() };
    this.folders.push(folder);
    this.folderTouched.set(key(path), Date.now());
-   window.RecentFolders?.remember?.({ path: folder.path, name: folder.name });
+   // A per-chat workspace (temp) is not remembered as a recent workspace.
+   if (!temp) window.RecentFolders?.remember?.({ path: folder.path, name: folder.name });
    this.save();
   }
   return folder;

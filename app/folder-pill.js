@@ -86,17 +86,19 @@ class FolderPill {
     button.disabled = true;
     const folder = await window.openghost?.workspace?.(kind).catch(() => null);
     button.disabled = false;
-    if (folder) this.choose(folder);
+    if (folder) this.choose(folder, { remember: kind === 'public' });
    });
   }
   this.menu.querySelector('[data-pick-new]')?.addEventListener('click', () => { this.menu.hidePopover?.(); this.pick(true); });
  }
 
- choose(folder) {
+ choose(folder, { remember = true } = {}) {
   this.menu?.hidePopover?.();
-  window.RecentFolders?.remember?.(folder);
-  this.library.folder(folder);
-  this.chat.setFolder({ path: folder.path, name: folder.name });
+  // A per-chat workspace is thrown away after that chat: it is not a place to come back to,
+  // so it never lands in the recent workspaces. Public and picked folders do.
+  if (remember) window.RecentFolders?.remember?.(folder);
+  this.library.folder({ path: folder.path, name: folder.name, temp: !remember });
+  this.chat.setFolder({ path: folder.path, name: folder.name, temp: !remember });
  }
 
  sync() {
