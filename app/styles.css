@@ -8999,3 +8999,28 @@ body.has-lightbox{overflow:hidden}
 /* Prism V2: parallel rows with a logo, dressed like the model menu */
 .parallel-model{gap:9px;padding:6px 7px}
 .parallel-model input[type=checkbox]{width:14px;height:14px;accent-color:#7a8bff}
+
+/* Prism V2: reasoning is markdown, so its blocks read like small documents */
+.message-thinking-inner{white-space:normal;font-style:normal;color:rgba(var(--fg-rgb),.56)}
+.message-thinking-inner p{margin:0 0 6px}
+.message-thinking-inner p:last-child{margin-bottom:0}
+.message-thinking-inner strong{color:rgba(var(--fg-rgb),.8);font-weight:650}
+.message-thinking-inner em{color:rgba(var(--fg-rgb),.68)}
+.message-thinking-inner ul,.message-thinking-inner ol{margin:0 0 6px;padding-left:20px}
+.message-thinking-inner li{margin:2px 0}
+.message-thinking-inner li::marker{color:rgba(var(--fg-rgb),.42)}
+.message-thinking-inner code{font-family:var(--mono-font);font-size:11.5px;background:rgba(var(--fg-rgb),.07);padding:1px 4px;border-radius:4px;color:rgba(var(--fg-rgb),.7)}
+.message-thinking-inner pre{margin:6px 0;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.32);overflow:auto;max-height:220px}
+.message-thinking-inner pre code{background:none;padding:0;font-size:11.5px;color:rgba(var(--fg-rgb),.75)}
+.message-thinking-inner h1,.message-thinking-inner h2,.message-thinking-inner h3,.message-thinking-inner h4{margin:8px 0 4px;font-size:12.5px;font-weight:650;color:rgba(var(--fg-rgb),.76)}
+.message-thinking-inner blockquote{margin:6px 0;padding-left:10px;border-left:2px solid rgba(var(--fg-rgb),.18);color:rgba(var(--fg-rgb),.5)}
+
+/* Prism V2: one rhythm between steps — a card at a step's edge brings no extra margin */
+.message > .tool:first-child{margin-top:0}
+.message > .tool:last-child{margin-bottom:0}
+.message > .message-thinking:last-child{margin-bottom:0}
+
+/* Prism V2: paths inside a running tool stay quiet grey, not a blue link */
+.tool .path-chip{background:none;color:var(--fg-tertiary);padding:0 2px;margin:0;border-radius:6px;font-size:inherit}
+.tool .path-chip .path-chip-icon{width:12px;height:12px;opacity:.65}
+.tool .path-chip:hover,.tool .path-chip:focus-visible{background:none;color:rgba(var(--fg-rgb),.82);text-decoration:underline}
