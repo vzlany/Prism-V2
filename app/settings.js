@@ -40,7 +40,7 @@ function apiRow(provider) {
  const [href, host] = LINKS[provider];
  const note = I18n.has(`settings.${provider}.note`) ? ` ${escapeHtml(I18n.t(`settings.${provider}.note`))}` : '';
  return `
-  <div class="settings-row">
+  <div class="settings-row is-wide">
    <div class="settings-text">
     <label class="settings-label" for="settings-key-${provider}">${escapeHtml(I18n.t(`settings.${provider}.key`))}</label>
     <p class="settings-hint"><span>${escapeHtml(I18n.t(`settings.${provider}.hint`))}</span> <a href="${href}" target="_blank" rel="noopener noreferrer">${host}</a>.${note}</p>
@@ -60,7 +60,7 @@ function apiRow(provider) {
 
 function accountRow() {
  return `
-  <div class="settings-row">
+  <div class="settings-row is-wide">
    <div class="settings-text">
     <span class="settings-label">${escapeHtml(I18n.t('settings.chatgpt.label'))}</span>
     <p class="settings-hint">${escapeHtml(I18n.t('settings.chatgpt.hint'))}</p>
@@ -628,6 +628,22 @@ class Settings {
     <div class="settings-control">
      ${models.length ? `<select class="settings-select prompt-model" aria-label="${escapeHtml(I18n.t('settings.prompt.model'))}">${options}</select>
      <textarea class="settings-key prompt-model-text" rows="4" spellcheck="true" placeholder="${escapeHtml(I18n.t('settings.prompt.modelPrompt'))}"></textarea>` : `<p class="settings-hint">${escapeHtml(I18n.t('settings.prompt.empty'))}</p>`}
+    </div>
+   </div>
+   <div class="settings-row is-wide">
+    <div class="settings-text">
+     <span class="settings-label">${escapeHtml(I18n.t('settings.prompt.builtin'))}</span>
+     <p class="settings-hint">${escapeHtml(I18n.t('settings.prompt.builtinHint'))}</p>
+    </div>
+    <div class="settings-control">
+     <details class="prompt-builtin">
+      <summary>${escapeHtml(I18n.t('settings.prompt.builtinAgent'))}</summary>
+      <pre class="prompt-pre">${escapeHtml(window.AgentPrompt?.template || '')}</pre>
+     </details>
+     ${window.PrismFormat?.guide ? `<details class="prompt-builtin">
+      <summary>${escapeHtml(I18n.t('settings.prompt.builtinFormat'))}</summary>
+      <pre class="prompt-pre">${escapeHtml(window.PrismFormat.guide)}</pre>
+     </details>` : ''}
     </div>
    </div>
    <p class="settings-status" data-provider="prompt" role="status"></p>`;

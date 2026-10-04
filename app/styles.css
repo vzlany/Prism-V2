@@ -8423,11 +8423,22 @@ a.settings-button {
 .tool-code,.tool-output{overflow-wrap:anywhere}
 
 
-/* Prism V2: effort name above the slider */
+/* Prism V2: effort name above the slider — its colour, weight and tracking say which level
+   is under the lens, before the growing size does. The --paint darkening stays on top. */
 .effort-panel{padding-top:36px}
-.effort-name{position:absolute;z-index:3;left:0;right:0;top:8px;height:13px;line-height:13px;text-align:center;font-size:11px;letter-spacing:.02em;color:color-mix(in srgb, #0c1016 calc(var(--paint, 0) * 100%), rgba(var(--fg-rgb), .6));pointer-events:none}
-.effort-name{transition:font-size .2s ease}
+.effort-name{--effort-color:rgba(var(--fg-rgb), .6);position:absolute;z-index:3;left:0;right:0;top:8px;height:13px;line-height:13px;text-align:center;font-size:11px;letter-spacing:.02em;color:color-mix(in srgb, #0c1016 calc(var(--paint, 0) * 100%), var(--effort-color));pointer-events:none}
+.effort-name{transition:font-size .2s ease,color .2s ease,letter-spacing .2s ease}
 .effort-name.is-pulse{animation:effort-name-in .22s ease}
+.effort-name[data-level="default"]{--effort-color:rgba(var(--fg-rgb),.6)}
+.effort-name[data-level="none"]{--effort-color:rgba(var(--fg-rgb),.44);font-weight:600;letter-spacing:.1em}
+.effort-name[data-level="minimal"]{--effort-color:#9db8ff;font-weight:600;letter-spacing:.08em}
+.effort-name[data-level="instant"]{--effort-color:#8fd8ff;font-weight:600;letter-spacing:.08em}
+.effort-name[data-level="low"]{--effort-color:#7ed0ff;font-weight:650}
+.effort-name[data-level="medium"]{--effort-color:#6fe3c9;font-weight:650}
+.effort-name[data-level="high"]{--effort-color:#a99bff;font-weight:700;letter-spacing:.05em}
+.effort-name[data-level="xhigh"]{--effort-color:#ff9f7a;font-weight:700;letter-spacing:.05em}
+.effort-name[data-level="max"]{--effort-color:#ffb066;font-weight:750;letter-spacing:.07em}
+.effort-name[data-level="extra"]{--effort-color:#ffb066;font-weight:750;letter-spacing:.07em}
 @keyframes effort-name-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
 
 
@@ -8977,7 +8988,10 @@ body.has-lightbox{overflow:hidden}
 .model-icon-img.is-app{width:100%;height:100%;object-fit:cover;transform:scale(1.16);border-radius:5px}
 /* A logo drawn as `currentColor` comes out black in an <img>: flipped to white on the menu. */
 .model-icon-img.is-dark{filter:brightness(0) invert(1)}
+/* Once the mark is up, the initials badge behind it is gone for good: transparent logos
+   used to let the two letters show through. */
 .model-icon.has-image{background:none}
+.model-icon.has-image .model-icon-letter{visibility:hidden}
 
 /* Prism V2: the model menu's search field */
 .model-menu-search{display:flex;align-items:center;gap:8px;margin:2px 4px 6px;padding:7px 10px;border-radius:12px;background:rgba(var(--fg-rgb),.05)}
@@ -9038,10 +9052,10 @@ body.has-lightbox{overflow:hidden}
 }
 
 /* Prism V2: the Dashboard row above Folders, and the panel it opens */
-.chats-dashboard{display:flex;align-items:center;gap:8px;width:100%;padding:7px 8px;margin:0;border:0;border-radius:9px;background:none;color:rgba(var(--fg-rgb),.5);font:inherit;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;text-align:left;cursor:pointer}
-.chats-dashboard:hover,.chats-dashboard:focus-visible{background:rgba(var(--fg-rgb),.05);color:rgba(var(--fg-rgb),.78);outline:none}
-.chats-dashboard .glyph{flex:none;width:14px;height:14px;color:rgba(var(--fg-rgb),.42);transition:color .15s ease}
-.chats-dashboard:hover .glyph,.chats-dashboard:focus-visible .glyph{color:rgba(var(--fg-rgb),.72)}
+.chats-dashboard{display:flex;align-items:center;gap:9px;width:100%;padding:10px 10px;margin:0 0 4px;border:0;border-radius:11px;background:rgba(var(--fg-rgb),.055);box-shadow:inset 0 0 0 1px rgba(var(--fg-rgb),.08);color:rgba(var(--fg-rgb),.78);font:inherit;font-size:12px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;text-align:left;cursor:pointer;transition:background-color .16s ease,color .16s ease,box-shadow .16s ease}
+.chats-dashboard:hover,.chats-dashboard:focus-visible{background:rgba(138,180,255,.13);box-shadow:inset 0 0 0 1px rgba(138,180,255,.3);color:rgba(var(--fg-rgb),.96);outline:none}
+.chats-dashboard .glyph{flex:none;width:16px;height:16px;color:#9db8ff;transition:color .16s ease}
+.chats-dashboard:hover .glyph,.chats-dashboard:focus-visible .glyph{color:#c6d6ff}
 .chats-heading + .chats-dashboard{margin-top:2px}
 
 .dashboard-panel{position:fixed;inset:0;margin:auto;width:min(720px, calc(100vw - 26px));height:fit-content;max-height:min(84vh, 880px);overflow-y:auto;padding:16px 18px 18px;border:0;border-radius:22px;background:linear-gradient(180deg, rgba(32,33,38,.98), rgba(22,23,27,.98));box-shadow:inset 0 0 0 1px rgba(var(--fg-rgb),.09),0 30px 90px rgba(0,0,0,.65);color:rgba(var(--fg-rgb),.88);scrollbar-width:thin;scrollbar-color:rgba(var(--fg-rgb),.15) transparent}
@@ -9091,3 +9105,10 @@ body.has-lightbox{overflow:hidden}
 .settings-prompt-page .settings-control{gap:8px}
 .settings-prompt-page textarea.settings-key{width:100%;height:auto;min-height:96px;padding:9px 11px;line-height:1.55;resize:vertical;font-family:inherit;white-space:pre-wrap}
 .settings-prompt-page .prompt-model{margin-bottom:2px}
+.prompt-builtin{border-radius:10px;background:rgba(var(--fg-rgb),.035);box-shadow:inset 0 0 0 1px rgba(var(--fg-rgb),.07);overflow:hidden}
+.prompt-builtin + .prompt-builtin{margin-top:8px}
+.prompt-builtin summary{padding:9px 12px;font-size:12.5px;color:rgba(var(--fg-rgb),.8);cursor:pointer;user-select:none;list-style:none}
+.prompt-builtin summary::-webkit-details-marker{display:none}
+.prompt-builtin summary::before{content:"›";display:inline-block;width:14px;color:var(--fg-tertiary);transition:transform .18s ease}
+.prompt-builtin[open] summary::before{transform:rotate(90deg)}
+.prompt-pre{margin:0;padding:0 12px 12px;max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--mono-font);font-size:11.5px;line-height:1.6;color:rgba(var(--fg-rgb),.62);scrollbar-width:thin}

@@ -66,12 +66,17 @@ function load(key, sources) {
  if (entry && (entry.source || Date.now() - entry.at < FAIL_TTL)) return entry;
  const next = { source: null, at: Date.now(), waiters: [] };
  cache.set(key, next);
- Promise.all(sources.map(source => probe(source.url).then(ok => (ok ? source : null), () => null)))
-  .then(results => {
-   next.source = results.find(Boolean) || null;
-   for (const waiter of next.waiters) waiter(next.source);
-   next.waiters.length = 0;
-  });
+ // Sources are tried in order, local marks first: a shipped logo is found immediately and the
+ // remote fallbacks are never even requested, so the menus stay quiet and offline-clean.
+ (async () => {
+  let found = null;
+  for (const source of sources) {
+   try { if (await probe(source.url)) { found = source; break; } } catch {}
+  }
+  next.source = found;
+  for (const waiter of next.waiters) waiter(next.source);
+  next.waiters.length = 0;
+ })();
  return next;
 }
 
@@ -92,9 +97,14 @@ function icon(model) {
    const img = document.createElement('img');
    img.className = `model-icon-img${source.dark ? ' is-dark' : ''}${source.app ? ' is-app' : ''}`;
    img.alt = '';
+   // The letter badge stays until the mark has pixels to cover it: a transparent logo over
+   // the initials reads as "2 letters behind the icon".
+   const cover = () => wrap.classList.add('has-image');
+   img.addEventListener('load', cover, { once: true });
+   img.addEventListener('error', () => img.remove(), { once: true });
    img.src = source.url;
    wrap.append(img);
-   wrap.classList.add('has-image');
+   if (img.complete && img.naturalWidth > 1) cover();
   };
   const entry = load(info.key, info.sources);
   // The element is inserted into the menu a moment after it is built, so a cached logo is

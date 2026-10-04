@@ -89,6 +89,11 @@ function environment({ folder, mode, env, now }) {
 }
 
 window.AgentPrompt = {
+ // The built-in instructions every agent chat starts from, with their {placeholders} still in
+ // place — Settings -> Prompt shows this read-only so it is clear what Prism V2 sends on top
+ // of the user's own prompts.
+ template: AGENT,
+ plain: PLAIN,
  build({ folder, mode, env, browser = '', mcp = '', memory = '', plan = '', instructions = '', skills = '', now = new Date() }) {
   if (!folder) return PLAIN;
   return AGENT.replace('{environment}', () => environment({ folder, mode, env, now }))

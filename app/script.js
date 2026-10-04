@@ -35,7 +35,7 @@ const measureComposer = () => {
 // The composer slides up and down between the empty and chat states over half a second;
 // while that runs the top has to be read every frame or it stays where the slide began.
 const settleComposer = () => {
-  const until = performance.now() + 800;
+  const until = performance.now() + 620;
   const step = () => {
     measureComposer();
     if (performance.now() < until) requestAnimationFrame(step);

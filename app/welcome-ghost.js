@@ -63,15 +63,18 @@ class WelcomeGhost {
   const from = this.flight.getBoundingClientRect();
   const start = { x: from.left + from.width / 2, y: from.top + from.height / 2, size: from.width || 1 };
   const begun = performance.now();
-  // The reply is still settling while the ghost flies, so the landing spot is read every frame:
-  // aiming at where the status stood on the first frame lands the ghost somewhere else — the
-  // teleport it used to do — while following it lands exactly on the mark.
+  // The reply is still settling while the ghost flies, so the landing spot follows the status
+  // mark. Reading its rect every frame forces a layout each time; the status barely moves, so
+  // it is read every fourth frame and held in between.
+  let frame = 0, live = null;
   const tick = now => {
    if (generation !== this.generation) return;
    const t = Math.min(1, (now - begun) / FLIGHT.duration);
-   const mark = status.querySelector('ghost-thinking');
-   const to = mark ? mark.getBoundingClientRect() : null;
-   const live = to && to.width ? to : null;
+   if (!(frame++ % 4) || !live) {
+    const mark = status.querySelector('ghost-thinking');
+    const to = mark ? mark.getBoundingClientRect() : null;
+    live = to && to.width ? to : live;
+   }
    const ease = power => 1 - Math.pow(1 - t, power);
    const dx = live ? (live.left + live.width / 2 - start.x) * ease(3) : 0;
    const dy = live ? (live.top + live.height / 2 - start.y) * (t * t * (3 - 2 * t)) : 0;

@@ -211,12 +211,16 @@ class EffortSlider {
   this.slider.setAttribute('aria-valuemax', String(this.max));
  }
 
- // A model without thinking levels has nothing to choose: the button leaves the composer.
+ // A model without thinking levels has nothing to choose: the button leaves the composer, and
+ // the panel must not linger showing an effort name over the composer while it animates away.
  applyVisibility() {
   const hidden = this.efforts.length < 2;
   this.button.hidden = hidden;
   this.button.style.display = hidden ? 'none' : '';
-  if (hidden && this.opened) this.close(true);
+  if (hidden && this.opened) {
+   this.close(true);
+   this.panel.hidePopover?.();
+  }
  }
 
  setEfforts(efforts) {
@@ -324,6 +328,9 @@ class EffortSlider {
    const level = Math.max(0, this.efforts.indexOf(value));
    const size = 11 + (this.max ? level / this.max : 0) * 5;
    node.style.fontSize = `${size.toFixed(1)}px`;
+   // Each level wears its own colour and tracking (see the stylesheet), so the name reads at
+   // a glance even before the size does.
+   node.dataset.level = value;
   }
   if (node && node.textContent !== name) {
    node.textContent = name;

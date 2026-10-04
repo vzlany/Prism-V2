@@ -54,7 +54,10 @@ class GhostThinking extends HTMLElement {
   this.shape = this.shadowRoot.querySelector('.shape');
   this.eyes = [...this.shadowRoot.querySelectorAll('.eye')];
   this.raf = 0;
+  this.rendered = 0;
+  this.swayed = 0;
   this.tick = this.tick.bind(this);
+  this.onVisibility = () => { if (!document.hidden) this.last = performance.now(); };
  }
 
  connectedCallback() {
@@ -69,12 +72,14 @@ class GhostThinking extends HTMLElement {
   this.nextBlink = now + random(BLINK_EVERY) * 0.5;
   this.blinkAt = -Infinity;
   this.eye = { x: [0, 0], y: [0, 0], sx: [1, 0], sy: [1, 0] };
+  document.addEventListener('visibilitychange', this.onVisibility);
   this.raf = requestAnimationFrame(this.tick);
  }
 
  disconnectedCallback() {
   cancelAnimationFrame(this.raf);
   this.raf = 0;
+  document.removeEventListener('visibilitychange', this.onVisibility);
  }
 
  look(x, y, hold = GAZE_HOLD) {
@@ -90,6 +95,13 @@ class GhostThinking extends HTMLElement {
  }
 
  tick(now) {
+  // A hidden window (backgroundThrottling is off for the app) and a ghost the eye cannot
+  // follow are not worth a paint: skip the work and keep the loop warm at a low rate.
+  if (document.hidden) { this.raf = requestAnimationFrame(this.tick); return; }
+  // The ghost reads fine at ~30fps and the springs below sub-step their own math, so half the
+  // frames only save work, they do not change the motion.
+  if (now - this.rendered < 30) { this.raf = requestAnimationFrame(this.tick); return; }
+  this.rendered = now;
   const dt = Math.min((now - this.last) / 1000, 0.032);
   this.last = now;
   if (this.gaze && now >= this.gazeUntil) {
@@ -116,10 +128,14 @@ class GhostThinking extends HTMLElement {
   const float = Math.sin(t * 2 * Math.PI / FLOAT.period) * FLOAT.amp;
   const sway = Math.sin(t * 2 * Math.PI / SWAY.period) * SWAY.amp;
   const { x, y, sx, sy } = this.eye;
-  this.body.setAttribute('transform', `translate(0 ${fixed(float)})`);
-  this.shape.setAttribute('d', bodyPath(sway));
+  this.body.style.transform = `translateY(${fixed(float)}px)`;
+  // Rebuilding the path string is the expensive half: only do it when the sway actually moved.
+  if (Math.abs(sway - this.swayed) > 0.12) {
+   this.swayed = sway;
+   this.shape.setAttribute('d', bodyPath(sway));
+  }
   for (let i = 0; i < 2; i++) {
-   this.eyes[i].setAttribute('transform', `translate(${fixed(EYE_X[i] + x[0])} ${fixed(EYE_Y + y[0])}) scale(${sx[0].toFixed(3)} ${Math.max(0.05, sy[0] * blink).toFixed(3)})`);
+   this.eyes[i].style.transform = `translate(${fixed(EYE_X[i] + x[0])}px, ${fixed(EYE_Y + y[0])}px) scale(${sx[0].toFixed(3)}, ${Math.max(0.05, sy[0] * blink).toFixed(3)})`;
   }
   this.raf = requestAnimationFrame(this.tick);
  }
