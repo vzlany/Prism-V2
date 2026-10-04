@@ -2029,13 +2029,11 @@ ghost-thinking {
 .t-green { --tone: 128, 218, 134; }
 
 .md-w {
-  position: relative;
   animation: md-wave 0.22s cubic-bezier(0.33, 1, 0.68, 1) both;
 }
 
 @keyframes md-wave {
   from {
-    top: 0.35em;
     opacity: 0;
   }
 }
@@ -5508,14 +5506,14 @@ h6.md-h {
 }
 
 .composer-folder-char {
-  position: relative;
+  display: inline-block;
   animation: composer-folder-char 220ms cubic-bezier(0.33, 1, 0.68, 1) both;
 }
 
 @keyframes composer-folder-char {
   from {
     opacity: 0;
-    top: 0.35em;
+    transform: translateY(0.35em);
   }
 }
 
