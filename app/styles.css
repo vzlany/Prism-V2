@@ -6006,6 +6006,26 @@ h6.md-h {
   transform: none;
 }
 
+/* Prism V2: the Discord switch at the end of the mode menu */
+.mode-sep {
+  height: 1px;
+  margin: 5px 6px;
+  background: rgba(var(--fg-rgb), 0.08);
+}
+
+.mode-option.mode-discord .mode-icon.is-discord {
+  background: rgba(88, 101, 242, 0.16);
+  color: #b7c1ff;
+}
+
+.mode-option.mode-discord[aria-checked="true"] .mode-option-title {
+  color: #c6d6ff;
+}
+
+.mode-option.mode-discord.is-on .mode-option-check {
+  color: #8fa4ff;
+}
+
 .composer-actions {
   display: flex;
   align-items: center;

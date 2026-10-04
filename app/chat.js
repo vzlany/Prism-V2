@@ -1478,6 +1478,11 @@ class Chat {
    const outcome = aborted ? 'failed' : error ? 'error' : 'completed';
    const summary = String(entry.content || '').replace(/\s+/g, ' ').trim().slice(0, 300);
    window.openghost?.notify?.(title, outcome, summary);
+   // The Discord switch at the end of the mode menu: a DM with the fuller summary, sent
+   // whether or not the toast was shown.
+   if (window.DiscordNotify?.on && !conv.subagent && !turn.quiet) {
+    window.openghost?.discord?.dm?.({ title, outcome, summary: String(entry.content || '').replace(/\s+/g, ' ').trim().slice(0, 1200) });
+   }
    window.ParallelRuns?.update(conv.id, { status: outcome, snippet: summary.slice(0, 140) });
    // A chime when a task ends, an approval card or question waits, or something breaks.
    // Subagents stay silent (several run at once) and so do the quiet internal turns a model

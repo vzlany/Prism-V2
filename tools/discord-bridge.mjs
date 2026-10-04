@@ -188,6 +188,8 @@ async function turn(prompt, display = {}) {
    let callArgs = {};
    try { callArgs = JSON.parse(call.function.arguments || "{}"); } catch {}
    status(`🔧 ${call.function.name}`);
+   const item = { name: call.function.name, args: callArgs };
+   const messageId = await display.running?.(item);
    let output = "", failed = false;
    try {
     const toolResult = await AgentTools.run(call.function.name, callArgs, { id: `dc-tool-${call.id}`, cwd: state.folder });
@@ -199,7 +201,7 @@ async function turn(prompt, display = {}) {
     failed = true;
    }
    state.messages.push({ role: "tool", tool_call_id: call.id, content: output });
-   await display.event?.({ name: call.function.name, args: callArgs, output, error: failed });
+   await display.event?.({ ...item, output, error: failed, messageId });
   }
   if (pictures.length) {
    const content = [{ type: "text", text: "The pictures from the tools you just ran follow." }];
@@ -211,34 +213,38 @@ async function turn(prompt, display = {}) {
 }
 
 // --------------------------------------------------------------- full display formatting
+// [running, done] — the same message starts in the present tense and is edited to the past
+// tense when the tool finishes.
 const TOOL_TITLES = {
- run_powershell: "Ran a command",
- git: "Ran git in the project",
- write_file: "Wrote a file",
- edit_file: "Edited a file",
- patch: "Patched a file",
- read_file: "Read a file",
- list_files: "Listed a folder",
- web_search: "Searched the web",
- fetch_url: "Opened a link",
- http_request: "Sent an HTTP request",
- screenshot: "Took a screenshot",
- clipboard: "Used the clipboard",
- open_path: "Opened a path",
- notify: "Sent a notification",
- wait: "Waited",
- attach_file: "Attached a file",
- video_frames: "Looked at a video",
- subagent: "Started a subagent",
- ask_user: "Asked the user",
- memory_save: "Saved a memory",
- memory_forget: "Forgot a memory",
+ run_powershell: ["Running a command", "Ran a command"],
+ git: ["Running git", "Ran git in the project"],
+ write_file: ["Writing a file", "Wrote a file"],
+ edit_file: ["Editing a file", "Edited a file"],
+ patch: ["Patching a file", "Patched a file"],
+ read_file: ["Reading a file", "Read a file"],
+ list_files: ["Listing a folder", "Listed a folder"],
+ web_search: ["Searching the web", "Searched the web"],
+ fetch_url: ["Opening a link", "Opened a link"],
+ http_request: ["Sending an HTTP request", "Sent an HTTP request"],
+ screenshot: ["Taking a screenshot", "Took a screenshot"],
+ clipboard: ["Using the clipboard", "Used the clipboard"],
+ open_path: ["Opening a path", "Opened a path"],
+ notify: ["Sending a notification", "Sent a notification"],
+ wait: ["Waiting", "Waited"],
+ attach_file: ["Attaching a file", "Attached a file"],
+ video_frames: ["Looking at a video", "Looked at a video"],
+ subagent: ["Starting a subagent", "Started a subagent"],
+ ask_user: ["Asking the user", "Asked the user"],
+ memory_save: ["Saving a memory", "Saved a memory"],
+ memory_forget: ["Forgetting a memory", "Forgot a memory"],
 };
 
-function toolTitle(name) {
- if (TOOL_TITLES[name]) return TOOL_TITLES[name];
- if (String(name).startsWith("browser_")) return "Used the browser";
- return String(name || "tool").replace(/[_-]+/g, " ");
+function toolTitle(name, running) {
+ const pair = TOOL_TITLES[name];
+ if (pair) return running ? pair[0] : pair[1];
+ if (String(name).startsWith("browser_")) return running ? "Using the browser" : "Used the browser";
+ const plain = String(name || "tool").replace(/[_-]+/g, " ");
+ return running ? `Running ${plain}` : `Ran ${plain}`;
 }
 
 function toolDetail(name, toolArgs = {}) {
@@ -252,10 +258,11 @@ function toolDetail(name, toolArgs = {}) {
  return first("query", "url", "path", "file", "directory", "command", "label", "text", "id") || "";
 }
 
-// One action on its own line, in a box: the command, the file, the search.
-function toolBox({ name, args: toolArgs, output, error }) {
+// One action on its own line, in a box: the command, the file, the search. The same message
+// is edited from "Running…" to "Ran…" when the tool is done.
+function toolBox({ name, args: toolArgs, output, error, running }) {
  const detail = String(toolDetail(name, toolArgs) || "").trim();
- const title = toolTitle(name);
+ const title = toolTitle(name, running);
  let line = `📦 **${title}:**`;
  if (detail) {
   const one = detail.replace(/\s+/g, " ").trim();
@@ -314,10 +321,11 @@ const IDLE = "💤 ready";
 let gateway = null, heartbeat = 0, seq = null, gatewayReady = false, shuttingDown = false;
 
 // A custom status (type 4) shows the text itself, so the profile says what Prism is doing.
-function setPresence(name) {
+// While a reply is being produced the status is dnd, otherwise online.
+function setPresence(name, status = "online") {
  if (!gatewayReady || !gateway || gateway.readyState !== WebSocket.OPEN) return;
  try {
-  gateway.send(JSON.stringify({ op: 3, d: { since: 0, status: "online", afk: false, activities: [{ name: "Prism V2", type: 4, state: String(name).slice(0, 128) }] } }));
+  gateway.send(JSON.stringify({ op: 3, d: { since: 0, status, afk: false, activities: [{ name: "Prism V2", type: 4, state: String(name).slice(0, 128) }] } }));
  } catch {}
 }
 
@@ -388,6 +396,7 @@ const HELP = [
  "**Prism V2 bridge** — I run on your PC and answer here.",
  "",
  "`/new` — start a fresh conversation",
+ "`/clear` — delete every message I sent in this DM",
  "`/stop` — stop the reply being written",
  "`/seefull` — toggle Full Display: every thought and every action is posted here",
  "`/effort <level>` — thinking effort (default, none, low, medium, high, xhigh, max)",
@@ -396,6 +405,26 @@ const HELP = [
  "`/status` — what I am set to",
  "`/help` — this",
 ].join("\n");
+
+// Delete the bot's own messages in this DM (Discord lets a bot remove what it sent).
+async function clearBotMessages(channel) {
+ let deleted = 0, before = null;
+ for (let page = 0; page < 6; page++) {
+  const query = `/channels/${channel}/messages?limit=100${before ? `&before=${before}` : ""}`;
+  const res = await api(query);
+  if (!res.ok) break;
+  const list = await res.json();
+  if (!Array.isArray(list) || !list.length) break;
+  before = list[list.length - 1].id;
+  for (const item of list) {
+   if (!item.author?.bot) continue;
+   const del = await api(`/channels/${channel}/messages/${item.id}`, { method: "DELETE" });
+   if (del.ok || del.status === 404) deleted++;
+  }
+  if (list.length < 100) break;
+ }
+ return deleted;
+}
 
 async function handle(channel, message) {
  let text = String(message.content || "").trim();
@@ -414,6 +443,15 @@ async function handle(channel, message) {
   state.messages = [];
   savedState();
   return void await post(channel, "✨ fresh conversation");
+ }
+ if (text === "/clear") {
+  const notice = await api(`/channels/${channel}/messages`, { method: "POST", body: JSON.stringify({ content: "🧹 clearing my messages…" }) }).then(res => (res.ok ? res.json() : null)).catch(() => null);
+  const deleted = await clearBotMessages(channel);
+  if (notice?.id) {
+   await api(`/channels/${channel}/messages/${notice.id}`, { method: "PATCH", body: JSON.stringify({ content: `🧹 cleared ${deleted} of my messages` }) }).catch(() => {});
+   setTimeout(() => { api(`/channels/${channel}/messages/${notice.id}`, { method: "DELETE" }).catch(() => {}); }, 4000);
+  }
+  return;
  }
  if (text === "/stop") {
   state.stopped = true;
@@ -473,15 +511,31 @@ async function handle(channel, message) {
   api(`/channels/${channel}/messages/${placeholderId}`, { method: "PATCH", body: JSON.stringify({ content: line }) }).catch(() => {});
  };
  const display = {
+  // The gateway status changes with the work: DND while a reply is being produced, the
+  // exact phrase the user sees, and back to online + "💤 ready" when the turn ends.
   status: line => {
-   setPresence(`⚙️ ${line.replace(/[^\p{L}\p{N} .,!?…-]/gu, "").trim() || "working…"}`);
+   setPresence(line, "dnd");
    updatePlaceholder(line);
   },
   // Full Display: the finished thought in small grey text, each action as its own box.
   thought: async words => { if (state.seefull) await post(channel, subtext(words)); },
-  event: async item => { if (state.seefull) await post(channel, toolBox(item)); },
+  // The action's message is posted while the tool runs ("Running…") and edited to the past
+  // tense when it finishes ("Ran…").
+  running: async item => {
+   if (!state.seefull) return null;
+   try {
+    const res = await api(`/channels/${channel}/messages`, { method: "POST", body: JSON.stringify({ content: toolBox({ ...item, running: true }) }) });
+    return (await res.json().catch(() => ({})))?.id || null;
+   } catch { return null; }
+  },
+  event: async item => {
+   if (!state.seefull) return;
+   const content = toolBox(item);
+   if (item.messageId) await api(`/channels/${channel}/messages/${item.messageId}`, { method: "PATCH", body: JSON.stringify({ content }) }).catch(() => {});
+   else await post(channel, content);
+  },
  };
- setPresence("⚙️ working…");
+ setPresence("🤔 thinking…", "dnd");
  try {
   const answer = await turn(text, display);
   setPresence(IDLE);

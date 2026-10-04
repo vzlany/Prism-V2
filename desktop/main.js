@@ -585,6 +585,16 @@ MCP.register(fromApp);
 Memory.register(fromApp);
 Instructions.register(fromApp);
 Discord.register(fromApp);
+// The mode menu's "DM me on Discord when done" switch: a finished reply sends its own DM,
+// whether or not the Windows toast was shown.
+ipcMain.handle('discord:dm', (event, payload) => {
+ if (!fromApp(event)) return { ok: false };
+ return Discord.send(
+  typeof payload?.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Prism V2',
+  typeof payload?.outcome === 'string' ? payload.outcome : 'completed',
+  typeof payload?.summary === 'string' ? payload.summary : '',
+ );
+});
 ipcMain.handle('profile:info', event => {
  if (!fromApp(event)) return { name: PROFILE || 'default', profiles: [] };
  let profiles = [];

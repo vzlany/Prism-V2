@@ -162,6 +162,13 @@ window.openghost = {
   update: (id, text) => invoke('memory:update', id, text),
   remove: id => invoke('memory:remove', id),
  },
+ discord: {
+  // The web can send the same "finished" DM through the engine host.
+  get: async () => ({ enabled: false, userId: '', hasToken: false }),
+  set: async () => ({ enabled: false, userId: '', hasToken: false }),
+  test: async () => ({ ok: false, error: 'works only in the desktop app' }),
+  dm: payload => invoke('discord:dm', payload),
+ },
  instructions: {
   list: directory => invoke('instructions:list', directory),
   read: (directory, file) => invoke('instructions:read', directory, file),

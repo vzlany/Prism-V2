@@ -60,6 +60,8 @@ const library = new Library(ChatStore, syncAll);
 window.addEventListener('pagehide', () => library.flush());
 // The app's model catalog arrives (or leaves) with its heartbeat: the picker follows.
 window.openghost?.app?.onStatus?.(() => { settings.loadShared?.().catch(() => {}); });
+// The Discord "DM when done" switch is shared through the store; load it once at startup.
+window.DiscordNotify?.load?.().catch(() => {});
 const chat = new Chat({ main, thread, bottom: threadBottom, settings, library, onChange: syncAll, onList: list => threadScrollbar.observe(list) });
 const lockScreen = new LockScreen({ main, chat, composer, onOpen: () => composerInput.focus({ preventScroll: true }) });
 // The store folder is shared with the desktop app and any other `prism web` window: when

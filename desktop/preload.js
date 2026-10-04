@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('openghost', {
   get: () => ipcRenderer.invoke('discord:get'),
   set: patch => ipcRenderer.invoke('discord:set', patch),
   test: () => ipcRenderer.invoke('discord:test'),
+  dm: payload => ipcRenderer.invoke('discord:dm', payload),
  },
  memory: {
   list: () => ipcRenderer.invoke('memory:list'),

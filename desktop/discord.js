@@ -40,7 +40,7 @@ async function send(title, outcome, summary) {
   });
   if (!dm.ok) return { ok: false, error: `dm channel ${dm.status}` };
   const channel = await dm.json();
-  const content = `**${String(title).slice(0, 120)}** — ${String(outcome || 'completed')}${summary ? `\n${String(summary).slice(0, 400)}` : ''}`;
+  const content = `**${String(title).slice(0, 120)}** — ${String(outcome || 'completed')}${summary ? `\n${String(summary).slice(0, 1200)}` : ''}`;
   const message = await fetch(`https://discord.com/api/v10/channels/${channel.id}/messages`, {
    method: 'POST',
    headers,
