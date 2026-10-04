@@ -286,10 +286,33 @@ function startWeb(auto = readAuto()) {
   console.log('[auto] could not start the web server:', error.message);
  }
 }
+// The Discord bridge is a separate Node process (Electron runs it as Node). It shows the bot
+// online with a status, answers DMs with the app's equipped keys and the same tools.
+let botChild = null;
+function stopBot() {
+ if (!botChild) return;
+ try { botChild.kill(); } catch {}
+ botChild = null;
+}
+function startBot(auto = readAuto()) {
+ if (botChild || !auto.bot) return;
+ const script = path.join(ROOT, 'tools', 'discord-bridge.mjs');
+ try {
+  botChild = spawn(process.execPath, [script, ...(PROFILE ? ['--profile', PROFILE] : [])], {
+   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+   windowsHide: true,
+   stdio: 'ignore',
+  });
+  botChild.on('exit', code => { botChild = null; console.log(`[auto] discord bot stopped${code ? ` (${code})` : ''}`); });
+  console.log('[auto] discord bot started');
+ } catch (error) {
+  console.log('[auto] could not start the discord bot:', error.message);
+ }
+}
 ipcMain.handle('auto:get', event => {
  if (!fromApp(event)) return null;
  const auto = readAuto();
- return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, port: webPort(auto), webRunning: Boolean(webChild) };
+ return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
 });
 // The web server lists its live connections in web-clients.json (it may also be running
 // from a terminal, not started by this app): the Auto page shows the port and the devices.
@@ -309,12 +332,15 @@ ipcMain.handle('auto:set', (event, patch) => {
   ...(typeof patch?.login === 'boolean' ? { login: patch.login } : {}),
   ...(typeof patch?.hidden === 'boolean' ? { hidden: patch.hidden } : {}),
   ...(typeof patch?.web === 'boolean' ? { web: patch.web } : {}),
+  ...(typeof patch?.bot === 'boolean' ? { bot: patch.bot } : {}),
   ...(patch?.port !== undefined ? { port: webPort({ port: patch.port }) } : {}),
  });
  applyAuto(auto);
  if (auto.web) { stopWeb(); startWeb(auto); }
  else stopWeb();
- return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, port: webPort(auto), webRunning: Boolean(webChild) };
+ if (auto.bot) { stopBot(); startBot(auto); }
+ else stopBot();
+ return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
 });
 
 let tray = null;
@@ -612,6 +638,7 @@ if (process.argv.includes('--create-shortcut')) {
   createTray(win);
   applyAuto();
   startWeb();
+  startBot();
   Updater.start();
   MCP.init().catch(() => {});
   win.on('closed', () => {
@@ -626,6 +653,7 @@ if (process.argv.includes('--create-shortcut')) {
   Tools.cancelAll();
   MCP.stopAll();
   stopWeb();
+  stopBot();
   if (!writes.size) return;
   event.preventDefault();
   Promise.allSettled([...writes.values()]).then(() => app.quit());

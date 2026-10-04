@@ -112,6 +112,7 @@ class Settings {
   this.checked = new Set();
   // Keys saved in an earlier session count as working until a check says otherwise.
   this.accepted = new Set(Object.keys(KEYS).filter(provider => this.keys[provider]));
+  this.syncSharedKeys();
   this.build();
   this.paintMcp();
   this.paintEffects();
@@ -137,6 +138,15 @@ class Settings {
 
  saveApis() {
   try { localStorage.setItem(STORAGE.apis, JSON.stringify(this.apis)); } catch {}
+ }
+
+ // The Discord bridge (a separate process) cannot read the browser's localStorage, so the
+ // equipped keys are mirrored into the shared store; the bridge reads them from there.
+ syncSharedKeys() {
+  if (!window.openghost?.store?.write) return;
+  const keys = {};
+  for (const provider of Object.keys(KEYS)) if (this.keys[provider]) keys[provider] = this.keys[provider];
+  try { Promise.resolve(window.openghost.store.write('keys', { at: Date.now(), keys })).catch(() => {}); } catch {}
  }
 
  readActive() {
@@ -171,6 +181,7 @@ class Settings {
   this.paintApis(provider);
   this.paint();
   this.changed();
+  this.syncSharedKeys();
   if (this.keys[provider]) this.checkKey(provider);
  }
 
@@ -190,6 +201,7 @@ class Settings {
   this.paintApis(provider);
   this.paint();
   this.changed();
+  this.syncSharedKeys();
   this.checkKey(provider);
   return true;
  }
@@ -210,6 +222,7 @@ class Settings {
   this.paintApis(provider);
   this.paint();
   this.changed();
+  this.syncSharedKeys();
   if (this.keys[provider]) this.checkKey(provider);
  }
 
@@ -234,6 +247,7 @@ class Settings {
    else localStorage.removeItem(KEYS[provider]);
    this.accepted.delete(provider);
    this.checked.delete(provider);
+   this.syncSharedKeys();
    clearTimeout(this.timer?.[provider]);
    this.timer = { ...this.timer };
    this.paint();
@@ -543,7 +557,7 @@ class Settings {
  async paintAuto() {
   const node = this.autoPage;
   if (!node) return;
-  const auto = (await window.openghost?.auto?.get?.().catch(() => null)) || { login: false, hidden: false, web: false, port: 8787, webRunning: false };
+  const auto = (await window.openghost?.auto?.get?.().catch(() => null)) || { login: false, hidden: false, web: false, bot: false, port: 8787, webRunning: false, botRunning: false };
   const row = (labelKey, hintKey, control) => `<div class="settings-row is-wide">
    <div class="settings-text">
     <span class="settings-label">${escapeHtml(I18n.t(labelKey))}</span>
@@ -556,6 +570,7 @@ class Settings {
    row('settings.auto.login', 'settings.auto.loginHint', toggle('auto-login', auto.login)),
    row('settings.auto.hidden', 'settings.auto.hiddenHint', toggle('auto-hidden', auto.hidden, !auto.login)),
    row('settings.auto.web', 'settings.auto.webHint', `<div class="mcp-add-row">${toggle('auto-web', auto.web)}<input class="settings-key auto-port" type="number" min="1" max="65535" value="${auto.port}" ${auto.web ? '' : 'disabled'}><button type="button" class="settings-button" data-auto-open ${auto.webRunning || auto.web ? '' : 'disabled'}>${escapeHtml(I18n.t('settings.auto.open'))}</button></div>`),
+   row('settings.auto.bot', 'settings.auto.botHint', `<div class="mcp-add-row">${toggle('auto-bot', auto.bot)}<span class="auto-bot-state ${auto.botRunning ? 'is-on' : ''}">${escapeHtml(I18n.t(auto.botRunning ? 'settings.auto.botRunning' : 'settings.auto.botStopped'))}</span></div>`),
    row('settings.auto.net', 'settings.auto.netHint', `<div data-auto-net></div>`),
    `<p class="settings-status" data-provider="auto" role="status"></p>`,
   ].join('');
@@ -591,6 +606,7 @@ class Settings {
   node.querySelector('.auto-login')?.addEventListener('change', event => save({ login: event.target.checked }));
   node.querySelector('.auto-hidden')?.addEventListener('change', event => save({ hidden: event.target.checked }));
   node.querySelector('.auto-web')?.addEventListener('change', event => save({ web: event.target.checked }));
+  node.querySelector('.auto-bot')?.addEventListener('change', event => save({ bot: event.target.checked }));
   node.querySelector('.auto-port')?.addEventListener('change', event => save({ port: Number(event.target.value) || 8787 }));
   node.querySelector('[data-auto-open]')?.addEventListener('click', () => window.open(`http://localhost:${auto.port}/`, '_blank'));
  }

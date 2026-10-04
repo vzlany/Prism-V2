@@ -17,6 +17,12 @@ const QUOTE_MAX = 6000;
 const LINK_OUT = { duration: 260, easing: 'cubic-bezier(0.3, 0.7, 0.4, 1)', fill: 'forwards' };
 const MANUAL_DELETE = /^delete(Content|Word|SoftLine|HardLine)(Backward|Forward)$/;
 const TYPED_URL = /(?:^|\s)((?:https?:\/\/|www\.)\S+)$/i;
+// Above this much text (or this many lines) the mirror stops building a div per paragraph and
+// shows one plain text node instead: pasting a document or writing hundreds of lines used to
+// make the visible text (the textarea itself is transparent; the mirror is what you read)
+// arrive late and stutter. Link chips are restored once the text shrinks back under the cap.
+const PLAIN_CHARS = 12000;
+const PLAIN_LINES = 300;
 
 const escapeHtml = text => text.replace(/[&<>]/g, c => c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;');
 const escapeAttr = text => escapeHtml(text).replace(/"/g, '&quot;');
@@ -62,9 +68,28 @@ class ComposerText {
  refresh() {
   this.value = this.input.value;
   this.seg = null;
+  this.wave = null;
+  if (this.plainFor(this.value)) {
+   this.flat = true;
+   this.links = [];
+   this.index();
+   this.lines.textContent = this.value;
+   this.mirror.scrollTop = this.input.scrollTop;
+   return;
+  }
+  this.flat = false;
   this.links = this.recall(0, this.value.length, []);
   this.index();
   this.renderAll(performance.now());
+ }
+
+ // Whether the text is large enough that the mirror should drop the per-paragraph DOM and
+ // the chips, and just show the raw text.
+ plainFor(text) {
+  if (text.length > PLAIN_CHARS) return true;
+  let lines = 1;
+  for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) if (++lines > PLAIN_LINES) return true;
+  return false;
  }
 
  text(from = 0, to = this.value.length) {
@@ -270,6 +295,25 @@ class ComposerText {
   let tail = 0;
   while (tail < min - at && old.charCodeAt(old.length - 1 - tail) === next.charCodeAt(next.length - 1 - tail)) tail++;
   const removed = old.length - at - tail, inserted = next.length - at - tail;
+  // A big paste, or text with hundreds of lines, goes straight through the plain renderer:
+  // no wave, no chips, one text node. Coming back under the caps rebuilds them once.
+  const plain = this.plainFor(next);
+  if (plain || this.flat) {
+   this.value = next;
+   this.seg = null;
+   this.wave = null;
+   if (plain) {
+    this.flat = true;
+    this.links = [];
+    this.index();
+    this.lines.textContent = next;
+    this.mirror.scrollTop = this.input.scrollTop;
+    return;
+   }
+   this.flat = false;
+   this.refresh();
+   return;
+  }
   const animate = pending !== null && !reducedMotion();
   const typed = animate && window.Effects?.typing() !== false && pending.type === 'insertText' && inserted > 0 && inserted <= 2;
   const erased = animate && !inserted && pending.collapsed && MANUAL_DELETE.test(pending.type) && removed <= MAX_MANUAL_DELETE;

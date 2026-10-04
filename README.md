@@ -32,11 +32,11 @@ here is in this repository; nothing else was removed.
   place right away, and an open thread refreshes the moment the other process writes it.
 - **Windows tray icon** — open the app, open the web, quit; the tooltip says how many turns
   are working.
-- **Settings → Auto** — start with Windows, start hidden (straight into the tray), and start
+- **Settings → Auto** — start with Windows, start hidden (straight into the tray), start
   the web server with the app on the port you choose (default 8787, reachable from your
-  network). On Windows the startup entry is a **Prism V2 shortcut in the Startup folder**
-  with the app's own icon, so Task Manager's startup list says "Prism V2" instead of
-  "electron.exe".
+  network), and start the **Discord bot** with the app so it is always online. On Windows
+  the startup entry is a **Prism V2 shortcut in the Startup folder** with the app's own icon,
+  so Task Manager's startup list says "Prism V2" instead of "electron.exe".
 
 ### Models, prices and effort
 
@@ -243,11 +243,24 @@ prism discord --once "hi"      # one turn in the terminal, prints the reply
 ```
 
 The bot only answers the user id in Settings → Discord, so DMs from anyone else are
-ignored. It keeps one conversation with history (`/new` resets it), and commands:
-`/folder <path>` sets where tools work, `/model provider:id` switches model, `/status`,
-`/stop`, `/help`. Replies are edited into one Discord message; long answers continue in
-follow-ups. Tools run without asking — that is the point (you are the only allowed user),
-so keep the token private and use `--no-tools` if you want chat only.
+ignored. It connects to the Discord gateway, so it shows **online with a status** that says
+what it is doing (`💤 ready`, `⚙️ writing…`, `🔧 run_powershell`), and it uses the equipped
+provider keys the app mirrors into the shared store — the key you set in Settings works
+here without a second copy. It keeps one conversation with history (`/new` resets it), and
+commands:
+
+- `/seefull` — toggle **Full Display**: every finished thought is posted as small grey
+  `-#` text and every action as its own box (`📦 **Ran a command:** …`); thoughts are only
+  sent once the model has finished thinking.
+- `/effort <level>` — change the thinking effort (`default`, `none`, `low`, `medium`,
+  `high`, `xhigh`, `max`); `/effort` lists what the model takes.
+- `/folder <path>` sets where tools work, `/model provider:id` switches model, `/status`
+  shows the current setup, `/stop` stops the reply, `/help` lists everything.
+
+Replies are edited into one Discord message; long answers continue in follow-ups. Tools run
+without asking — that is the point (you are the only allowed user), so keep the token
+private and use `--no-tools` if you want chat only. In Settings → Auto, *Start the Discord
+bot* keeps the bot running with the app.
 
 ## The full UI on your phone, across networks
 

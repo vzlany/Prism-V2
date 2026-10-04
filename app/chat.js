@@ -437,8 +437,9 @@ class Chat {
   conv.extraSystem = 'You are a subagent: the main agent handed you one task to complete autonomously. Work with your tools until it is done or you are certain it cannot be, then reply with a short, factual report of what you did, what you found and anything the main agent must know. You cannot ask the user questions; if something would need approval it is refused, so work around it and say so in the report.';
   this.conversations.set(record.id, conv);
   this.attach(conv);
-  // Subagents are hidden from the chat list, so the Runs tab is where they are watched.
-  window.ParallelRuns?.add({ id: record.id, title: String(label || promptText).slice(0, 80), model: I18n.t('runs.subagent'), status: 'running', snippet: '' });
+  // Subagents are hidden from the chat list, so the Runs tab is where they are watched. The
+  // prompt is shown there from the first moment, not only when the run ends.
+  window.ParallelRuns?.add({ id: record.id, title: String(label || promptText).slice(0, 80), model: I18n.t('runs.subagent'), status: 'running', snippet: String(promptText).slice(0, 140) });
   const done = new Promise(resolve => { conv.awaitDone = resolve; });
   this.run(conv, { text: promptText, attachments: [] }, this.config(parent), null);
   this.onChange();
@@ -463,7 +464,7 @@ class Chat {
    this.attach(conv);
    if (delegating) this.delegate(conv, { text, attachments: [] });
    else this.run(conv, { text, attachments: [] }, this.config(conv), null);
-   window.ParallelRuns?.add({ id: record.id, title: record.title, model: entry.name || entry.id, status: 'running', snippet: '' });
+   window.ParallelRuns?.add({ id: record.id, title: record.title, model: entry.name || entry.id, status: 'running', snippet: String(text).slice(0, 140) });
    ids.push(record.id);
   }
   this.onChange();
@@ -1305,11 +1306,24 @@ class Chat {
   if (conv === this.active) this.followBottom();
   this.publishLive(conv, turn);
   const id = turn.tool = `${conv.id}-${++this.tools}`;
-  // A subagent card carries a way into the conversation the subagent works in.
-  if (card && name === 'subagent') card.addOpen(I18n.t('subagent.open'), () => {
-   const subId = this.subagents?.get(id);
-   if (subId) this.open(subId);
-  });
+  // A subagent card carries a way into the conversation the subagent works in, and a live
+  // clock beside it so the main chat shows how long it has been working.
+  if (card && name === 'subagent') {
+   card.addOpen(I18n.t('subagent.open'), () => {
+    const subId = this.subagents?.get(id);
+    if (subId) this.open(subId);
+   });
+   const timer = document.createElement('span');
+   timer.className = 'tool-timer';
+   timer.title = I18n.t('subagent.running');
+   card.head.insertBefore(timer, card.chevron);
+   const begun = Date.now();
+   const step = () => {
+    timer.textContent = spell(Math.max(1, Math.round((Date.now() - begun) / 1000)));
+    if (card.el.classList.contains('is-running')) timer.timerId = setTimeout(step, 1000);
+   };
+   step();
+  }
   try {
    if (handed) {
     const now = await AgentTools.run('browser_snapshot', {}, { id, cwd });
