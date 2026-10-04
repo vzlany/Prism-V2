@@ -57,9 +57,11 @@ const TITLE_BAR = { height: 36, symbolColor: '#9a9a9a' };
 const STORE_KEY = /^[a-z0-9_-]+(\/[a-z0-9_-]+)?$/;
 
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
-// Packaged builds claim com.prismv2.app; a dev run gets its own id so it can never
-// hijack the taskbar identity of the installed app in the shell's caches.
-app.setAppUserModelId(app.isPackaged ? APP_ID : `${APP_ID}.dev`);
+// Both the packaged build and a development checkout claim com.prismv2.app: Windows dresses
+// the taskbar button with the icon of the Start Menu shortcut that carries the same identity
+// (`installIdentityShortcut`), and that is what gives a checkout the app's own icon instead
+// of Electron's.
+app.setAppUserModelId(APP_ID);
 nativeTheme.themeSource = 'dark';
 Menu.setApplicationMenu(null);
 
@@ -71,7 +73,7 @@ function createShortcut() {
   cwd: ROOT,
   icon: ICON,
   iconIndex: 0,
-  appUserModelId: app.isPackaged ? APP_ID : `${APP_ID}.dev`,
+  appUserModelId: APP_ID,
   description: 'Prism V2',
  });
  console.log(ok ? `Shortcut: ${link}` : 'Could not create the shortcut');
@@ -93,7 +95,7 @@ function installIdentityShortcut() {
    cwd: ROOT,
    icon: ICON,
    iconIndex: 0,
-   appUserModelId: app.isPackaged ? APP_ID : `${APP_ID}.dev`,
+   appUserModelId: APP_ID,
    description: 'Prism V2',
   });
  } catch {}
@@ -218,8 +220,41 @@ function writeAuto(patch) {
  } catch {}
  return next;
 }
+// Windows' own Run key (what setLoginItemSettings writes) points at electron.exe, so Task
+// Manager's startup list shows "electron.exe" with Electron's icon. A shortcut in the
+// Startup folder wears Prism V2's own name and icon instead, and Task Manager lists it by
+// the shortcut — where Windows expects startup apps to live. Other platforms keep the
+// native login item.
+function startupLink() {
+ return path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'Prism V2.lnk');
+}
+function writeStartupShortcut(hidden) {
+ const link = startupLink();
+ fs.mkdirSync(path.dirname(link), { recursive: true });
+ const args = app.isPackaged ? (hidden ? ['--hidden'] : []) : [`"${ROOT}"`, ...(hidden ? ['--hidden'] : [])];
+ try { fs.rmSync(link, { force: true }); } catch {}
+ return shell.writeShortcutLink(link, 'create', {
+  target: process.execPath,
+  args: args.join(' '),
+  cwd: ROOT,
+  icon: ICON,
+  iconIndex: 0,
+  appUserModelId: APP_ID,
+  description: 'Prism V2',
+ });
+}
+function removeStartupShortcut() {
+ try { fs.rmSync(startupLink(), { force: true }); } catch {}
+}
 function applyAuto(auto = readAuto()) {
  try {
+  if (process.platform === 'win32') {
+   // Never leave the old registry entry behind as a second, ugly startup item.
+   app.setLoginItemSettings({ openAtLogin: false });
+   if (auto.login) writeStartupShortcut(Boolean(auto.hidden));
+   else removeStartupShortcut();
+   return;
+  }
   app.setLoginItemSettings({
    openAtLogin: Boolean(auto.login),
    path: process.execPath,
@@ -441,11 +476,13 @@ ipcMain.handle('path:open', (event, target, cwd) => {
  return true;
 });
 
-// A workspace folder without picking one: a fresh one per chat, or the shared Public one.
+// A workspace folder without picking one: the shared Chats folder (all "Chat workspace"
+// conversations live together under one heading instead of one timestamped folder each),
+// or the shared Public one.
 ipcMain.handle('workspace:create', async (event, kind) => {
  if (!fromApp(event)) return null;
  const base = path.join(app.getPath('documents'), 'Prism V2');
- const name = kind === 'public' ? 'Public' : `Chat ${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`;
+ const name = kind === 'public' ? 'Public' : 'Chats';
  const folder = path.join(base, name);
  try {
   await fs.promises.mkdir(folder, { recursive: true });

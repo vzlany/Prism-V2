@@ -1,9 +1,14 @@
 // Real little logos for the model menus, next to the letter badge that shows until the
 // mark arrives: a transparent brand logo when one can be found, the app's favicon after
 // that, a coloured monogram otherwise. No plate is drawn behind them.
+//
+// The brand marks ship with the app (app/brands, the same set ElysianAI uses), so the
+// menus are instant and identical offline; the remote sources are only a fallback for a
+// family the local set does not know.
 (() => {
 'use strict';
 
+const local = name => `brands/${name}.png`;
 const lobe = name => `https://unpkg.com/@lobehub/icons-static-svg/icons/${name}.svg`;
 const simple = slug => `https://cdn.simpleicons.org/${slug}/e8edf5`;
 // Favicons come with their own background baked in: they are clipped like app icons, and
@@ -15,19 +20,23 @@ const favicons = domain => [
 ];
 // [rule, initials, colour, key, sources best first]
 const FAMILIES = [
- [/deepseek/i, 'DS', '#5b74ff', 'deepseek', [{ url: lobe('deepseek-color') }, { url: simple('deepseek') }, ...favicons('deepseek.com')]],
- [/kimi|moonshot/i, 'KM', '#8aa2c8', 'moonshot', [{ url: simple('moonshotai') }, ...favicons('moonshot.ai')]],
- [/glm|zhipu/i, 'GLM', '#0ea5a4', 'zhipu', [{ url: lobe('zhipu-color') }, ...favicons('zhipuai.cn')]],
- [/qwen/i, 'QW', '#7c5cff', 'qwen', [{ url: lobe('qwen-color') }, { url: simple('qwen') }, ...favicons('qwen.ai')]],
- [/minimax/i, 'MM', '#f59e0b', 'minimax', [{ url: lobe('minimax-color') }, ...favicons('minimax.io')]],
- [/longcat/i, 'LC', '#eab308', 'longcat', [{ url: lobe('longcat-color') }, ...favicons('longcat.ai')]],
- [/mimo|xiaomi/i, 'MI', '#ec4899', 'xiaomi', [{ url: simple('xiaomi') }, ...favicons('xiaomi.com')]],
- [/grok|xai/i, 'X', '#a8b3c4', 'xai', [{ url: simple('x') }, ...favicons('x.ai')]],
- [/gpt|openai/i, 'GPT', '#10b981', 'openai', [{ url: lobe('openai'), dark: true }, ...favicons('openai.com')]],
- [/muse/i, 'MS', '#8b5cf6', 'meta', [{ url: lobe('meta-color') }, ...favicons('meta.com')]],
- [/hunyuan|(^|[^a-z])hy\d*([^a-z]|$)/i, 'HY', '#3b82f6', 'hunyuan', [{ url: lobe('hunyuan-color') }, ...favicons('tencent.com')]],
- [/claude|anthropic/i, 'AN', '#d97757', 'claude', [{ url: lobe('claude-color') }, ...favicons('anthropic.com')]],
- [/opencode/i, 'OC', '#9a9a9a', 'opencode', [{ url: simple('opencode') }, ...favicons('opencode.ai')]],
+ [/deepseek/i, 'DS', '#5b74ff', 'deepseek', [{ url: local('deepseek') }, { url: lobe('deepseek-color') }, { url: simple('deepseek') }, ...favicons('deepseek.com')]],
+ [/kimi|moonshot/i, 'KM', '#8aa2c8', 'moonshot', [{ url: local('kimi') }, { url: simple('moonshotai') }, ...favicons('moonshot.ai')]],
+ [/glm|zhipu/i, 'GLM', '#0ea5a4', 'zhipu', [{ url: local('glm') }, { url: lobe('zhipu-color') }, ...favicons('zhipuai.cn')]],
+ [/qwen/i, 'QW', '#7c5cff', 'qwen', [{ url: local('qwen') }, { url: lobe('qwen-color') }, { url: simple('qwen') }, ...favicons('qwen.ai')]],
+ [/minimax/i, 'MM', '#f59e0b', 'minimax', [{ url: local('minimax') }, { url: lobe('minimax-color') }, ...favicons('minimax.io')]],
+ [/longcat/i, 'LC', '#eab308', 'longcat', [{ url: local('longcat') }, { url: lobe('longcat-color') }, ...favicons('longcat.ai')]],
+ [/mimo|xiaomi/i, 'MI', '#ec4899', 'xiaomi', [{ url: local('xiaomi') }, { url: simple('xiaomi') }, ...favicons('xiaomi.com')]],
+ [/grok|xai/i, 'X', '#a8b3c4', 'xai', [{ url: local('grok') }, { url: simple('x') }, ...favicons('x.ai')]],
+ [/gpt|openai/i, 'GPT', '#10b981', 'openai', [{ url: local('gpt') }, { url: lobe('openai'), dark: true }, ...favicons('openai.com')]],
+ [/muse|llama|(^|[^a-z])meta([^a-z]|$)/i, 'MS', '#8b5cf6', 'meta', [{ url: local('muse-llama') }, { url: lobe('meta-color') }, ...favicons('meta.com')]],
+ [/hunyuan|(^|[^a-z])hy\d*([^a-z]|$)/i, 'HY', '#3b82f6', 'hunyuan', [{ url: local('hy') }, { url: lobe('hunyuan-color') }, ...favicons('tencent.com')]],
+ [/claude|anthropic/i, 'AN', '#d97757', 'claude', [{ url: local('anthropic') }, { url: lobe('claude-color') }, ...favicons('anthropic.com')]],
+ [/opencode/i, 'OC', '#9a9a9a', 'opencode', [{ url: local('opencode') }, { url: simple('opencode') }, ...favicons('opencode.ai')]],
+ [/gemma/i, 'GE', '#4285f4', 'gemma', [{ url: local('gemma') }, { url: lobe('gemma-color') }, ...favicons('ai.google.dev')]],
+ [/google|gemini|gemma/i, 'GO', '#4285f4', 'google', [{ url: local('google') }, { url: lobe('google-color') }, ...favicons('google.com')]],
+ [/nvidia/i, 'NV', '#76b900', 'nvidia', [{ url: local('nvidia') }, { url: simple('nvidia') }, ...favicons('nvidia.com')]],
+ [/ollama/i, 'OL', '#c4c4c4', 'ollama', [{ url: local('ollama') }, { url: simple('ollama') }, ...favicons('ollama.com')]],
 ];
 
 const cache = new Map();

@@ -2,6 +2,9 @@
 'use strict';
 
 const PACE = { lag: 0.28, drain: 0.14, min: 40, max: 2400, smooth: 0.1 };
+// One DOM repaint per this many milliseconds while the answer streams: more than enough for
+// the eye, and it keeps a fast model from rebuilding markdown on every single frame.
+const PAINT_MS = 32;
 const WAVE = { duration: 220, max: 90, spread: 50 };
 const GROW_SETTLE = 300;
 const SWAP = new Set(['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
@@ -46,6 +49,40 @@ class StreamView {
   }
  }
 
+ // The same block-for-block patch the live stream uses, but with no typing wave: a block
+ // whose rendered html did not change keeps its DOM node, so a code block in a thought is
+ // never rebuilt (and never flashes) just because a word arrived somewhere else. Used by
+ // the Thought box, which repaints on a timer rather than a frame.
+ static patch(root, source, { cache = null, tones = null, onChange = null, live = false } = {}) {
+  const picked = tones || root.__tones || (root.__tones = shuffle(Markdown.TONES, seeded(source)));
+  const blocks = Markdown.blocks(source, { live, tones: picked, cache });
+  const template = root.__patchTemplate || (root.__patchTemplate = document.createElement('template'));
+  const kids = root.children;
+  let diagrams = false;
+  for (let k = 0; k < blocks.length; k++) {
+   const html = blocks[k], el = kids[k];
+   if (el && el.__html === html) continue;
+   template.innerHTML = html;
+   const node = document.importNode(template.content.firstElementChild, true);
+   if (el) el.replaceWith(node);
+   else root.appendChild(node);
+   node.__html = html;
+   if (!diagrams && html.includes('md-diagram')) diagrams = true;
+  }
+  while (kids.length > blocks.length) kids[kids.length - 1].remove();
+  if (diagrams && window.Diagram) {
+   Diagram.prewarm();
+   for (const el of root.querySelectorAll('.md-diagram')) {
+    const value = el.dataset.diagram || '';
+    if (el.__source === value) continue;
+    el.__source = value;
+    el.__live = false;
+    el.__view ||= Diagram.view(el, picked, onChange);
+    el.__view.update(value, false);
+   }
+  }
+ }
+
  constructor(root, { onChange } = {}) {
   this.root = root;
   this.onChange = onChange;
@@ -63,6 +100,7 @@ class StreamView {
   this.settling = [];
   this.raf = 0;
   this.last = 0;
+  this.lastPaint = 0;
   this.tick = this.tick.bind(this);
   this.finished = new Promise(resolve => { this.resolve = resolve; });
  }
@@ -92,7 +130,12 @@ class StreamView {
   this.advance(dt);
   const end = this.source.length, count = this.cut();
   const final = this.done && count === end;
-  if (count !== this.painted || final !== this.final) this.paint(count, final, now, dt);
+  // The DOM half of the typewriter is the expensive one: at most one repaint per ~30ms
+  // while text is arriving, so a long answer cannot pin the main thread on every frame.
+  // The last frame is always painted, even when it lands inside that budget.
+  const changed = count !== this.painted || final !== this.final;
+  const due = final || this.painted < 0 || now - this.lastPaint >= PAINT_MS;
+  if (changed && due) this.paint(count, final, now, dt);
   this.sweep(now);
   this.settle(now);
   if (count < end || this.alive.length || this.settling.length) this.raf = requestAnimationFrame(this.tick);
@@ -118,6 +161,7 @@ class StreamView {
  paint(count, final, now, dt) {
   this.painted = count;
   this.final = final;
+  this.lastPaint = now;
   const blocks = Markdown.blocks(this.source.slice(0, count), { live: !final, tones: this.tones, cache: this.cache });
   const wave = { spans: [], animate: !reducedMotion() && window.Effects?.typing() !== false };
   const kids = this.root.children;

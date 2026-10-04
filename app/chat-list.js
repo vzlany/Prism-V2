@@ -74,7 +74,7 @@ function place(parent, children) {
 }
 
 class ChatList {
- constructor({ root, library, chat, onNewFolder, onNewChat, onLock }) {
+ constructor({ root, library, chat, onNewFolder, onNewChat, onLock, onDashboard }) {
   this.root = root;
   this.list = root.querySelector('.chats-list');
   this.library = library;
@@ -82,6 +82,7 @@ class ChatList {
   this.onNewFolder = onNewFolder;
   this.onNewChat = onNewChat;
   this.onLock = onLock;
+  this.onDashboard = onDashboard;
   this.query = '';
   this.rows = new Map();
   this.groups = new Map();
@@ -95,6 +96,14 @@ class ChatList {
   this.tick = this.tick.bind(this);
   this.pinnedHead = this.heading(I18n.t('chats.pinned'));
   this.foldersHead = this.heading(I18n.t('chats.folders'), { action: 'new-folder', label: I18n.t('folder.new'), icon: Glyphs.folderAdd });
+  // The Dashboard row above Folders: press it for the whole picture of Prism, the chats and
+  // the models behind them.
+  this.dashboardHead = element('button', 'chats-dashboard');
+  this.dashboardHead.type = 'button';
+  this.dashboardHead.dataset.action = 'dashboard';
+  this.dashboardHead.innerHTML = `${Glyphs.grid}<span class="chats-dashboard-text">${I18n.t('dashboard.title')}</span>`;
+  this.dashboardHead.title = I18n.t('dashboard.open');
+  this.dashboardHead.setAttribute('aria-label', I18n.t('dashboard.open'));
   this.hint = element('div', 'chats-empty is-hint');
   this.draft = this.row({ id: '' });
   this.draft.row.classList.add('is-draft', 'is-active');
@@ -379,6 +388,7 @@ class ChatList {
   const draft = !query && this.chat.folder;
   const order = [this.glide];
   if (pinned.length) order.push(this.pinnedHead, ...pinned.map(chat => this.item(chat, seen)));
+  order.push(this.dashboardHead);
   order.push(this.foldersHead);
   for (const { folder, chats } of folders) order.push(this.folder(folder, chats, !!query, seen, !!draft && key(draft.path) === key(folder.path)));
   for (const [path, group] of this.groups) if (!lib.folders.some(folder => key(folder.path) === path)) { clearTimeout(group.timer); this.groups.delete(path); }
@@ -465,7 +475,8 @@ class ChatList {
   const button = event.target.closest('[data-action]');
   if (button) {
    const id = button.closest('.chat-row')?.dataset.id, group = button.closest('.chats-folder')?.__group;
-   if (button.dataset.action === 'new-folder') this.onNewFolder();
+   if (button.dataset.action === 'dashboard') this.onDashboard?.();
+   else if (button.dataset.action === 'new-folder') this.onNewFolder();
    else if (button.dataset.action === 'new-chat') this.newChat(group);
    else if (button.dataset.action === 'delete-folder') this.askDeleteFolder(group);
    else if (button.dataset.action === 'rename-folder') this.renameFolder(group);

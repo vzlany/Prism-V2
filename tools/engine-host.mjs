@@ -134,10 +134,10 @@ export function createEngineHost({ profile = "" } = {}) {
   }
  });
  handlers.set("path:open", (event, target, cwd) => typeof target === "string" && target ? electron.shell.openPath(fullPath(target, cwd)) : false);
- // A folder without picking one: a fresh per-chat workspace, or the shared Public one.
+ // A folder without picking one: the shared Chats folder, or the shared Public one.
  handlers.set("workspace:create", (event, kind) => {
   const base = join(process.env.USERPROFILE || process.env.HOME || ".", "Prism V2");
-  const name = kind === "public" ? "Public" : `Chat ${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}`;
+  const name = kind === "public" ? "Public" : "Chats";
   const folder = join(base, name);
   try { mkdirSync(folder, { recursive: true }); return { path: folder, name }; } catch { return null; }
  });

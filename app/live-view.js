@@ -77,7 +77,10 @@ class LiveView {
   const text = String(part.text || '');
   if (text !== node.text) {
    node.text = text;
-   StreamView.render(node.el, text);
+   node.cache ||= new Map();
+   // The patch keeps finished blocks in place, so a code block does not blink on every update.
+   if (window.StreamView?.patch) StreamView.patch(node.el, text, { cache: node.cache });
+   else StreamView.render(node.el, text);
   }
  }
 }

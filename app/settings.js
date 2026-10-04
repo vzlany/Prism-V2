@@ -1,7 +1,7 @@
 (() => {
 'use strict';
 
-const STORAGE = { effort: 'deepseek.effort', mode: 'openghost.mode', model: 'openghost.model', catalog: 'openghost.catalog', catalogAt: 'openghost.catalogAt' };
+const STORAGE = { effort: 'deepseek.effort', mode: 'openghost.mode', model: 'openghost.model', catalog: 'openghost.catalog', catalogAt: 'openghost.catalogAt', apis: 'openghost.apis', apiActive: 'openghost.apiActive' };
 const KEYS = { openai: 'openai.apiKey', anthropic: 'anthropic.apiKey', deepseek: 'deepseek.apiKey', 'opencode-go': 'opencode-go.apiKey' };
 // The order providers appear in, in the settings and in the model picker.
 const ORDER = ['opencode-go', 'chatgpt', 'openai', 'anthropic', 'deepseek'];
@@ -31,8 +31,12 @@ const CATALOG_TTL = 6 * 60 * 60 * 1000;
 const CATALOG_EVERY = 30 * 60 * 1000;
 
 const escapeHtml = text => String(text).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const uid = () => `api_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 
-function keyRow(provider) {
+// One provider can hold several API keys: entries live in localStorage under one list, one
+// of them is equipped and is the one every model call uses. The old single-key storage is
+// folded in on first load, so nothing typed before is lost.
+function apiRow(provider) {
  const [href, host] = LINKS[provider];
  const note = I18n.has(`settings.${provider}.note`) ? ` ${escapeHtml(I18n.t(`settings.${provider}.note`))}` : '';
  return `
@@ -40,9 +44,15 @@ function keyRow(provider) {
    <div class="settings-text">
     <label class="settings-label" for="settings-key-${provider}">${escapeHtml(I18n.t(`settings.${provider}.key`))}</label>
     <p class="settings-hint"><span>${escapeHtml(I18n.t(`settings.${provider}.hint`))}</span> <a href="${href}" target="_blank" rel="noopener noreferrer">${host}</a>.${note}</p>
+    <p class="settings-hint">${escapeHtml(I18n.t('settings.api.multiHint'))}</p>
    </div>
    <div class="settings-control">
-    <input id="settings-key-${provider}" class="settings-key is-secret" data-provider="${provider}" type="text" placeholder="${provider === 'anthropic' ? 'sk-ant-…' : 'sk-…'}" autocomplete="off" spellcheck="false">
+    <div class="api-list" data-provider="${provider}" role="radiogroup" aria-label="${escapeHtml(I18n.t(`settings.${provider}.key`))}"></div>
+    <div class="mcp-add-row api-add-row">
+     <input class="settings-key api-new-name" placeholder="${escapeHtml(I18n.t('settings.api.namePlaceholder'))}" autocomplete="off" spellcheck="false">
+     <input id="settings-key-${provider}" class="settings-key api-new-key is-secret" type="text" placeholder="${provider === 'anthropic' ? 'sk-ant-…' : 'sk-…'}" autocomplete="off" spellcheck="false">
+     <button type="button" class="settings-button is-primary" data-api-add="${provider}">${escapeHtml(I18n.t('settings.api.add'))}</button>
+    </div>
     <p class="settings-status" data-provider="${provider}" role="status"></p>
    </div>
   </div>`;
@@ -83,7 +93,9 @@ class Settings {
  constructor(dialog) {
   this.dialog = dialog;
   this.list = dialog.querySelector('.settings-providers');
-  this.keys = Object.fromEntries(Object.entries(KEYS).map(([provider, key]) => [provider, localStorage.getItem(key) || '']));
+  this.apis = this.readApis();
+  this.activeApi = this.readActive();
+  this.keys = Object.fromEntries(Object.keys(KEYS).map(provider => [provider, this.equippedKey(provider)]));
   this.account = { connected: false };
   this.catalog = this.readCatalog();
   this.shared = {};
@@ -106,6 +118,155 @@ class Settings {
   this.collect();
   dialog.addEventListener('dismiss', () => dialog.close());
   this.refreshAll();
+ }
+
+ // ------------------------------------------------------------- API keys per provider
+ // The old single key per provider migrates into the list the first time this runs.
+ readApis() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(STORAGE.apis)) || {}; } catch {}
+  const apis = {};
+  for (const provider of Object.keys(KEYS)) {
+   const list = Array.isArray(saved[provider]) ? saved[provider].filter(entry => entry?.key) : [];
+   const legacy = (localStorage.getItem(KEYS[provider]) || '').trim();
+   if (legacy && !list.some(entry => entry.key === legacy)) list.unshift({ id: uid(), name: I18n.t('settings.api.default'), key: legacy, at: Date.now() });
+   apis[provider] = list.map((entry, k) => ({ id: entry.id || uid(), name: String(entry.name || `${I18n.t('settings.api.default')} ${k + 1}`), key: String(entry.key), at: Number(entry.at) || Date.now() }));
+  }
+  return apis;
+ }
+
+ saveApis() {
+  try { localStorage.setItem(STORAGE.apis, JSON.stringify(this.apis)); } catch {}
+ }
+
+ readActive() {
+  try { return JSON.parse(localStorage.getItem(STORAGE.apiActive)) || {}; } catch { return {}; }
+ }
+
+ saveActive() {
+  try { localStorage.setItem(STORAGE.apiActive, JSON.stringify(this.activeApi)); } catch {}
+ }
+
+ equipped(provider) {
+  const list = this.apis[provider] || [];
+  const active = list.find(entry => entry.id === this.activeApi[provider]);
+  return active || list[0] || null;
+ }
+
+ equippedKey(provider) {
+  return this.equipped(provider)?.key || '';
+ }
+
+ // Equipping writes the key the rest of the app already reads (this.keys + the old storage
+ // key), so every model call and every "is it connected" check follows at once.
+ equip(provider, id) {
+  if (!this.apis[provider]?.some(entry => entry.id === id)) return;
+  this.activeApi[provider] = id;
+  this.saveActive();
+  this.keys[provider] = this.equippedKey(provider);
+  if (this.keys[provider]) localStorage.setItem(KEYS[provider], this.keys[provider]);
+  else localStorage.removeItem(KEYS[provider]);
+  this.accepted.delete(provider);
+  this.checked.delete(provider);
+  this.paintApis(provider);
+  this.paint();
+  this.changed();
+  if (this.keys[provider]) this.checkKey(provider);
+ }
+
+ addApi(provider, name, key) {
+  const value = String(key || '').trim();
+  if (!value) return false;
+  const list = this.apis[provider] ||= [];
+  const entry = { id: uid(), name: String(name || '').trim() || `${I18n.t('settings.api.default')} ${list.length + 1}`, key: value, at: Date.now() };
+  list.push(entry);
+  this.saveApis();
+  this.activeApi[provider] = entry.id;
+  this.saveActive();
+  this.keys[provider] = entry.key;
+  localStorage.setItem(KEYS[provider], entry.key);
+  this.accepted.delete(provider);
+  this.checked.delete(provider);
+  this.paintApis(provider);
+  this.paint();
+  this.changed();
+  this.checkKey(provider);
+  return true;
+ }
+
+ removeApi(provider, id) {
+  const list = this.apis[provider] || [];
+  const at = list.findIndex(entry => entry.id === id);
+  if (at < 0) return;
+  list.splice(at, 1);
+  if (this.activeApi[provider] === id) delete this.activeApi[provider];
+  this.saveApis();
+  this.saveActive();
+  this.keys[provider] = this.equippedKey(provider);
+  if (this.keys[provider]) localStorage.setItem(KEYS[provider], this.keys[provider]);
+  else localStorage.removeItem(KEYS[provider]);
+  this.accepted.delete(provider);
+  this.checked.delete(provider);
+  this.paintApis(provider);
+  this.paint();
+  this.changed();
+  if (this.keys[provider]) this.checkKey(provider);
+ }
+
+ renameApi(provider, id, name) {
+  const entry = this.apis[provider]?.find(item => item.id === id);
+  if (!entry) return;
+  entry.name = String(name || '').trim() || entry.name;
+  this.saveApis();
+  this.paintApis(provider);
+ }
+
+ // The key of one entry changed in place; the equipped one updates the live key at once.
+ editApi(provider, id, key) {
+  const entry = this.apis[provider]?.find(item => item.id === id);
+  if (!entry) return;
+  entry.key = String(key);
+  this.saveApis();
+  const active = this.activeApi[provider] ? this.equipped(provider) : null;
+  if ((active && active.id === id) || (!this.activeApi[provider] && (this.apis[provider] || [])[0]?.id === id)) {
+   this.keys[provider] = entry.key;
+   if (entry.key) localStorage.setItem(KEYS[provider], entry.key);
+   else localStorage.removeItem(KEYS[provider]);
+   this.accepted.delete(provider);
+   this.checked.delete(provider);
+   clearTimeout(this.timer?.[provider]);
+   this.timer = { ...this.timer };
+   this.paint();
+   if (entry.key) {
+    this.setStatus(provider, I18n.t('settings.key.checking'));
+    this.timer[provider] = setTimeout(() => this.checkKey(provider), CHECK_DELAY);
+   } else this.changed();
+  }
+ }
+
+ // Draws the provider's key list: one row per saved API, the equipped one first in the
+ // radio group, with Add (above) collecting a new one.
+ paintApis(provider) {
+  const box = this.list?.querySelector(`.api-list[data-provider="${provider}"]`);
+  if (!box) return;
+  const list = this.apis[provider] || [];
+  const active = this.equipped(provider)?.id || '';
+  box.innerHTML = list.length ? list.map(entry => `
+   <div class="api-item${entry.id === active ? ' is-active' : ''}" data-id="${escapeHtml(entry.id)}">
+    <input type="radio" name="api-${provider}" class="api-radio" value="${escapeHtml(entry.id)}" ${entry.id === active ? 'checked' : ''} aria-label="${escapeHtml(I18n.t('settings.api.equip'))}">
+    <input class="api-name" value="${escapeHtml(entry.name)}" spellcheck="false" autocomplete="off" aria-label="${escapeHtml(I18n.t('settings.api.name'))}">
+    <input class="api-key is-secret" value="${escapeHtml(entry.key)}" spellcheck="false" autocomplete="off" aria-label="${escapeHtml(I18n.t(`settings.${provider}.key`))}">
+    <button type="button" class="api-remove" title="${escapeHtml(I18n.t('settings.api.remove'))}" aria-label="${escapeHtml(I18n.t('settings.api.remove'))}">×</button>
+   </div>`).join('')
+   : `<p class="api-empty">${escapeHtml(I18n.t('settings.api.empty'))}</p>`;
+  for (const item of box.querySelectorAll('.api-item')) {
+   const id = item.dataset.id;
+   item.querySelector('.api-radio')?.addEventListener('change', () => this.equip(provider, id));
+   item.querySelector('.api-name')?.addEventListener('change', event => this.renameApi(provider, id, event.target.value));
+   item.querySelector('.api-key')?.addEventListener('input', event => this.editApi(provider, id, event.target.value));
+   item.querySelector('.api-remove')?.addEventListener('click', () => this.removeApi(provider, id));
+  }
+  box.querySelector(`.api-radio[value="${CSS.escape(active)}"]`)?.closest('.api-item')?.classList.add('is-active');
  }
 
  readCatalog() {
@@ -300,17 +461,24 @@ class Settings {
 
  build() {
   this.list.innerHTML = [
-   section('opencode-go', 'OpenCode Go', keyRow('opencode-go')),
-   section('openai', 'OpenAI', accountRow() + keyRow('openai')),
-   section('anthropic', 'Anthropic', keyRow('anthropic')),
-   section('deepseek', 'DeepSeek', keyRow('deepseek')),
+   section('opencode-go', 'OpenCode Go', apiRow('opencode-go')),
+   section('openai', 'OpenAI', accountRow() + apiRow('openai')),
+   section('anthropic', 'Anthropic', apiRow('anthropic')),
+   section('deepseek', 'DeepSeek', apiRow('deepseek')),
   ].join('');
   this.inputs = {};
-  for (const input of this.list.querySelectorAll('.settings-key')) {
-   const provider = input.dataset.provider;
-   this.inputs[provider] = input;
-   input.value = this.keys[provider];
-   input.addEventListener('input', () => this.onKeyInput(provider));
+  for (const provider of Object.keys(KEYS)) {
+   this.paintApis(provider);
+   const add = this.list.querySelector(`[data-api-add="${provider}"]`);
+   const name = add?.closest('.api-add-row')?.querySelector('.api-new-name');
+   const key = add?.closest('.api-add-row')?.querySelector('.api-new-key');
+   this.inputs[provider] = key;
+   const submit = () => {
+    if (this.addApi(provider, name?.value, key?.value) && name && key) { name.value = ''; key.value = ''; }
+    key?.focus();
+   };
+   add?.addEventListener('click', submit);
+   key?.addEventListener('keydown', event => { if (event.key === 'Enter') submit(); });
   }
   this.statuses = Object.fromEntries([...this.list.querySelectorAll('.settings-status')].map(node => [node.dataset.provider, node]));
   this.accountBox = this.list.querySelector('.settings-account');
@@ -362,6 +530,7 @@ class Settings {
   const bar = document.querySelector('.settings-scrollbar');
   if (bar) bar.style.display = name === 'mcp' ? 'none' : '';
   if (name === 'mcp') this.paintMcp();
+  if (name === 'prompt') this.paintPrompt();
   if (name === 'effects') this.paintEffects();
   if (name === 'memory') this.paintMemory();
   if (name === 'auto') this.paintAuto();
@@ -433,8 +602,75 @@ class Settings {
   node.classList.toggle('is-error', tone === 'error');
  }
 
- async paintMemory() {
-  const node = this.dialog.querySelector('.settings-memory-page');
+ // Settings -> Prompt: a global system prompt (switchable) and a prompt per model.
+ async paintPrompt() {
+  const node = this.dialog.querySelector('.settings-prompt-page');
+  if (!node || !window.Prompts) return;
+  const data = await window.Prompts.load(true);
+  const models = this.models || [];
+  const options = models.map(model => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.name || model.id)}</option>`).join('');
+  node.innerHTML = `
+   <div class="settings-row is-wide">
+    <div class="settings-text">
+     <span class="settings-label">${escapeHtml(I18n.t('settings.prompt.global'))}</span>
+     <p class="settings-hint">${escapeHtml(I18n.t('settings.prompt.globalHint'))}</p>
+    </div>
+    <div class="settings-control">
+     <label class="mcp-auto"><input type="checkbox" class="prompt-enabled"${data.enabled ? ' checked' : ''}>${escapeHtml(I18n.t('settings.prompt.enabled'))}</label>
+     <textarea class="settings-key prompt-global" rows="5" spellcheck="true" placeholder="${escapeHtml(I18n.t('settings.prompt.placeholder'))}">${escapeHtml(data.global)}</textarea>
+    </div>
+   </div>
+   <div class="settings-row is-wide">
+    <div class="settings-text">
+     <span class="settings-label">${escapeHtml(I18n.t('settings.prompt.module'))}</span>
+     <p class="settings-hint">${escapeHtml(I18n.t('settings.prompt.moduleHint'))}</p>
+    </div>
+    <div class="settings-control">
+     ${models.length ? `<select class="settings-select prompt-model" aria-label="${escapeHtml(I18n.t('settings.prompt.model'))}">${options}</select>
+     <textarea class="settings-key prompt-model-text" rows="4" spellcheck="true" placeholder="${escapeHtml(I18n.t('settings.prompt.modelPrompt'))}"></textarea>` : `<p class="settings-hint">${escapeHtml(I18n.t('settings.prompt.empty'))}</p>`}
+    </div>
+   </div>
+   <p class="settings-status" data-provider="prompt" role="status"></p>`;
+  const flush = async (patch = {}) => {
+   const current = await window.Prompts.load();
+   const next = await window.Prompts.save({ ...current, ...patch });
+   this.setStatus('prompt', I18n.t('settings.prompt.saved'));
+   return next;
+  };
+  const enabled = node.querySelector('.prompt-enabled');
+  const global = node.querySelector('.prompt-global');
+  const select = node.querySelector('.prompt-model');
+  const modelText = node.querySelector('.prompt-model-text');
+  let timer = 0;
+  const queue = run => {
+   clearTimeout(timer);
+   timer = setTimeout(() => Promise.resolve().then(run).catch(() => {}), 350);
+  };
+  global?.addEventListener('input', () => queue(() => flush({ global: global.value })));
+  enabled?.addEventListener('change', () => queue(() => flush({ enabled: enabled.checked })));
+  let shown = select?.value || '';
+  const showModel = () => { if (modelText) modelText.value = data.models?.[shown] || ''; };
+  const commitModel = async () => {
+   const current = await window.Prompts.load();
+   const models = { ...(current.models || {}) };
+   const value = (modelText?.value || '').trim();
+   if (value) models[shown] = modelText.value;
+   else delete models[shown];
+   await window.Prompts.save({ ...current, models });
+   data.models = models;
+   this.setStatus('prompt', I18n.t('settings.prompt.saved'));
+  };
+  select?.addEventListener('change', async () => {
+   clearTimeout(timer);
+   await commitModel();
+   shown = select.value;
+   showModel();
+  });
+  modelText?.addEventListener('input', () => queue(commitModel));
+  showModel();
+ }
+
+ async paintMemory() {  const node = this.dialog.querySelector('.settings-memory-page');
   if (!node || !window.openghost?.memory) return;
   let memories = [];
   try { memories = (await window.openghost.memory.list()) || []; } catch {}
@@ -824,25 +1060,6 @@ for (const button of node.querySelectorAll('[data-effect-group]')) {
   for (const provider of Object.keys(KEYS)) {
    if (this.keys[provider] && !this.checked.has(provider)) this.checkKey(provider);
   }
- }
-
- onKeyInput(provider) {
-  const key = this.inputs[provider].value.trim();
-  this.keys[provider] = key;
-  if (key) localStorage.setItem(KEYS[provider], key);
-  else localStorage.removeItem(KEYS[provider]);
-  clearTimeout(this.timer?.[provider]);
-  this.timer = { ...this.timer };
-  this.checked.delete(provider);
-  this.accepted.delete(provider);
-  if (!key) {
-   this.setStatus(provider, '');
-   this.changed();
-   return;
-  }
-  this.paint();
-  this.setStatus(provider, I18n.t('settings.key.checking'));
-  this.timer[provider] = setTimeout(() => this.checkKey(provider), CHECK_DELAY);
  }
 
  // A working key shows only in the badge; the line under the field is for the check in progress and for what went wrong.

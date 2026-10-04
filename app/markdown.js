@@ -471,7 +471,11 @@ function renderCode(block, state, live) {
  }
  const first = block.body.split('\n').find(line => line.trim()) || '';
  const art = ART_LANGS.has(lang) && ART.test(first);
- const body = art ? artHtml(block.body) : Highlight.code(block.body, lang);
+ // A fence that is still being written renders as plain text: re-highlighting it on every
+ // arriving character is what made code in a live thought crawl. It gets its colours the
+ // moment the fence closes (or the stream ends).
+ const growing = !block.closed && live;
+ const body = art ? artHtml(block.body) : growing ? escapeHtml(block.body) : Highlight.code(block.body, lang);
  const label = lang || (art ? 'diagram' : 'code');
  return `<div${classes('md-code', art && 'is-art', tone(state.tone || (art ? state.tones[0] : '')))}><div class="md-code-bar"><span class="md-code-lang">${escapeHtml(label)}</span>`
   + `<button class="md-copy" type="button" aria-label="${I18n.t('code.copy')}">${COPY_ICON}</button></div><pre><code>${body}</code></pre></div>`;

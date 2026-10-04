@@ -25,8 +25,8 @@ here is in this repository; nothing else was removed.
   itself, so a headless `prism web` still works.
 - **Live mirror of the running turn.** The phone sees the same thing the app does while it
   works: the Thought box growing, the tool cards running (white snake included, same icon and
-  title), and the answer being written — as a live card at the end of the thread that is
-  replaced by the saved conversation when the turn ends.
+  title), and the answer being written — laid out exactly like the app's own message, not
+  wrapped in an extra card, and replaced by the saved conversation when the turn ends.
 - **Instant sync both ways.** The shared store is watched on both sides (index and every
   conversation file), so a project, a chat, a rename or a finished reply shows up in the other
   place right away, and an open thread refreshes the moment the other process writes it.
@@ -34,10 +34,23 @@ here is in this repository; nothing else was removed.
   are working.
 - **Settings → Auto** — start with Windows, start hidden (straight into the tray), and start
   the web server with the app on the port you choose (default 8787, reachable from your
-  network).
+  network). On Windows the startup entry is a **Prism V2 shortcut in the Startup folder**
+  with the app's own icon, so Task Manager's startup list says "Prism V2" instead of
+  "electron.exe".
 
 ### Models, prices and effort
 
+- **Several API keys per provider.** Each provider keeps a list of keys in Settings →
+  Providers; add as many as you like, rename them, equip one, and every model call uses the
+  equipped key. The old single key migrates into the list on first run.
+- **Prompt settings.** Settings → Prompt holds a **global system prompt** for every model
+  (toggleable, with Prism V2's built-in agent rules still in place) and a **per-model
+  prompt**; the global one is shared through the store, so a prompt written on the phone is
+  the prompt the desktop app runs delegated turns with.
+- **Real brand icons, shipped with the app.** The model picker, the parallel list and the
+  dashboard wear the same coloured brand marks ElysianAI uses (DeepSeek, Kimi, GLM, Qwen,
+  MiniMax, LongCat, MiMo, Grok, GPT, Muse/Llama, Hunyuan, Claude, OpenCode, Gemma, Google,
+  NVIDIA, Ollama), served from `app/brands/` so they appear instantly and offline.
 - **OpenCode's own pricing** — the `~$` readout uses OpenCode's catalog
   (models.opencode.ai) with cache reads/writes, reasoning tokens and context tiers, cached
   locally with a fallback.
@@ -51,6 +64,15 @@ here is in this repository; nothing else was removed.
   message about to be sent, and the button wears OpenCode's breathing-dots indicator.
 - **Parallel runs are children in the list** — every run (and subagent) started from a
   conversation is drawn under it in the sidebar, indented, with its own busy ghost.
+
+### Dashboard
+
+- **Dashboard row above Folders** — opens a themed panel with everything Prism V2 knows:
+  conversations, messages, tokens and estimated spend, the peak context window, thinking
+  time, memory facts, the models that did the most work (with their logos and share bars),
+  the workspaces that hold the chats, first and last activity, the busiest day and the
+  average messages per chat. It reads the newest conversations quietly in the background and
+  reuses the numbers for a minute.
 
 ### Chat and interface
 
@@ -77,10 +99,18 @@ here is in this repository; nothing else was removed.
 - **Copy that works everywhere** — including a phone on plain http, where the browser
   clipboard is unavailable; the fallback still copies and the buttons answer.
 - **New Folder menu** — the last five workspaces, each forgettable with an ×, and a last entry
-  that opens the folder picker.
+  that opens the folder picker. Choosing **Chat workspace** uses one shared
+  `Documents\Prism V2\Chats` folder, so the list shows a single **Chats** section instead of
+  a timestamped folder per chat.
 - **Phone comfort** — older messages are prerendered in the background so scrolling up finds
   whole messages ready; model names wrap and shrink instead of being cut off; drafts autosave
   per chat and are restored after a reload; the web defaults to Full access.
+- **Fast where it used to stutter** — the streamed answer is repainted at most ~30 times a
+  second and each markdown block is patched in place, so a finished code block is never
+  rebuilt for a word that arrives elsewhere; the per-word typing blur was dropped (opacity
+  and rise only); the Thought box renders its markdown block-by-block on a timer, so code in
+  a long thought no longer flashes or crawls. The window icon is a full multi-size `.ico`
+  (16→256 px) instead of a single 32 px one.
 - **Auto reconnect** — a dropped connection is retried a few times before the error and its
   Retry button appear.
 
@@ -94,7 +124,9 @@ here is in this repository; nothing else was removed.
 ## What Prism already had
 
 - **Memory** — the agent saves durable facts with its `memory_save` tool; Settings → Memory
-  lists them and lets you add or forget.
+  lists them and lets you add or forget. The tool is instructed to keep only facts that
+  matter in other conversations (name, preferences, projects, what this computer has), and a
+  fact that is already there is updated in place instead of saved a second time.
 - **Profiles** — separate workspaces (chats, memory, keys, MCP config); `prism --profile work`.
 - **Subagents** — the agent hands a self-contained job to a background copy of itself.
 - **Plan & Build** — a composer switch that keeps the agent reading and proposing until you

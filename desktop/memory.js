@@ -31,12 +31,48 @@ function save() {
 
 const list = () => load().map(({ id, text, created, updated }) => ({ id, text, created, updated }));
 
+// Facts settle into memory; they don't multiply. The same fact said twice updates the
+// first entry (and the app's screen reader shows it only once), and a fact that merely
+// adds a detail to one already there keeps the fuller sentence. This is what stops every
+// conversation from adding its own near-copy of "the user prefers X".
+const clean = text => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+const words = text => new Set(clean(text).split(' ').filter(word => word.length > 2));
+function overlap(a, b) {
+ const left = words(a), right = words(b);
+ if (!left.size || !right.size) return 0;
+ let shared = 0;
+ for (const word of left) if (right.has(word)) shared++;
+ return shared / Math.max(left.size, right.size);
+}
 function add(text) {
  const value = String(text || '').trim();
  if (!value) return null;
  const now = Date.now();
+ const items = load();
+ const wanted = clean(value);
+ // The same memory, whatever the punctuation: refresh it in place.
+ const same = items.find(item => clean(item.text) === wanted);
+ if (same) {
+  same.updated = now;
+  if (value.length > same.text.length) same.text = value.slice(0, 2000);
+  save();
+  return { ...same, merged: true };
+ }
+ // A close cousin: keep the longer wording and mark it fresh rather than adding a second.
+ const near = items.find(item => {
+  const score = overlap(item.text, value);
+  const cleanItem = clean(item.text);
+  const shorter = Math.min(cleanItem.length, wanted.length);
+  return score >= 0.72 || (shorter > 24 && (cleanItem.includes(wanted) || wanted.includes(cleanItem)));
+ });
+ if (near) {
+  near.text = value.length > near.text.length ? value.slice(0, 2000) : near.text;
+  near.updated = now;
+  save();
+  return { ...near, merged: true };
+ }
  const item = { id: `mem_${crypto.randomBytes(4).toString('hex')}`, text: value.slice(0, 2000), created: now, updated: now };
- load().push(item);
+ items.push(item);
  save();
  return item;
 }

@@ -39,7 +39,7 @@
           <div class="thread-list"></div>
         </div>
         <div class="scrollbar thread-scrollbar" aria-hidden="true"><div class="scrollbar-thumb"></div></div>
-        <scroll-button class="thread-bottom glass-lens"></scroll-button>
+        <scroll-button class="thread-bottom"></scroll-button>
       </div>
       <div class="drop-zone" aria-hidden="true">
         <div class="drop-art"></div>
@@ -88,6 +88,8 @@
 
   <div class="context-panel" popover="auto" role="dialog" aria-label="Conversation statistics"></div>
 
+  <div class="dashboard-panel" popover="auto" role="dialog" aria-label="Dashboard"></div>
+
   <div class="effort-panel" popover="manual" role="dialog" aria-label="Effort" data-i18n-attr="aria-label:effort">
     <div class="effort-name" aria-hidden="true"></div>
     <div class="effort-slider" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="3" aria-label="Effort" data-i18n-attr="aria-label:effort">
@@ -130,6 +132,10 @@
         <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M52 36v10M68 36v10"/><path d="M44 46h32v7a15 15 0 0 1-15 15h-2a15 15 0 0 1-15-15z"/><path d="M60 68v8a6 6 0 0 1-6 6h-4"/></svg>
         <span data-i18n="settings.providers">Providers</span>
       </button>
+      <button type="button" class="settings-tab" data-tab="prompt">
+        <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M38 44h44M38 58h30M38 72h22"/><path d="M78 66l4 12-12-4z"/></svg>
+        <span data-i18n="settings.prompt.tab">Prompt</span>
+      </button>
       <button type="button" class="settings-tab" data-tab="mcp">
         <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="42" cy="45" r="7"/><circle cx="78" cy="45" r="7"/><circle cx="60" cy="78" r="7"/><path d="M47 50l10 22M73 50L63 72M49 45h22"/></svg>
         <span data-i18n="settings.mcp.tab">MCP servers</span>
@@ -158,6 +164,14 @@
       </header>
       <p class="settings-lead" data-i18n="settings.lead">Connect the services whose models Prism V2 can use. Keys and sign-ins stay on this computer.</p>
       <div class="settings-providers"></div>
+    </section>
+    <section class="settings-page" data-page="prompt" hidden aria-labelledby="settings-prompt-title">
+      <header class="settings-page-header">
+        <h2 class="settings-page-title" id="settings-prompt-title" data-i18n="settings.prompt.tab">Prompt</h2>
+        <close-button class="settings-close"></close-button>
+      </header>
+      <p class="settings-lead" data-i18n="settings.prompt.lead">The system prompt sent to the models.</p>
+      <div class="settings-prompt-page"></div>
     </section>
     <section class="settings-page" data-page="mcp" hidden aria-labelledby="settings-mcp-title">
       <header class="settings-page-header">
@@ -212,6 +226,7 @@
   <script src="sounds.js"></script>
   <script src="presence.js"></script>
   <script src="clip.js"></script>
+  <script src="dashboard.js"></script>
   <script src="liquid-glass.js"></script>
   <script src="icon-button.js"></script>
   <script src="sidebar-toggle.js"></script>
@@ -249,6 +264,7 @@
   <script src="attachments.js"></script>
   <script src="lightbox.js"></script>
   <script src="media-slider.js"></script>
+  <script src="prompts.js"></script>
   <script src="settings.js"></script>
   <script src="context-circle.js"></script>
   <script src="effort-paint.js"></script>

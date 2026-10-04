@@ -1138,7 +1138,10 @@ class Chat {
 
  async system(conv) {
   const note = this.note ? `\n\n${this.note}` : '';
-  if (!this.agent(conv)) return FORMAT_GUIDE + note;
+  let custom = '';
+  try { custom = (await window.Prompts?.textFor?.(this.modelOf(conv))) || ''; } catch {}
+  const extra = conv.extraSystem ? `\n\n${conv.extraSystem}` : '';
+  if (!this.agent(conv)) return [FORMAT_GUIDE, custom, note].filter(Boolean).join('\n\n');
   const env = await AgentTools.environment();
   const browser = window.browserPanel?.context() || '';
   const world = await this.world(conv);
@@ -1146,10 +1149,9 @@ class Chat {
   let memory = '';
   try {
    const items = (await window.openghost?.memory?.list?.()) || [];
-   if (items.length) memory = ['# Memory', 'Short facts you saved earlier (with memory_save). Keep them in mind, keep them up to date, and save new durable facts as they come up.', ...items.map(item => `- [${item.id}] ${item.text}`)].join('\n');
+   if (items.length) memory = ['# Memory', 'Short facts you saved earlier (with memory_save). They are meant for every chat, not just the one they were written in: keep only durable things another conversation would need, and never save details that belong to one task.', ...items.map(item => `- [${item.id}] ${item.text}`)].join('\n');
   } catch {}
-  const extra = conv.extraSystem ? `\n\n${conv.extraSystem}` : '';
-  return `${AgentPrompt.build({ folder: conv.record.folder, mode: this.settings.mode, env, browser, mcp, memory, plan: this.agentMode === 'plan' ? PLAN_SECTION : '', instructions, skills })}${extra}\n\n# Formatting\n${FORMAT_GUIDE}${note}`;
+  return `${AgentPrompt.build({ folder: conv.record.folder, mode: this.settings.mode, env, browser, mcp, memory, plan: this.agentMode === 'plan' ? PLAN_SECTION : '', instructions, skills })}${custom ? `\n\n${custom}` : ''}${extra}\n\n# Formatting\n${FORMAT_GUIDE}${note}`;
  }
 
  context() {

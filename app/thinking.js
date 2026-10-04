@@ -142,11 +142,13 @@ class ThinkingView {
  }
 
  // Reasoning is markdown, the way OpenCode shows it: **bold**, `code`, * and 1. lists, - and
- // fenced blocks. At most one render per ~60ms, then one when the thought ends; a timer
- // rather than a frame, so a hidden or throttled window still draws it.
+ // fenced blocks. At most one render per ~90ms, then one when the thought ends; a timer
+ // rather than a frame, so a hidden or throttled window still draws it. The patch is
+ // block-by-block: unchanged blocks (a finished code block, a list above) keep their DOM,
+ // so nothing flashes just because the words kept coming.
  paint() {
   if (this.painted === this.text || this.pending) return;
-  this.pending = setTimeout(() => { this.pending = 0; this.flush(); }, 60);
+  this.pending = setTimeout(() => { this.pending = 0; this.flush(); }, 90);
  }
 
  flush() {
@@ -154,7 +156,9 @@ class ThinkingView {
   this.pending = 0;
   if (this.painted === this.text) return;
   this.painted = this.text;
-  if (window.StreamView?.render) StreamView.render(this.inner, this.text);
+  this.cache ||= new Map();
+  if (window.StreamView?.patch) StreamView.patch(this.inner, this.text, { cache: this.cache, live: Boolean(this.live), onChange: () => this.scroll() });
+  else if (window.StreamView?.render) StreamView.render(this.inner, this.text);
   else this.inner.textContent = this.text;
   this.scroll();
  }
@@ -169,6 +173,7 @@ class ThinkingView {
  fold() {
   this.live = false;
   this.stop();
+  this.flush();
   if (this.extended || this.touched) { this.sync(); return; }
   this.open = false;
   this.sync();

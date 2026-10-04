@@ -116,8 +116,8 @@ const SCHEMAS = [
    },
   },
  }, ['question', 'options']),
- fn('memory_save', 'Save a short fact worth keeping across turns, chats and restarts: the user\'s name, preferences, ongoing projects, or something about yourself. Keep each memory one short self-contained sentence. Use it whenever the user shares something durable. Never save passwords, API keys or one-off details.', {
-  text: { type: 'string', description: 'The fact to remember, one short sentence' },
+ fn('memory_save', 'Save a short, durable fact that will matter in other conversations: the user\'s name and language, standing preferences, ongoing projects, or stable things about this computer (Python is installed, VineFlower is used). One short self-contained sentence per fact, phrased so it makes sense with no chat around it. Save a fact only when it is worth knowing a month from now; never save what belongs to a single chat or task (file paths, plan details, round numbers, what you are doing right now), passwords, API keys or one-off details. Saving a fact that is already there updates it rather than adding a copy.', {
+  text: { type: 'string', description: 'The fact to remember, one short sentence, no chat-specific details' },
  }, ['text']),
  fn('memory_forget', 'Delete a saved memory by its id, or by a piece of its text. The ids are listed in the Memories section of the settings and in your system context.', {
   id: { type: 'string', description: 'Memory id, for example mem_1a2b3c4d' },
@@ -564,7 +564,8 @@ window.AgentTools = {
   }
   if (name === 'memory_save') {
    const item = await window.openghost?.memory?.add(String(args.text ?? ''));
-   return item ? `Saved as ${item.id}.` : 'Nothing to save.';
+   if (!item) return 'Nothing to save.';
+   return item.merged ? `Updated ${item.id}: the memory already existed.` : `Saved as ${item.id}.`;
   }
   if (name === 'memory_forget') {
    const all = (await window.openghost?.memory?.list()) || [];
