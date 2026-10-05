@@ -1,3 +1,4 @@
+// The original built-in agent prompt, kept so Settings -> Prompt can still show it.
 (() => {
 'use strict';
 
@@ -88,7 +89,7 @@ function environment({ folder, mode, env, now }) {
  ].join('\n');
 }
 
-window.AgentPrompt = {
+window.AgentPromptV1 = {
  // The built-in instructions every agent chat starts from, with their {placeholders} still in
  // place — Settings -> Prompt shows this read-only so it is clear what Prism V2 sends on top
  // of the user's own prompts.

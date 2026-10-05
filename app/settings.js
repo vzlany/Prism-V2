@@ -662,6 +662,11 @@ class Settings {
       <summary>${escapeHtml(I18n.t('settings.prompt.builtinFormat'))}</summary>
       <pre class="prompt-pre">${escapeHtml(window.PrismFormat.guide)}</pre>
      </details>` : ''}
+     ${window.AgentPromptV1?.template ? `<details class="prompt-builtin">
+      <summary>${escapeHtml(I18n.t('settings.prompt.builtinV1'))}</summary>
+      <p class="settings-hint">${escapeHtml(I18n.t('settings.prompt.builtinV1Hint'))}</p>
+      <pre class="prompt-pre">${escapeHtml(window.AgentPromptV1.template)}</pre>
+     </details>` : ''}
     </div>
    </div>
    <p class="settings-status" data-provider="prompt" role="status"></p>`;
@@ -747,6 +752,7 @@ class Settings {
   this.skillOff = window.openghost?.skills?.onProgress?.(data => {
    if (data?.stage === 'loading') line(I18n.t('settings.skills.loadingSkill', { name: data.name }));
    else if (data?.stage === 'loaded') line(I18n.t('settings.skills.loadedSkill', { name: data.name }), 'ok');
+   else if (data?.stage === 'backup') line(I18n.t('settings.skills.backupSkill', { name: data.name }), 'ok');
    else if (data?.stage === 'failed') line(String(data.name), 'error');
   });
   const button = node.querySelector('[data-skills-install]');

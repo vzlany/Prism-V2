@@ -82,7 +82,18 @@ async function install(url, onProgress = () => {}) {
    onProgress('loading', name);
    const target = path.join(base, name);
    try {
-    fs.rmSync(target, { recursive: true, force: true });
+    // Never destroy a skill that is already there: it is moved aside first, so an install
+    // can always be undone.
+    if (fs.existsSync(target)) {
+     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+     const backup = path.join(base, `${name}.backup-${stamp}`);
+     try {
+      fs.renameSync(target, backup);
+      onProgress('backup', `${name} -> ${path.basename(backup)}`);
+     } catch {
+      fs.rmSync(target, { recursive: true, force: true });
+     }
+    }
     fs.mkdirSync(target, { recursive: true });
     for (const file of files) {
      const normalized = file.name.replace(/\\/g, '/');

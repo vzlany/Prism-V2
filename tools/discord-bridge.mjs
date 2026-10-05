@@ -177,16 +177,28 @@ function stream(messages, { tools, onDelta, onThought }) {
  return new Promise((resolve, reject) => {
   const id = `dc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   let content = "", reasoning = "";
+  // A model that goes quiet for minutes is not "writing" anymore: abort it so the status
+  // and the DM do not stay stuck on a dead connection.
+  let watchdog = 0;
+  const bump = () => {
+   clearTimeout(watchdog);
+   watchdog = setTimeout(() => {
+    try { host.emit("llm:abort", id); } catch {}
+    reject(new Error("the model stopped responding"));
+   }, 5 * 60 * 1000);
+  };
   const sender = {
    send: (channel, data) => {
     if (channel !== "llm:event" || data?.id !== id) return;
+    bump();
     if (data.type === "content") { content += data.delta; onDelta?.(data.delta); }
     else if (data.type === "reasoning") { reasoning += data.delta; onThought?.(data.delta); }
-    else if (data.type === "done") resolve({ ...data.result, content: data.result?.content ?? content, reasoning: data.result?.reasoning ?? reasoning });
-    else if (data.type === "error") reject(Object.assign(new Error(data.message || "the model stopped"), { status: data.status }));
+    else if (data.type === "done") { clearTimeout(watchdog); resolve({ ...data.result, content: data.result?.content ?? content, reasoning: data.result?.reasoning ?? reasoning }); }
+    else if (data.type === "error") { clearTimeout(watchdog); reject(Object.assign(new Error(data.message || "the model stopped"), { status: data.status })); }
    },
    isDestroyed: () => false,
   };
+  bump();
   host.setSender(sender);
   currentRun = id;
   const [provider, ...rest] = String(state.model).split(":");
@@ -399,7 +411,7 @@ async function replyTo(channel, messageId, text) {
 // --------------------------------------------------------------- gateway (online status + DMs)
 const INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15); // GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT
 const IDLE = "💤 ready";
-let gateway = null, heartbeat = 0, seq = null, gatewayReady = false, shuttingDown = false;
+let gateway = null, heartbeat = 0, seq = null, gatewayReady = false, shuttingDown = false, presenceLoop = 0;
 
 // A custom status (type 4) shows the text itself, so the profile says what Prism is doing.
 // While a reply is being produced the status is dnd, otherwise online.
@@ -408,6 +420,16 @@ function setPresence(name, status = "online") {
  try {
   gateway.send(JSON.stringify({ op: 3, d: { since: 0, status, afk: false, activities: [{ name: "Prism V2", type: 4, state: String(name).slice(0, 128) }] } }));
  } catch {}
+}
+
+// The status is put back to idle every half minute unless a turn is really running, so a
+// missed reset (a dropped gateway, a killed turn) can never leave "writing…" behind.
+function startPresenceLoop() {
+ clearInterval(presenceLoop);
+ presenceLoop = setInterval(() => {
+  if (!gatewayReady || busy || currentRun) return;
+  setPresence(IDLE, "online");
+ }, 30000);
 }
 
 function connectGateway() {
@@ -434,6 +456,8 @@ function connectGateway() {
    if (msg.t === "READY") {
     gatewayReady = true;
     log(`online as ${msg.d?.user?.username || "the bot"}`);
+    setPresence(IDLE, "online");
+    startPresenceLoop();
    } else if (msg.t === "MESSAGE_CREATE") {
     const data = msg.d || {};
     if (data.author?.bot) return;
