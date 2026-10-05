@@ -113,6 +113,9 @@ class Settings {
   // Keys saved in an earlier session count as working until a check says otherwise.
   this.accepted = new Set(Object.keys(KEYS).filter(provider => this.keys[provider]));
   this.syncSharedKeys();
+  // A second, delayed mirror: if the first read happened before storage was ready, this one
+  // fills the bot's copy as soon as the keys are readable.
+  setTimeout(() => this.syncSharedKeys(), 5000);
   this.build();
   this.paintMcp();
   this.paintEffects();
@@ -141,11 +144,20 @@ class Settings {
  }
 
  // The Discord bridge (a separate process) cannot read the browser's localStorage, so the
- // equipped keys are mirrored into the shared store; the bridge reads them from there.
+ // equipped keys are mirrored into the shared store; the bridge reads them from there. The
+ // keys are re-read from storage here, and an empty set is never written: a renderer that
+ // came up before its storage did must not wipe the bot's copy of the keys.
  syncSharedKeys() {
   if (!window.openghost?.store?.write) return;
+  const apis = this.readApis();
+  const active = this.readActive();
   const keys = {};
-  for (const provider of Object.keys(KEYS)) if (this.keys[provider]) keys[provider] = this.keys[provider];
+  for (const provider of Object.keys(KEYS)) {
+   const list = apis[provider] || [];
+   const entry = list.find(item => item.id === active[provider]) || list[0];
+   if (entry?.key) keys[provider] = entry.key;
+  }
+  if (!Object.keys(keys).length) return;
   try { Promise.resolve(window.openghost.store.write('keys', { at: Date.now(), keys })).catch(() => {}); } catch {}
  }
 
