@@ -73,7 +73,7 @@ const lockCard = new LockCard({ chat, library, scroller: document.querySelector(
 const dashboard = new Dashboard({ panel: document.querySelector('.dashboard-panel'), library, settings });
 new WelcomeGhost({ main, root: document.querySelector('.welcome'), input: composerInput });
 folderPill = new FolderPill({ button: document.querySelector('.composer-folder'), library, chat, menu: document.querySelector('.folder-menu') });
-instructionsPill = new InstructionsPill({ button: document.querySelector('.composer-instructions'), menu: document.querySelector('.instructions-menu'), chat });
+instructionsPill = new InstructionsPill({ button: document.querySelector('.composer-instructions'), menu: document.querySelector('.instructions-menu'), chat, library });
 planButton?.addEventListener('click', () => chat.setAgentMode(chat.agentMode === 'plan' ? 'build' : 'plan'));
 window.PrismPlan = { approve: () => chat.setAgentMode('build') };
 window.__prismSubagent = (label, prompt, toolId) => chat.deploySubagent(prompt, label, toolId);

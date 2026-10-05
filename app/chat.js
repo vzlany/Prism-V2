@@ -1133,10 +1133,17 @@ class Chat {
    next.mcp = AgentTools.mcpSummary();
   } catch {}
   try {
-   const chosen = JSON.parse(localStorage.getItem('openghost.instructions') || '{}')[conv.record.folder];
+   // One instruction file for every chat: the global choice first, then an older per-folder
+   // choice for this folder.
+   let chosen = null;
+   try { const global = JSON.parse(localStorage.getItem('openghost.instructionGlobal') || 'null'); if (global?.file) chosen = global; } catch {}
+   if (!chosen) {
+    const picked = JSON.parse(localStorage.getItem('openghost.instructions') || '{}')[conv.record.folder];
+    if (picked) chosen = { folder: conv.record.folder, file: picked };
+   }
    if (chosen) {
-    const text = await window.openghost?.instructions?.read?.(conv.record.folder, chosen);
-    if (text && text.trim()) next.instructions = `# Project instructions (from ${chosen})\nThese come from the project's own instruction file; follow them like the user's words.\n\n${String(text).slice(0, 12000)}`;
+    const text = await window.openghost?.instructions?.read?.(chosen.folder, chosen.file);
+    if (text && text.trim()) next.instructions = `# Selected instructions (from ${chosen.file})\nThese were chosen by the user in the composer's instruction menu and apply to every chat; follow them like the user's words.\n\n${String(text).slice(0, 12000)}`;
    }
   } catch {}
   try {

@@ -11,7 +11,7 @@
 // REST poll below stays as a fallback if the gateway cannot be reached.
 import { createEngineHost } from "./engine-host.mjs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { WebSocket } from "ws";
 
 const args = process.argv.slice(2);
@@ -237,13 +237,31 @@ async function systemPrompt() {
   const items = (await window.openghost.memory.list()) || [];
   if (items.length) memory = ["# Memory", ...items.map(item => `- ${item.text}`)].join("\n");
  } catch {}
+ // The instruction file chosen in the composer (mirrored into the store) and the skills
+ // installed on this computer apply here too.
+ let instructions = "";
+ try {
+  const pick = readJson(join(USER_DATA, "store", "instructions.json"), null);
+  if (pick?.file && typeof pick.folder === "string") {
+   const base = resolve(pick.folder), target = resolve(base, pick.file);
+   if (target.startsWith(base)) {
+    const text = readFileSync(target, "utf8").slice(0, 12000);
+    if (text.trim()) instructions = `# Selected instructions (from ${pick.file})\nThese were chosen by the user in the app and apply to every chat; follow them like the user's words.\n\n${text}`;
+   }
+  }
+ } catch {}
+ let skills = "";
+ try {
+  const found = (await host.invoke("skills:list", state.folder)) || [];
+  if (found.length) skills = ["# Skills (Claude skill folders)", "Reusable instructions saved as SKILL.md files on this computer. When a task matches one, read its file with read_file and follow it.", ...found.slice(0, 40).map(item => `- ${item.name}${item.description ? ` — ${item.description}` : ''} (${item.path})`)].join("\n");
+ } catch {}
  // The user's own Prompt settings (store/prompts.json) apply here too.
  const prompts = readJson(join(USER_DATA, "store", "prompts.json"), null);
  let custom = "";
  if (prompts && prompts.enabled !== false && typeof prompts.global === "string" && prompts.global.trim()) custom += `\n\n# User instructions (global)\n${prompts.global.trim()}`;
  const own = prompts?.models?.[state.model];
  if (typeof own === "string" && own.trim()) custom += `\n\n# User instructions (this model)\n${own.trim()}`;
- return `${AgentPrompt.build({ folder: state.folder, mode: "full", env, browser: "", mcp, memory, plan: "", instructions: "", skills: "", now: new Date() })}${custom}\n\n# Remote control\nYou are answering over Discord, from the user's phone. Keep replies short and plain; Discord markdown works.${state.tools ? " Tools run without asking." : " Tools are unavailable in this session: never attempt a tool call, answer in plain text."}`;
+ return `${AgentPrompt.build({ folder: state.folder, mode: "full", env, browser: "", mcp, memory, plan: "", instructions, skills, now: new Date() })}${custom}\n\n# Remote control\nYou are answering over Discord, from the user's phone. Keep replies short and plain; Discord markdown works.${state.tools ? " Tools run without asking." : " Tools are unavailable in this session: never attempt a tool call, answer in plain text."}`;
 }
 
 async function turn(prompt, display = {}) {
