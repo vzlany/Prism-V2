@@ -87,6 +87,7 @@ export function createEngineHost({ profile = "" } = {}) {
  const MCP = require(join(ROOT, "desktop", "mcp.js"));
  const Memory = require(join(ROOT, "desktop", "memory.js"));
  const Instructions = require(join(ROOT, "desktop", "instructions.js"));
+ const Skills = require(join(ROOT, "desktop", "skills.js"));
  const Discord = require(join(ROOT, "desktop", "discord.js"));
  const LLM = require(join(ROOT, "desktop", "llm.js"));
 
@@ -95,6 +96,7 @@ export function createEngineHost({ profile = "" } = {}) {
  MCP.register(allow);
  Memory.register(allow);
  Instructions.register(allow);
+ Skills.register(allow);
  Discord.register(allow);
  // The mode menu's "DM me on Discord when done" switch on a headless web run.
  handlers.set("discord:dm", (event, payload) => Discord.send(
@@ -167,7 +169,7 @@ export function createEngineHost({ profile = "" } = {}) {
   electron,
   handlers,
   listeners,
-  engines: { Tools, MCP, Memory, LLM, Discord },
+  engines: { Tools, MCP, Memory, LLM, Discord, Skills },
   setSender(next) { sender = next; },
   // Calls a registered ipcMain.handle-style handler the way a renderer invoke would.
   invoke(channel, ...args) {

@@ -31,7 +31,11 @@ here is in this repository; nothing else was removed.
   conversation file), so a project, a chat, a rename or a finished reply shows up in the other
   place right away, and an open thread refreshes the moment the other process writes it.
 - **Windows tray icon** — open the app, open the web, quit; the tooltip says how many turns
-  are working.
+  are working. Closing the window only hides it: Prism keeps running in the tray (web server
+  and Discord bot included) until you press Quit.
+- **Every message says where it came from** — a message written on the phone wears a
+  "Website" tag on the desktop, a Discord message wears "Discord" everywhere, and a message
+  never shows a tag in the place it was written.
 - **Settings → Auto** — start with Windows, start hidden (straight into the tray), start
   the web server with the app on the port you choose (default 8787, reachable from your
   network), and start the **Discord bot** with the app so it is always online. On Windows
@@ -64,6 +68,14 @@ here is in this repository; nothing else was removed.
   message about to be sent, and the button wears OpenCode's breathing-dots indicator.
 - **Parallel runs are children in the list** — every run (and subagent) started from a
   conversation is drawn under it in the sidebar, indented, with its own busy ghost.
+
+### Skills from GitHub
+
+- **Settings → Skills** installs Claude-style skills straight from GitHub: paste a repository
+  (or a folder inside one), and every folder holding a `SKILL.md` lands in `~/.claude/skills`,
+  where the agent already lists and follows them. The page logs each one as
+  **Loading a Skill: X** → **Loaded Skill: X**. Private repositories work if the URL is one
+  the network can reach; installing replaces a skill of the same name.
 
 ### Dashboard
 
@@ -244,23 +256,28 @@ prism discord --once "hi"      # one turn in the terminal, prints the reply
 
 The bot only answers the user id in Settings → Discord, so DMs from anyone else are
 ignored. It connects to the Discord gateway, so it shows **online with a status** that says
-what it is doing (`💤 ready`, `⚙️ writing…`, `🔧 run_powershell`), and it uses the equipped
-provider keys the app mirrors into the shared store — the key you set in Settings works
-here without a second copy. It keeps one conversation with history (`/new` resets it), and
-commands:
+what it is doing (`💤 ready` when idle, and **dnd** with `🤔 thinking…`, `✍️ writing…` or the
+tool name while it works), and it uses the equipped provider keys the app mirrors into the
+shared store — the key you set in Settings works here without a second copy. Commands use
+`!` (a leading `/` still works):
 
-- `/seefull` — toggle **Full Display**: every finished thought is posted as small grey
-  `-#` text and every action as its own box (`📦 **Ran a command:** …`); thoughts are only
-  sent once the model has finished thinking.
-- `/effort <level>` — change the thinking effort (`default`, `none`, `low`, `medium`,
-  `high`, `xhigh`, `max`); `/effort` lists what the model takes.
-- `/folder <path>` sets where tools work, `/model provider:id` switches model, `/status`
-  shows the current setup, `/stop` stops the reply, `/help` lists everything.
+- `!chat` — list the conversations the bot keeps; `!chat 2` switches to one, `!chat <id>`
+  switches by id, `!chat new [title]` starts one. Every conversation is a real Prism chat in
+  the **-Discord** folder, visible and continuable in the app and on the web.
+- `!seefull` — toggle **Full Display**: every finished thought is posted as small grey `-#`
+  text and every action as its own box (`📦 **Running a command:** …` while it runs, edited
+  to `📦 **Ran a command:** …` when it finishes); thoughts are only sent once the model has
+  finished thinking.
+- `!effort <level>` — change the thinking effort (`default`, `none`, `low`, `medium`,
+  `high`, `xhigh`, `max`); `!effort` lists what the model takes.
+- `!clear` — delete every message the bot sent in the DM.
+- `!folder <path>`, `!model provider:id`, `!new`, `!status`, `!stop`, `!help`.
 
 Replies are edited into one Discord message; long answers continue in follow-ups. Tools run
 without asking — that is the point (you are the only allowed user), so keep the token
-private and use `--no-tools` if you want chat only. In Settings → Auto, *Start the Discord
-bot* keeps the bot running with the app.
+private and use `--no-tools` if you want chat only. Settings → **Discord** holds the token,
+the bot autostart, the "DM me when done" switch and the conversation list; the app's
+agent-mode menu also ends with a **DM me on Discord** switch for the same thing.
 
 ## The full UI on your phone, across networks
 

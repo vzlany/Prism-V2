@@ -7,11 +7,13 @@ const BOTTOM_SHOW = 120;
 const JUMP = { base: 420, perPixel: 0.05, max: 950 };
 // A chat opens with only its newest part drawn; older messages load in batches as you scroll up.
 const WINDOW_MIN = 45;
-const WINDOW_BATCH = 45;
+// Bigger batches, a taller pre-render and an earlier trigger: on a phone a 45-message batch
+// arrived slowly enough to read as a stall, so scrolling up now finds whole messages sooner.
+const WINDOW_BATCH = 80;
 // How many extra entries are quietly drawn ahead of a scroll, and how close to the top a
 // scroll has to get before the next batch is asked for.
-const PRERENDER = 135;
-const LOAD_AHEAD = 700;
+const PRERENDER = 240;
+const LOAD_AHEAD = 1400;
 const COPIED_TIME = 1600;
 const FINISH_NOTES = ['length', 'content_filter', 'insufficient_system_resource'];
 const LEAVE = { duration: 260, easing: 'cubic-bezier(0.32, 0.72, 0, 1)', fill: 'forwards' };
@@ -104,6 +106,10 @@ const FORMAT_GUIDE = [
 window.PrismFormat = { guide: FORMAT_GUIDE };
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Where this window runs from: a message written on the phone shows on the desktop as
+// "Website", one written in Discord shows everywhere as "Discord", and so on. A message is
+// never labelled in the place it was written.
+const PLATFORM = window.openghost?.desktop ? 'app' : (window.openghost?.web ? 'web' : 'app');
 const attr = text => text.replace(/[&"<\n]/g, c => ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '\n': ' ' })[c]);
 const samePath = (a, b) => a.toLowerCase() === b.toLowerCase();
 
@@ -686,7 +692,7 @@ class Chat {
    this.library.update(conv.id, { updated: Date.now() });
   }
   for (const actions of conv.list.querySelectorAll('.message-actions')) actions.remove();
-  const prompt = { text, attachments };
+  const prompt = { text, attachments, origin: PLATFORM };
   this.follow = true;
   if (conv.turn) {
    this.interject(conv, prompt);
@@ -710,7 +716,7 @@ class Chat {
   const bubble = this.userMessage(prompt);
   conv.list.append(bubble);
   this.main.classList.remove('is-empty');
-  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text };
+  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM };
   conv.messages.push(entry);
   this.nodes.set(entry, bubble);
   conv.waiting = Date.now();
@@ -1027,7 +1033,7 @@ class Chat {
   const turn = this.begin(conv, config);
   window.Presence?.publish(conv.id, { state: 'running', title: String(prompt.text || '').slice(0, 80), model: this.modelOf(conv), started: Date.now() });
   this.publishLive(conv, turn);
-  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text };
+  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM };
   conv.messages.push(entry);
   if (bubble) this.nodes.set(entry, bubble);
   this.openPart(conv, turn);
@@ -1383,7 +1389,7 @@ class Chat {
   const queued = turn.queue.splice(0);
   this.closePart(conv, turn.part);
   for (const { prompt, bubble } of queued) {
-   const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: await userContent(prompt) };
+   const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: await userContent(prompt), origin: prompt.origin || PLATFORM };
    conv.messages.push(entry);
    this.nodes.set(entry, bubble);
    conv.tokens += estimate([entry]);
@@ -1445,7 +1451,7 @@ class Chat {
   if (!entry.steps.length && !entry.content?.trim() && !entry.thinking?.trim()) drop(conv.messages, entry);
   if (turn.next) collapse(turn.next.el);
   const queued = turn.queue.splice(0).map(({ prompt, bubble }) => {
-   const item = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text };
+   const item = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM };
    conv.messages.push(item);
    this.nodes.set(item, bubble);
    return userContent(prompt).then(content => { item.content = content; }, () => {});
@@ -1678,8 +1684,8 @@ class Chat {
  }
 
  idle(fn) {
-  if (typeof requestIdleCallback === 'function') requestIdleCallback(fn, { timeout: 500 });
-  else setTimeout(fn, 150);
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(fn, { timeout: 250 });
+  else setTimeout(fn, 80);
  }
 
  // Whether an entry is worth drawing on the screen: words, reasoning, or a tool it called.
@@ -1732,7 +1738,7 @@ class Chat {
   const urls = Array.isArray(entry.content) ? entry.content.filter(part => part.type === 'image_url').map(part => part.image_url.url) : [];
   let k = 0;
   const attachments = (entry.attachments || []).map(item => ({ ...item, info: FileKinds.describe(item.name), url: item.image ? urls[k++] || '' : '' }));
-  return { text: entry.text || '', attachments };
+  return { text: entry.text || '', attachments, origin: entry.origin || '' };
  }
 
  restoredMessage(entry, last = true, conv = null) {
@@ -1915,9 +1921,17 @@ class Chat {
   return button;
  }
 
- userMessage({ text, attachments }) {
+ userMessage({ text, attachments, origin = '' }) {
   const el = document.createElement('div');
   el.className = 'message is-user';
+  // A message written somewhere else is labelled with where it came from; one written here
+  // wears no label, so the app never tells you a message you just typed came from the app.
+  if (origin && origin !== PLATFORM) {
+   const badge = document.createElement('div');
+   badge.className = `message-origin is-${origin}`;
+   badge.textContent = I18n.t(`origin.${origin}`);
+   el.append(badge);
+  }
   const images = attachments.filter(item => item.image && item.url), files = attachments.filter(item => !item.image);
   if (images.length) el.append(new MediaSlider(images.map(({ url, width, height, name, note }) => ({ url, width, height, name, note }))).el);
   if (files.length) {

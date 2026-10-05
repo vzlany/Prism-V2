@@ -56,6 +56,12 @@ contextBridge.exposeInMainWorld('openghost', {
  },
  skills: {
   list: directory => ipcRenderer.invoke('skills:list', directory),
+  install: url => ipcRenderer.invoke('skills:install', url),
+  onProgress: callback => {
+   const handler = (event, data) => callback(data);
+   ipcRenderer.on('skills:progress', handler);
+   return () => ipcRenderer.removeListener('skills:progress', handler);
+  },
  },
  app: {
   version: () => ipcRenderer.invoke('app:version'),

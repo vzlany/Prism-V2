@@ -545,6 +545,8 @@ class Settings {
   if (bar) bar.style.display = name === 'mcp' ? 'none' : '';
   if (name === 'mcp') this.paintMcp();
   if (name === 'prompt') this.paintPrompt();
+  if (name === 'skills') this.paintSkills();
+  if (name === 'discord') this.paintDiscord();
   if (name === 'effects') this.paintEffects();
   if (name === 'memory') this.paintMemory();
   if (name === 'auto') this.paintAuto();
@@ -702,6 +704,138 @@ class Settings {
   showModel();
  }
 
+ // Settings -> Skills: install Claude-style SKILL.md folders from a GitHub repository.
+ async paintSkills() {
+  const node = this.dialog.querySelector('.settings-skills-page');
+  if (!node) return;
+  let skills = [];
+  try { skills = (await window.openghost?.skills?.list?.()) || []; } catch {}
+  node.innerHTML = `
+   <div class="settings-row is-wide">
+    <div class="settings-text">
+     <span class="settings-label">${escapeHtml(I18n.t('settings.skills.installButton'))}</span>
+     <p class="settings-hint">${escapeHtml(I18n.t('settings.skills.installHint'))}</p>
+    </div>
+    <div class="settings-control">
+     <div class="mcp-add-row">
+      <input class="settings-key skills-url" placeholder="${escapeHtml(I18n.t('settings.skills.url'))}" spellcheck="false" autocomplete="off">
+      <button type="button" class="settings-button is-primary" data-skills-install>${escapeHtml(I18n.t('settings.skills.installButton'))}</button>
+     </div>
+     <div class="skills-log" data-skills-log role="status"></div>
+    </div>
+   </div>
+   <div class="settings-row is-wide">
+    <div class="settings-text">
+     <span class="settings-label">${escapeHtml(I18n.t('settings.skills.list'))}</span>
+    </div>
+    <div class="settings-control">
+     <div class="skills-list">${skills.length
+      ? skills.map(skill => `<div class="skill-row"><span class="skill-name">${escapeHtml(skill.name)}</span><span class="skill-desc">${escapeHtml(skill.description || '')}</span></div>`).join('')
+      : `<div class="settings-mcp-empty">${escapeHtml(I18n.t('settings.skills.empty'))}</div>`}</div>
+    </div>
+   </div>`;
+  const log = node.querySelector('[data-skills-log]');
+  const line = (text, tone = '') => {
+   if (!log) return;
+   const row = document.createElement('div');
+   row.className = `skill-log-line${tone ? ` is-${tone}` : ''}`;
+   row.textContent = text;
+   log.append(row);
+   log.scrollTop = log.scrollHeight;
+  };
+  this.skillOff?.();
+  this.skillOff = window.openghost?.skills?.onProgress?.(data => {
+   if (data?.stage === 'loading') line(I18n.t('settings.skills.loadingSkill', { name: data.name }));
+   else if (data?.stage === 'loaded') line(I18n.t('settings.skills.loadedSkill', { name: data.name }), 'ok');
+   else if (data?.stage === 'failed') line(String(data.name), 'error');
+  });
+  const button = node.querySelector('[data-skills-install]');
+  const input = node.querySelector('.skills-url');
+  button?.addEventListener('click', async () => {
+   const url = input?.value.trim();
+   if (!url) return;
+   button.disabled = true;
+   line(I18n.t('settings.skills.loading'));
+   const result = await window.openghost?.skills?.install?.(url).catch(() => null);
+   button.disabled = false;
+   if (result?.ok) {
+    if (!result.installed?.length) line(I18n.t('settings.skills.none'), 'error');
+    else line(I18n.t('settings.skills.done', { count: result.installed.length }), 'ok');
+    setTimeout(() => this.paintSkills(), 700);
+   } else {
+    line(I18n.t('settings.skills.failed', { error: result?.error || 'unknown error' }), 'error');
+   }
+  });
+ }
+
+ // Settings -> Discord: the bot itself, the DM switch, and the conversations it keeps.
+ async paintDiscord() {
+  const node = this.dialog.querySelector('.settings-discord-page');
+  if (!node) return;
+  let discord = { enabled: false, hasToken: false, userId: '' };
+  try { discord = (await window.openghost?.discord?.get?.()) || discord; } catch {}
+  let auto = { bot: false, botRunning: false };
+  try { auto = (await window.openghost?.auto?.get?.()) || auto; } catch {}
+  const dmOn = await Promise.resolve(window.DiscordNotify?.load?.()).then(data => data?.discord === true).catch(() => false);
+  let chats = [];
+  try {
+   const index = await window.openghost?.store?.read?.('index');
+   chats = (index?.chats || []).filter(chat => /discord$/i.test(String(chat.folder || '').replace(/[\\/]+$/, '')));
+   chats.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  } catch {}
+  const row = (labelKey, hintKey, control) => `<div class="settings-row is-wide">
+   <div class="settings-text">
+    <span class="settings-label">${escapeHtml(I18n.t(labelKey))}</span>
+    <p class="settings-hint">${escapeHtml(I18n.t(hintKey))}</p>
+   </div>
+   <div class="settings-control">${control}</div>
+  </div>`;
+  node.innerHTML = [
+   row('settings.discord.title', 'settings.discord.hint', `<div class="mcp-add-row">
+     <input class="settings-key discord-token" type="password" placeholder="${escapeHtml(discord.hasToken ? I18n.t('settings.discord.tokenSaved') : I18n.t('settings.discord.token'))}" autocomplete="off" spellcheck="false">
+     <input class="settings-key discord-user" value="${escapeHtml(discord.userId)}" placeholder="${escapeHtml(I18n.t('settings.discord.user'))}" spellcheck="false">
+    </div>
+    <div class="mcp-add-row" style="margin-top:6px">
+     <label class="mcp-auto"><input type="checkbox" class="discord-enabled" ${discord.enabled ? 'checked' : ''}>${escapeHtml(I18n.t('settings.discord.enable'))}</label>
+     <button type="button" class="settings-button is-primary" data-discord-save>${escapeHtml(I18n.t('settings.discord.save'))}</button>
+     <button type="button" class="settings-button" data-discord-test>${escapeHtml(I18n.t('settings.discord.test'))}</button>
+    </div>
+    <p class="settings-status" data-provider="discord" role="status"></p>`),
+   row('settings.discord.botTitle', 'settings.discord.botHint', `<div class="mcp-add-row">
+     <label class="mcp-auto"><input type="checkbox" class="discord-bot" ${auto.bot ? 'checked' : ''}>${escapeHtml(I18n.t('settings.auto.enable'))}</label>
+     <span class="auto-bot-state ${auto.botRunning ? 'is-on' : ''}">${escapeHtml(I18n.t(auto.botRunning ? 'settings.auto.botRunning' : 'settings.auto.botStopped'))}</span>
+    </div>`),
+   row('settings.discord.notifyTitle', 'settings.discord.notifyHint', `<label class="mcp-auto"><input type="checkbox" class="discord-notify" ${dmOn ? 'checked' : ''}>${escapeHtml(I18n.t('settings.auto.enable'))}</label>`),
+   row('settings.discord.chatsTitle', 'settings.discord.chatsHint', chats.length
+    ? `<div class="discord-chats">${chats.slice(0, 20).map(chat => `<div class="discord-chat"><span class="discord-chat-name">${escapeHtml(chat.title || I18n.t('chat.new'))}</span><span class="discord-chat-id">${escapeHtml(chat.id)}</span></div>`).join('')}</div>`
+    : `<div class="settings-mcp-empty">${escapeHtml(I18n.t('settings.discord.chatsEmpty'))}</div>`),
+  ].join('');
+  const status = text => {
+   const node2 = node.querySelector('.settings-status[data-provider="discord"]');
+   if (node2) node2.textContent = text || '';
+  };
+  node.querySelector('[data-discord-save]')?.addEventListener('click', async () => {
+   const token = node.querySelector('.discord-token')?.value.trim();
+   const userId = node.querySelector('.discord-user')?.value.trim() ?? '';
+   const enabled = !!node.querySelector('.discord-enabled')?.checked;
+   await window.openghost?.discord?.set?.({ ...(token ? { token } : {}), userId, enabled });
+   status(I18n.t('settings.discord.saved'));
+   this.paintDiscord();
+  });
+  node.querySelector('[data-discord-test]')?.addEventListener('click', async () => {
+   status(I18n.t('settings.discord.testing'));
+   const result = await window.openghost?.discord?.test?.();
+   status(result?.ok ? I18n.t('settings.discord.ok') : `${I18n.t('settings.discord.fail')} ${result?.error || ''}`);
+  });
+  node.querySelector('.discord-bot')?.addEventListener('change', async event => {
+   await window.openghost?.auto?.set?.({ bot: event.target.checked }).catch(() => {});
+   setTimeout(() => this.paintDiscord(), 600);
+  });
+  node.querySelector('.discord-notify')?.addEventListener('change', event => {
+   window.DiscordNotify?.save?.({ discord: event.target.checked });
+  });
+ }
+
  async paintMemory() {  const node = this.dialog.querySelector('.settings-memory-page');
   if (!node || !window.openghost?.memory) return;
   let memories = [];
@@ -826,26 +960,6 @@ let profile = { name: 'default', profiles: ['default'] };
     <p class="settings-status" data-provider="profile" role="status"></p>
    </div>
   </div>`;
-  let discord = { enabled: false, hasToken: false, userId: '' };
-  try { discord = (await window.openghost?.discord?.get?.()) || discord; } catch {}
-  const discordBlock = `<div class="settings-row is-wide">
-   <div class="settings-text">
-    <span class="settings-label">${escapeHtml(I18n.t('settings.discord.title'))}</span>
-    <p class="settings-hint">${escapeHtml(I18n.t('settings.discord.hint'))}</p>
-   </div>
-   <div class="settings-control">
-    <div class="mcp-add-row">
-     <input class="settings-key discord-token" type="password" placeholder="${escapeHtml(discord.hasToken ? I18n.t('settings.discord.tokenSaved') : I18n.t('settings.discord.token'))}" autocomplete="off" spellcheck="false">
-     <input class="settings-key discord-user" value="${escapeHtml(discord.userId)}" placeholder="${escapeHtml(I18n.t('settings.discord.user'))}" spellcheck="false">
-    </div>
-    <div class="mcp-add-row" style="margin-top:6px">
-     <label class="mcp-auto"><input type="checkbox" class="discord-enabled" ${discord.enabled ? 'checked' : ''}>${escapeHtml(I18n.t('settings.discord.enable'))}</label>
-     <button type="button" class="settings-button is-primary" data-discord-save>${escapeHtml(I18n.t('settings.discord.save'))}</button>
-     <button type="button" class="settings-button" data-discord-test>${escapeHtml(I18n.t('settings.discord.test'))}</button>
-    </div>
-    <p class="settings-status" data-provider="discord" role="status"></p>
-   </div>
-  </div>`;
   // Sounds: the chimes OpenCode ships, for a finished task, a waiting question and an error.
   const sounds = window.Sounds?.settings || { on: true, finishOn: true, finish: 'staplebops-01', questionOn: true, question: 'staplebops-02', errorOn: true, error: 'nope-03' };
   const soundOptions = selected => (window.Sounds?.options || []).map(id => `<option value="${id}"${id === selected ? ' selected' : ''}>${id}</option>`).join('');
@@ -871,25 +985,11 @@ let profile = { name: 'default', profiles: ['default'] };
    ${soundRow('error', 'settings.sounds.error', 'settings.sounds.errorHint', sounds.errorOn, sounds.error)}`;
   node.innerHTML = [
    profileBlock,
-   discordBlock,
    row('settings.effects.title', 'settings.effects.hint', choice('text', effects ? effects.mode : 'both', ['both', 'deleting'], typingLabels)),
    row('settings.effects.thinking', 'settings.effects.thinkingHint', choice('thinking', effects ? effects.thinkingMode : 'auto', ['auto', 'extended'], thinkingLabels)),
    row('settings.effects.tools', 'settings.effects.toolsHint', choice('tools', effects ? effects.toolsMode : 'auto', ['auto', 'open', 'closed'], viewLabels)),
    soundsBlock,
   ].join('');
-  node.querySelector('[data-discord-save]')?.addEventListener('click', async () => {
-   const token = node.querySelector('.discord-token')?.value.trim();
-   const userId = node.querySelector('.discord-user')?.value.trim() ?? '';
-   const enabled = !!node.querySelector('.discord-enabled')?.checked;
-   await window.openghost?.discord?.set?.({ ...(token ? { token } : {}), userId, enabled });
-   this.setStatus('discord', I18n.t('settings.discord.saved'));
-   this.paintEffects();
-  });
-  node.querySelector('[data-discord-test]')?.addEventListener('click', async () => {
-   this.setStatus('discord', I18n.t('settings.discord.testing'));
-   const result = await window.openghost?.discord?.test?.();
-   this.setStatus('discord', result?.ok ? I18n.t('settings.discord.ok') : `${I18n.t('settings.discord.fail')} ${result?.error || ''}`, result?.ok ? '' : 'error');
-  });
   node.querySelector('[data-profile-switch]')?.addEventListener('click', () => {
    const typed = node.querySelector('.profile-input')?.value.trim().toLowerCase();
    const name = typed || node.querySelector('.profile-select')?.value || 'default';

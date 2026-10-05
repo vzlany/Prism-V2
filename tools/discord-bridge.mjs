@@ -10,7 +10,7 @@
 // The bot connects to the Discord gateway, so it shows online with a working status; the
 // REST poll below stays as a fallback if the gateway cannot be reached.
 import { createEngineHost } from "./engine-host.mjs";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { WebSocket } from "ws";
 
@@ -42,7 +42,7 @@ const writeJson = (file, value) => {
 
 const config = readJson(configFile);
 const state = Object.assign(
- { messages: [], folder: process.env.USERPROFILE || process.env.HOME || ".", model: "opencode-go:deepseek-v4.1-flash", lastId: "0", effort: "", seefull: false },
+ { messages: [], folder: process.env.USERPROFILE || process.env.HOME || ".", model: "opencode-go:deepseek-v4.1-flash", lastId: "0", effort: "", seefull: false, chatId: "" },
  readJson(stateFile),
 );
 // How the bridge runs is decided here, not by what an earlier run saved.
@@ -50,7 +50,88 @@ state.tools = NO_TOOLS ? false : config.tools !== false;
 if (flag("--folder")) state.folder = String(flag("--folder"));
 if (flag("--model")) state.model = String(flag("--model"));
 
-const savedState = () => writeJson(stateFile, { messages: state.messages, folder: state.folder, model: state.model, lastId: state.lastId, effort: state.effort, thinking: state.thinking, seefull: state.seefull });
+const savedState = () => writeJson(stateFile, { messages: state.messages, folder: state.folder, model: state.model, lastId: state.lastId, effort: state.effort, thinking: state.thinking, seefull: state.seefull, chatId: state.chatId });
+
+// --------------------------------------------------------------- Prism conversations
+// Each Discord conversation is a real Prism chat under a "-Discord" folder: the app and the
+// web watch the same store, so everything the bot does can be read and continued there.
+const DISCORD_FOLDER = join(process.env.USERPROFILE || process.env.HOME || ".", "Prism V2", "Discord");
+const STORE_DIR = join(USER_DATA, "store");
+const indexFile = join(STORE_DIR, "index.json");
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const chatFile = id => join(STORE_DIR, "chats", `${id}.json`);
+const readIndex = () => {
+ const index = readJson(indexFile, { folders: [], chats: [] });
+ if (!Array.isArray(index.folders)) index.folders = [];
+ if (!Array.isArray(index.chats)) index.chats = [];
+ return index;
+};
+function writeIndex(index) {
+ try { mkdirSync(STORE_DIR, { recursive: true }); } catch {}
+ writeJson(indexFile, index);
+}
+function ensureDiscordFolder(index) {
+ if (!index.folders.some(folder => String(folder.path || "").toLowerCase() === DISCORD_FOLDER.toLowerCase())) {
+  index.folders.push({ path: DISCORD_FOLDER, name: "-Discord", collapsed: false, added: Date.now() });
+ }
+}
+const discordChats = (index = readIndex()) => index.chats
+ .filter(chat => String(chat.folder || "").toLowerCase() === DISCORD_FOLDER.toLowerCase())
+ .sort((a, b) => (a.created || 0) - (b.created || 0));
+function createChat(title) {
+ const index = readIndex();
+ ensureDiscordFolder(index);
+ const now = Date.now();
+ const record = { id: uid(), title: String(title || "New chat").slice(0, 60), folder: DISCORD_FOLDER, created: now, updated: now, pinned: false, named: false };
+ index.chats.push(record);
+ writeIndex(index);
+ writeJson(chatFile(record.id), { version: 1, messages: [], tokens: 0 });
+ return record;
+}
+function chatRecord(id) {
+ if (!id) return null;
+ return readIndex().chats.find(chat => chat.id === id && String(chat.folder || "").toLowerCase() === DISCORD_FOLDER.toLowerCase()) || null;
+}
+// The renderable messages (what the app draws) and the full model context (tools included)
+// live in the same Prism chat file: botContext is the bridge's own history.
+function contextOf(body) {
+ if (Array.isArray(body?.botContext) && body.botContext.length) return body.botContext;
+ return (body?.messages || [])
+  .filter(entry => (entry.role === "user" || entry.role === "assistant") && typeof entry.content === "string")
+  .map(entry => ({ role: entry.role, content: entry.content }));
+}
+function loadContext(record) {
+ const body = readJson(chatFile(record.id), {});
+ state.messages = contextOf(body);
+ state.chatId = record.id;
+ savedState();
+}
+function saveConversation(record, userText, answer) {
+ const body = readJson(chatFile(record.id), { version: 1 });
+ const messages = Array.isArray(body.messages) ? body.messages : [];
+ if (userText) messages.push({ role: "user", text: userText, content: userText, origin: "discord" });
+ if (answer) messages.push({ role: "assistant", content: answer });
+ const index = readIndex();
+ const chat = index.chats.find(item => item.id === record.id);
+ if (chat) {
+  chat.updated = Date.now();
+  if (!chat.named && userText) { chat.title = String(userText).split("\n")[0].slice(0, 60) || chat.title; chat.named = true; }
+  writeIndex(index);
+ }
+ writeJson(chatFile(record.id), { ...body, version: 1, messages, botContext: state.messages, tokens: Number(body.tokens) || 0 });
+}
+
+// Pick the conversation this message belongs to: the chosen one, or a fresh chat.
+function activeChat() {
+ let record = chatRecord(state.chatId);
+ if (!record) {
+  record = createChat(state.pendingTitle || "Discord chat");
+  state.pendingTitle = "";
+  loadContext(record);
+  log("new conversation", record.id);
+ }
+ return record;
+}
 
 // The app keeps provider keys in its own storage and mirrors the equipped ones into the
 // shared store (store/keys.json); the bridge reads that first, then its own config, then
@@ -395,15 +476,18 @@ async function pumpQueue() {
 const HELP = [
  "**Prism V2 bridge** — I run on your PC and answer here.",
  "",
- "`/new` — start a fresh conversation",
- "`/clear` — delete every message I sent in this DM",
- "`/stop` — stop the reply being written",
- "`/seefull` — toggle Full Display: every thought and every action is posted here",
- "`/effort <level>` — thinking effort (default, none, low, medium, high, xhigh, max)",
- "`/folder <path>` — the folder tools work in",
- "`/model <provider:id>` — switch model (e.g. `opencode-go:deepseek-v4.1-flash`)",
- "`/status` — what I am set to",
- "`/help` — this",
+ "`!new` — start a fresh conversation",
+ "`!chat` — list conversations (`!chat 2` switches, `!chat new [title]` starts one)",
+ "`!clear` — delete every message I sent in this DM",
+ "`!stop` — stop the reply being written",
+ "`!seefull` — toggle Full Display: every thought and every action is posted here",
+ "`!effort <level>` — thinking effort (default, none, low, medium, high, xhigh, max)",
+ "`!folder <path>` — the folder tools work in",
+ "`!model <provider:id>` — switch model (e.g. `opencode-go:deepseek-v4.1-flash`)",
+ "`!status` — what I am set to",
+ "`!help` — this",
+ "",
+ "Conversations live in the app and on the web under **-Discord**. A `/` prefix works too.",
 ].join("\n");
 
 // Delete the bot's own messages in this DM (Discord lets a bot remove what it sent).
@@ -438,13 +522,15 @@ async function handle(channel, message) {
  }
  if (!text) return;
  log("dm:", text.slice(0, 80));
- if (text === "/help") return void await post(channel, HELP);
- if (text === "/new") {
-  state.messages = [];
-  savedState();
-  return void await post(channel, "✨ fresh conversation");
+ // Commands use "!" (a leading "/" is accepted too, so older muscle memory still works).
+ const command = text.replace(/^\//, "!");
+ if (command === "!help") return void await post(channel, HELP);
+ if (command === "!new") {
+  const record = createChat();
+  loadContext(record);
+  return void await post(channel, `✨ new conversation **${record.title}**\n-# \`${record.id}\` — it shows up in the app and web under "-Discord".`);
  }
- if (text === "/clear") {
+ if (command === "!clear") {
   const notice = await api(`/channels/${channel}/messages`, { method: "POST", body: JSON.stringify({ content: "🧹 clearing my messages…" }) }).then(res => (res.ok ? res.json() : null)).catch(() => null);
   const deleted = await clearBotMessages(channel);
   if (notice?.id) {
@@ -453,27 +539,49 @@ async function handle(channel, message) {
   }
   return;
  }
- if (text === "/stop") {
+ if (command === "!stop") {
   state.stopped = true;
   if (currentRun) host.emit("llm:abort", currentRun);
   return void await post(channel, "⏹ stopping…");
  }
- if (text === "/seefull" || text === "/seefull on" || text === "/seefull off") {
-  const on = text === "/seefull off" ? false : text === "/seefull on" ? true : !state.seefull;
+ if (command === "!seefull" || command === "!seefull on" || command === "!seefull off") {
+  const on = command === "!seefull off" ? false : command === "!seefull on" ? true : !state.seefull;
   state.seefull = on;
   savedState();
   return void await post(channel, on
    ? "✅ Using Full Display — every finished thought and every action will be posted here while I work."
    : "💤 Full Display off.");
  }
- if (text === "/status") {
-  const lines = [`model: \`${state.model}\``, `effort: \`${state.effort || "default"}\``, `folder: \`${state.folder}\``, `tools: ${state.tools ? "on" : "off"}`, `full display: ${state.seefull ? "on" : "off"}`, `messages in context: ${state.messages.length}`];
+ if (command === "!status") {
+  const active = chatRecord(state.chatId);
+  const lines = [`model: \`${state.model}\``, `effort: \`${state.effort || "default"}\``, `folder: \`${state.folder}\``, `tools: ${state.tools ? "on" : "off"}`, `full display: ${state.seefull ? "on" : "off"}`, `conversation: **${active?.title || "—"}** \`${active?.id || "none"}\``, `messages in context: ${state.messages.length}`];
   return void await post(channel, lines.join("\n"));
  }
- if (text === "/effort" || text.startsWith("/effort ")) {
+ // !chat — list conversations; !chat 2 — switch by number; !chat <id> — switch by id;
+ // !chat new — start one. A message with no chosen conversation starts a fresh one.
+ if (command === "!chat" || command.startsWith("!chat ")) {
+  const arg = command.slice(5).trim();
+  if (!arg) {
+   const chats = discordChats();
+   if (!chats.length) return void await post(channel, "no conversations yet — just write a message and I start one.");
+   const lines = chats.map((chat, index) => `${chat.id === state.chatId ? "**▶**" : `${index + 1}.`} **${chat.title}** — \`${chat.id}\``);
+   return void await post(channel, [`**Discord conversations** (${chats.length})`, ...lines.slice(0, 25), "", "`!chat <number|id>` switches, `!chat new [title]` starts one."].join("\n"));
+  }
+  if (arg === "new" || arg.startsWith("new ")) {
+   const title = arg.slice(3).trim();
+   const record = createChat(title);
+   loadContext(record);
+   return void await post(channel, `💬 new conversation **${record.title}**\n-# \`${record.id}\``);
+  }
+  const record = chatRecord(arg) || discordChats()[Number(arg) - 1] || null;
+  if (!record) return void await post(channel, `no conversation \`${arg}\` — \`!chat\` lists them.`);
+  loadContext(record);
+  return void await post(channel, `💬 now working on **${record.title}**\n-# \`${record.id}\``);
+ }
+ if (command === "!effort" || command.startsWith("!effort ")) {
   const def = await modelDef();
   const levels = def?.efforts || [];
-  const value = text.slice(7).trim().toLowerCase();
+  const value = command.slice(7).trim().toLowerCase();
   if (!value) {
    const available = levels.length ? ` — available: ${levels.map(level => `\`${level}\``).join(", ")}` : "";
    return void await post(channel, `⚙️ effort: \`${state.effort || "default"}\`${available}`);
@@ -485,20 +593,22 @@ async function handle(channel, message) {
   savedState();
   return void await post(channel, `⚙️ effort: \`${value}\``);
  }
- if (text.startsWith("/folder ")) {
-  const folder = text.slice(8).trim();
+ if (command.startsWith("!folder ")) {
+  const folder = command.slice(8).trim();
   if (!existsSync(folder)) return void await post(channel, `no such folder: \`${folder}\``);
   state.folder = folder;
   savedState();
   return void await post(channel, `📁 tools now work in \`${folder}\``);
  }
- if (text.startsWith("/model ")) {
-  state.model = text.slice(7).trim();
+ if (command.startsWith("!model ")) {
+  state.model = command.slice(7).trim();
   state.effort = "";
   savedState();
   return void await post(channel, `🧠 model: \`${state.model}\``);
  }
 
+ // The conversation this turn belongs to (a fresh one is made if none is chosen).
+ const conversation = activeChat();
  state.stopped = false;
  const placeholder = await api(`/channels/${channel}/messages`, { method: "POST", body: JSON.stringify({ content: "⏳ working…" }) });
  const placeholderId = (await placeholder.json().catch(() => ({})))?.id;
@@ -539,11 +649,13 @@ async function handle(channel, message) {
  try {
   const answer = await turn(text, display);
   setPresence(IDLE);
+  saveConversation(conversation, text, answer);
   if (placeholderId) await replyTo(channel, placeholderId, answer);
   else await post(channel, answer);
   log("replied:", answer.replace(/\s+/g, " ").slice(0, 100));
  } catch (error) {
   setPresence(IDLE);
+  saveConversation(conversation, text, "");
   const note = `⚠️ ${error.message}`;
   if (placeholderId) await replyTo(channel, placeholderId, note);
   else await post(channel, note);

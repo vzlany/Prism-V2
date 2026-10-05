@@ -140,6 +140,14 @@
         <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="42" cy="45" r="7"/><circle cx="78" cy="45" r="7"/><circle cx="60" cy="78" r="7"/><path d="M47 50l10 22M73 50L63 72M49 45h22"/></svg>
         <span data-i18n="settings.mcp.tab">MCP servers</span>
       </button>
+      <button type="button" class="settings-tab" data-tab="skills">
+        <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M45 40h30v40H45z"/><path d="M52 49h16M52 58h16M52 67h10"/><path d="M38 48v30a6 6 0 0 0 6 6h24"/></svg>
+        <span data-i18n="settings.skills.tab">Skills</span>
+      </button>
+      <button type="button" class="settings-tab" data-tab="discord">
+        <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M38 46h44v20a6 6 0 0 1-6 6H54l-10 8v-8h-6a6 6 0 0 1-6-6z"/><circle cx="51" cy="58" r="1.5" fill="currentColor"/><circle cx="69" cy="58" r="1.5" fill="currentColor"/></svg>
+        <span data-i18n="settings.discord.tab">Discord</span>
+      </button>
       <button type="button" class="settings-tab" data-tab="effects">
         <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M40 45h40M40 60h40M40 75h40"/><circle cx="52" cy="45" r="6" fill="var(--chat-bg)"/><circle cx="70" cy="60" r="6" fill="var(--chat-bg)"/><circle cx="48" cy="75" r="6" fill="var(--chat-bg)"/></svg>
         <span data-i18n="settings.effects.tab">Interface</span>
@@ -180,6 +188,22 @@
       </header>
       <p class="settings-lead" data-i18n="settings.mcp.lead">Servers the agent can use. Add one below, or edit mcp.json and reload.</p>
       <div class="settings-mcp-page"></div>
+    </section>
+    <section class="settings-page" data-page="skills" hidden aria-labelledby="settings-skills-title">
+      <header class="settings-page-header">
+        <h2 class="settings-page-title" id="settings-skills-title" data-i18n="settings.skills.tab">Skills</h2>
+        <close-button class="settings-close"></close-button>
+      </header>
+      <p class="settings-lead" data-i18n="settings.skills.lead">Claude-style skills: folders with a SKILL.md the agent reads and follows when a task matches. Install them from a GitHub repository.</p>
+      <div class="settings-skills-page"></div>
+    </section>
+    <section class="settings-page" data-page="discord" hidden aria-labelledby="settings-discord-title">
+      <header class="settings-page-header">
+        <h2 class="settings-page-title" id="settings-discord-title" data-i18n="settings.discord.tab">Discord</h2>
+        <close-button class="settings-close"></close-button>
+      </header>
+      <p class="settings-lead" data-i18n="settings.discord.lead">The bot that DMs you when a reply finishes, and answers your DMs with this computer's tools.</p>
+      <div class="settings-discord-page"></div>
     </section>
     <section class="settings-page" data-page="effects" hidden aria-labelledby="settings-effects-title">
       <header class="settings-page-header">

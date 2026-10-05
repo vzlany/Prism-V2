@@ -59,7 +59,7 @@ class InstructionsPill {
   this.menu.innerHTML = [
    `<div class="instructions-head">${escapeHtml(I18n.t('instructions.title'))}</div>`,
    `<button type="button" class="instructions-item${current ? '' : ' is-on'}" data-file="">${escapeHtml(I18n.t('instructions.none'))}</button>`,
-   ...files.map(file => `<button type="button" class="instructions-item${file === current ? ' is-on' : ''}" data-file="${escapeHtml(file)}">${escapeHtml(file)}</button>`),
+   ...files.map(file => `<button type="button" class="instructions-item${file === current ? ' is-on' : ''}" data-file="${escapeHtml(file)}" title="${escapeHtml(file)}">${escapeHtml(file.split(/[\\/]/).pop())}</button>`),
    files.length ? '' : `<div class="instructions-empty">${escapeHtml(I18n.t('instructions.empty'))}</div>`,
    canOpen ? `<div class="instructions-sep" aria-hidden="true"></div><button type="button" class="instructions-open" data-open-folder>${Glyphs.folder}<span>${escapeHtml(I18n.t('instructions.open'))}</span></button>` : '',
   ].join('');

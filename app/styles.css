@@ -1238,6 +1238,12 @@ body.is-resizing-sidebar .main {
   white-space: pre-wrap;
 }
 
+/* Prism V2: where a user message came from, when it was not written on this platform */
+.message-origin{display:inline-flex;align-items:center;padding:2px 9px;border-radius:999px;background:rgba(var(--fg-rgb),.055);box-shadow:inset 0 0 0 1px rgba(var(--fg-rgb),.07);color:var(--fg-tertiary);font-size:10.5px;font-weight:650;letter-spacing:.04em;text-transform:uppercase}
+.message-origin.is-discord{color:#b7c1ff;background:rgba(88,101,242,.14);box-shadow:inset 0 0 0 1px rgba(88,101,242,.3)}
+.message-origin.is-web{color:#8fd8ff;background:rgba(80,170,255,.1);box-shadow:inset 0 0 0 1px rgba(80,170,255,.22)}
+.message-origin.is-server{color:#ffd08f;background:rgba(255,190,90,.1);box-shadow:inset 0 0 0 1px rgba(255,190,90,.22)}
+
 .message-quote {
   display: flex;
   gap: 8px;
@@ -9137,3 +9143,19 @@ body.has-lightbox{overflow:hidden}
 .prompt-builtin summary::before{content:"›";display:inline-block;width:14px;color:var(--fg-tertiary);transition:transform .18s ease}
 .prompt-builtin[open] summary::before{transform:rotate(90deg)}
 .prompt-pre{margin:0;padding:0 12px 12px;max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--mono-font);font-size:11.5px;line-height:1.6;color:rgba(var(--fg-rgb),.62);scrollbar-width:thin}
+
+/* Prism V2: the Skills page — GitHub install log and installed skills */
+.skills-log{margin-top:8px;max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:3px;font-size:12px;scrollbar-width:thin}
+.skill-log-line{color:var(--fg-secondary)}
+.skill-log-line.is-ok{color:rgb(var(--success-rgb))}
+.skill-log-line.is-error{color:rgb(var(--danger-rgb))}
+.skills-list{display:flex;flex-direction:column;gap:5px;max-height:280px;overflow-y:auto;scrollbar-width:thin}
+.skill-row{display:flex;flex-direction:column;gap:1px;padding:7px 9px;border-radius:9px;background:rgba(var(--fg-rgb),.04)}
+.skill-name{font-size:13px;color:rgba(var(--fg-rgb),.88)}
+.skill-desc{font-size:11.5px;color:var(--fg-tertiary);line-height:1.4}
+
+/* Prism V2: the Discord page — the conversations the bot keeps */
+.discord-chats{display:flex;flex-direction:column;gap:3px;max-height:220px;overflow-y:auto;scrollbar-width:thin}
+.discord-chat{display:flex;align-items:baseline;gap:10px;padding:5px 8px;border-radius:8px;background:rgba(var(--fg-rgb),.035)}
+.discord-chat-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:rgba(var(--fg-rgb),.85)}
+.discord-chat-id{font-family:var(--mono-font);font-size:10.5px;color:var(--fg-tertiary)}

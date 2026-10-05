@@ -176,6 +176,15 @@ window.openghost = {
  },
  skills: {
   list: directory => invoke('skills:list', directory),
+  install: url => invoke('skills:install', url),
+  onProgress: callback => {
+   on('skills:progress', callback);
+   return () => {
+    const list = state.listeners.get('skills:progress') || [];
+    const at = list.indexOf(callback);
+    if (at >= 0) list.splice(at, 1);
+   };
+  },
  },
  app: {
   version: () => invoke('app:version'),

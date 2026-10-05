@@ -10,11 +10,15 @@ const LLM = require('./llm');
 const MCP = require('./mcp');
 const Memory = require('./memory');
 const Instructions = require('./instructions');
+const Skills = require('./skills');
 const Discord = require('./discord');
 const Updater = require('./updater');
 const CliCommand = require('./cli-command');
 
 const APP_ID = 'com.prismv2.app';
+// Set when the app is really quitting (tray -> Quit, update install, system shutdown): only
+// then does the window's close actually close it.
+let quitting = false;
 // Prism V2 is the V2 fork of Prism: it keeps its data under its own name, and a machine that
 // already ran Prism has its folder copied over once, so chats, keys, memory and MCP config
 // carry on here.
@@ -444,6 +448,13 @@ function createWindow() {
   },
  });
  win.once('ready-to-show', () => { if (!HIDDEN) win.show(); });
+ // Closing the window hides it: Prism keeps running in the tray, the web server and the
+ // Discord bot stay up, and a running turn is not interrupted. Tray -> Quit really quits.
+ win.on('close', event => {
+  if (quitting) return;
+  event.preventDefault();
+  win.hide();
+ });
  // On Windows the taskbar icon of an unpackaged app otherwise stays Electron's; set it
  // explicitly as well as through the Start Menu identity shortcut.
  try { win.setIcon(nativeImage.createFromPath(ICON)); } catch {}
@@ -584,6 +595,7 @@ LLM.register(fromApp);
 MCP.register(fromApp);
 Memory.register(fromApp);
 Instructions.register(fromApp);
+Skills.register(fromApp);
 Discord.register(fromApp);
 // The mode menu's "DM me on Discord when done" switch: a finished reply sends its own DM,
 // whether or not the Windows toast was shown.
@@ -634,8 +646,8 @@ if (process.argv.includes('--create-shortcut')) {
  let win = null;
  app.on('second-instance', () => {
   if (!win) return;
-  if (win.isMinimized()) win.restore();
-  win.focus();
+  // The window may be hidden in the tray, not minimized: show it again.
+  showWindow(win);
  });
  app.whenReady().then(() => {
   Browser.setup();
@@ -660,6 +672,7 @@ if (process.argv.includes('--create-shortcut')) {
  });
  app.on('window-all-closed', () => app.quit());
  app.on('before-quit', event => {
+  quitting = true;
   Tools.cancelAll();
   MCP.stopAll();
   stopWeb();
