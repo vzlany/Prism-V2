@@ -11,6 +11,7 @@
 // REST poll below stays as a fallback if the gateway cannot be reached.
 import { createEngineHost } from "./engine-host.mjs";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, join, resolve } from "node:path";
 import { WebSocket } from "ws";
 
@@ -26,6 +27,8 @@ const NO_TOOLS = args.includes("--no-tools");
 
 const host = createEngineHost({ profile: PROFILE });
 const { ROOT, USER_DATA, engines } = host;
+// Shared with the finish DM: Discord has no tables, so both convert them before posting.
+const { plainTables } = createRequire(import.meta.url)(join(ROOT, "desktop", "discord-format.js"));
 
 const stamp = () => new Date().toISOString().slice(11, 19);
 const log = (...parts) => console.log(`[${stamp()}]`, ...parts);
@@ -261,7 +264,7 @@ async function systemPrompt() {
  if (prompts && prompts.enabled !== false && typeof prompts.global === "string" && prompts.global.trim()) custom += `\n\n# User instructions (global)\n${prompts.global.trim()}`;
  const own = prompts?.models?.[state.model];
  if (typeof own === "string" && own.trim()) custom += `\n\n# User instructions (this model)\n${own.trim()}`;
- return `${AgentPrompt.build({ folder: state.folder, mode: "full", env, browser: "", mcp, memory, plan: "", instructions, skills, now: new Date() })}${custom}\n\n# Remote control\nYou are answering over Discord, from the user's phone. Keep replies short and plain; Discord markdown works.${state.tools ? " Tools run without asking." : " Tools are unavailable in this session: never attempt a tool call, answer in plain text."}`;
+ return `${AgentPrompt.build({ folder: state.folder, mode: "full", env, browser: "", mcp, memory, plan: "", instructions, skills, now: new Date() })}${custom}\n\n# Remote control\nYou are answering over Discord, from the user's phone. Keep replies short and plain; Discord markdown works, but **never write markdown tables** — Discord does not render them and they arrive as a wall of pipes. Use short lists with bold labels instead, one line per item (for example \`- **Title:** what changed\`).${state.tools ? " Tools run without asking." : " Tools are unavailable in this session: never attempt a tool call, answer in plain text."}`;
 }
 
 async function turn(prompt, display = {}) {
@@ -403,7 +406,7 @@ const api = (path, options = {}) => fetch(DISCORD + path, {
 });
 const chunk = text => {
  const out = [];
- let rest = String(text);
+ let rest = plainTables(String(text));
  while (rest.length > 1900) {
   let at = rest.lastIndexOf("\n", 1900);
   if (at < 400) at = 1900;

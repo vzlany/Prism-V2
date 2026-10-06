@@ -6,6 +6,7 @@
 const { app, ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { plainTables } = require('./discord-format');
 
 const file = () => path.join(app.getPath('userData'), 'discord.json');
 let prefs = null;
@@ -33,7 +34,7 @@ function state() {
 // and all, in as many messages as it takes.
 function chunks(text) {
  const out = [];
- let rest = String(text || '').trim();
+ let rest = plainTables(String(text || '')).trim();
  while (rest.length > 1900) {
   let at = rest.lastIndexOf('\n', 1900);
   if (at < 400) at = rest.lastIndexOf(' ', 1900);
