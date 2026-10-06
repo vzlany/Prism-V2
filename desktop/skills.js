@@ -115,7 +115,34 @@ async function install(url, onProgress = () => {}) {
  return { ok: false, error: lastError };
 }
 
+// Removes a skill the Settings list shows. Only a SKILL.md folder directly under
+// ~/.claude/skills is eligible, and it is renamed aside (*.backup-<stamp>) rather than
+// deleted, so a removal can always be undone by renaming it back. Backups stay hidden.
+function remove(target) {
+ try {
+  const file = path.resolve(String(target || ''));
+  if (path.basename(file).toLowerCase() !== 'skill.md') return { ok: false, error: 'not a SKILL.md file' };
+  const dir = path.dirname(file);
+  const root = path.join(os.homedir(), '.claude', 'skills');
+  const relative = path.relative(root, dir);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || relative.includes(path.sep)) {
+   return { ok: false, error: 'not a skill in ~/.claude/skills' };
+  }
+  const name = path.basename(dir);
+  if (name.includes('.backup-')) return { ok: false, error: 'already removed' };
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const backup = path.join(root, `${name}.backup-${stamp}`);
+  fs.renameSync(dir, backup);
+  return { ok: true, name, backup };
+ } catch (error) {
+  return { ok: false, error: String(error?.message || error) };
+ }
+}
+
 function register(fromApp) {
+ // Built-in (Claude-provided) skill folders are removable like installed ones: the row you
+ // see in Settings can always be taken out of the list, safely, with a backup on disk.
+ ipcMain.handle('skills:remove', (event, target) => (fromApp(event) ? remove(target) : { ok: false, error: 'not allowed' }));
  ipcMain.handle('skills:install', async (event, url) => {
   if (!fromApp(event) || typeof url !== 'string' || !url.trim()) return { ok: false, error: 'no address' };
   const send = (stage, name) => { try { event.sender.send('skills:progress', { stage, name }); } catch {} };
@@ -127,4 +154,4 @@ function register(fromApp) {
  });
 }
 
-module.exports = { register, install, parseRepo, untar };
+module.exports = { register, install, remove, parseRepo, untar };

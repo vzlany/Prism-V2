@@ -747,7 +747,7 @@ class Settings {
     </div>
     <div class="settings-control">
      <div class="skills-list">${skills.length
-      ? skills.map(skill => `<div class="skill-row"><span class="skill-name">${escapeHtml(skill.name)}</span><span class="skill-desc">${escapeHtml(skill.description || '')}</span></div>`).join('')
+      ? skills.map(skill => `<div class="skill-row" data-skill="${escapeHtml(skill.path || '')}"><span class="skill-name">${escapeHtml(skill.name)}</span><span class="skill-desc">${escapeHtml(skill.description || '')}</span><button type="button" class="skill-remove" title="${escapeHtml(I18n.t('settings.skills.remove'))}" aria-label="${escapeHtml(I18n.t('settings.skills.remove'))}">&#215;</button></div>`).join('')
       : `<div class="settings-mcp-empty">${escapeHtml(I18n.t('settings.skills.empty'))}</div>`}</div>
     </div>
    </div>`;
@@ -784,6 +784,23 @@ class Settings {
     line(I18n.t('settings.skills.failed', { error: result?.error || 'unknown error' }), 'error');
    }
   });
+  // Every row (built-in or installed) can be taken out: the folder is renamed aside, not
+  // deleted, and the list is repainted without it.
+  for (const row of node.querySelectorAll('.skill-row')) {
+   row.querySelector('.skill-remove')?.addEventListener('click', async () => {
+    const target = row.dataset.skill;
+    if (!target || row.classList.contains('is-removing')) return;
+    row.classList.add('is-removing');
+    const result = await (window.openghost?.skills?.remove?.(target) || Promise.resolve(null)).catch(() => null);
+    if (result?.ok) {
+     line(I18n.t('settings.skills.removed', { name: result.name || '' }), 'ok');
+     this.paintSkills();
+    } else {
+     row.classList.remove('is-removing');
+     line(I18n.t('settings.skills.removeFailed', { error: result?.error || 'unknown error' }), 'error');
+    }
+   });
+  }
  }
 
  // Settings -> Discord: the bot itself, the DM switch, and the conversations it keeps.

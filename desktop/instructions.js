@@ -75,6 +75,8 @@ const listSkills = directory => {
   try {
    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
+    // A removed skill is renamed to *.backup-<stamp>: it stays on disk but out of the list.
+    if (entry.name.includes('.backup-')) continue;
     const skill = readSkill(path.join(root, entry.name, 'SKILL.md'));
     if (skill) out.push(skill);
    }

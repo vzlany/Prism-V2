@@ -177,6 +177,7 @@ window.openghost = {
  skills: {
   list: directory => invoke('skills:list', directory),
   install: url => invoke('skills:install', url),
+  remove: target => invoke('skills:remove', target),
   onProgress: callback => {
    on('skills:progress', callback);
    return () => {

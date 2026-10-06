@@ -9151,9 +9151,12 @@ body.has-lightbox{overflow:hidden}
 .skill-log-line.is-ok{color:rgb(var(--success-rgb))}
 .skill-log-line.is-error{color:rgb(var(--danger-rgb))}
 .skills-list{display:flex;flex-direction:column;gap:5px;max-height:280px;overflow-y:auto;scrollbar-width:thin}
-.skill-row{display:flex;flex-direction:column;gap:1px;padding:7px 9px;border-radius:9px;background:rgba(var(--fg-rgb),.04)}
+.skill-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:1px 8px;padding:7px 9px;border-radius:9px;background:rgba(var(--fg-rgb),.04)}
+.skill-row.is-removing{opacity:.5;pointer-events:none}
 .skill-name{font-size:13px;color:rgba(var(--fg-rgb),.88)}
-.skill-desc{font-size:11.5px;color:var(--fg-tertiary);line-height:1.4}
+.skill-desc{grid-column:1;font-size:11.5px;color:var(--fg-tertiary);line-height:1.4}
+.skill-remove{grid-column:2;grid-row:1 / span 2;border:0;background:transparent;color:var(--fg-tertiary);font-size:15px;line-height:1;padding:2px 5px;border-radius:6px;cursor:pointer}
+.skill-remove:hover{color:rgb(var(--danger-rgb));background:rgba(var(--danger-rgb),.12)}
 
 /* Prism V2: the Discord page — the conversations the bot keeps */
 .discord-chats{display:flex;flex-direction:column;gap:3px;max-height:220px;overflow-y:auto;scrollbar-width:thin}
