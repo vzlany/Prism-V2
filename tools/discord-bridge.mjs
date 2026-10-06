@@ -10,8 +10,8 @@
 // The bot connects to the Discord gateway, so it shows online with a working status; the
 // REST poll below stays as a fallback if the gateway cannot be reached.
 import { createEngineHost } from "./engine-host.mjs";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { WebSocket } from "ws";
 
 const args = process.argv.slice(2);
@@ -274,7 +274,10 @@ async function turn(prompt, display = {}) {
   lastStatus = line;
   display.status?.(line);
  };
- for (let step = 0; step < 12; step++) {
+ // A hard question can take many calls: 12 used to cut real work off mid-task. The loop still
+ // ends on its own when the model answers without asking for another tool.
+ const MAX_STEPS = 50;
+ for (let step = 0; step < MAX_STEPS; step++) {
   if (state.stopped) return "⏹ stopped";
   let reasoning = "";
   const result = await stream([{ role: "system", content: system }, ...state.messages], {
@@ -307,6 +310,8 @@ async function turn(prompt, display = {}) {
     // Tools can answer with text, or with text plus pictures (a screenshot, an image file).
     output = typeof toolResult === "string" ? toolResult : String(toolResult?.text ?? JSON.stringify(toolResult ?? ""));
     if (toolResult?.images?.length) pictures.push(...toolResult.images);
+    // A finished file the agent attached (attach_file) is uploaded to the DM as it is made.
+    if (toolResult?.files?.length) await display.files?.(toolResult.files);
    } catch (error) {
     output = `Error: ${error.message}`;
     failed = true;
@@ -320,7 +325,7 @@ async function turn(prompt, display = {}) {
    state.messages.push({ role: "user", content });
   }
  }
- return "(stopped after 12 tool steps)";
+ return `(stopped after ${MAX_STEPS} tool steps)`;
 }
 
 // --------------------------------------------------------------- full display formatting
@@ -424,6 +429,30 @@ async function replyTo(channel, messageId, text) {
  const parts = chunk(text);
  await api(`/channels/${channel}/messages/${messageId}`, { method: "PATCH", body: JSON.stringify({ content: parts[0] }) });
  for (const part of parts.slice(1)) await api(`/channels/${channel}/messages`, { method: "POST", body: JSON.stringify({ content: part }) });
+}
+
+// Attachments: a file the agent produced (attach_file) is uploaded as a real Discord file.
+// Anything missing or over the safe size is skipped, so the reply never fails over an upload.
+const MAX_FILE = 9 * 1024 * 1024;
+async function postFiles(channel, files) {
+ const list = (Array.isArray(files) ? files : [])
+  .map(file => (typeof file === "string" ? { path: file } : file))
+  .filter(file => file?.path)
+  .slice(0, 10);
+ for (const file of list) {
+  try {
+   const stat = statSync(file.path);
+   if (!stat.isFile() || stat.size > MAX_FILE) continue;
+   const form = new FormData();
+   form.append("payload_json", JSON.stringify({}));
+   form.append("files[0]", new Blob([readFileSync(file.path)]), basename(file.path));
+   await fetch(`${DISCORD}/channels/${channel}/messages`, {
+    method: "POST",
+    headers: { authorization: `Bot ${config.token || ""}` },
+    body: form,
+   }).catch(() => {});
+  } catch {}
+ }
 }
 
 // --------------------------------------------------------------- gateway (online status + DMs)
@@ -686,6 +715,8 @@ async function handle(channel, message) {
    if (item.messageId) await api(`/channels/${channel}/messages/${item.messageId}`, { method: "PATCH", body: JSON.stringify({ content }) }).catch(() => {});
    else await post(channel, content);
   },
+  // Files made during the turn arrive here right after the tool that made them.
+  files: async list => { await postFiles(channel, list).catch(() => {}); },
  };
  setPresence("🤔 thinking…", "dnd");
  try {

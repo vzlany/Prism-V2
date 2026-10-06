@@ -288,6 +288,9 @@ class Chat {
   this.tools = 0;
   this.follow = true;
   this.lastTop = 0;
+  // When the user last scrolled by hand (wheel, finger, keyboard, scrollbar): only then may
+  // following switch off. Content-driven scroll events must not count as leaving the bottom.
+  this.scrollIntent = 0;
   this.followFrame = 0;
   this.followLast = 0;
   this.followPos = 0;
@@ -314,6 +317,16 @@ class Chat {
    this.syncBottom();
   });
   thread.addEventListener('scroll', () => this.onScroll());
+  // Real scrolling turns following off; a Thought folding or a tool card closing above the
+  // viewport fires a scroll event too, and those must not be mistaken for the reader leaving
+  // the bottom (that made the page "teleport up" when a tool started or a thought ended).
+  const intent = () => { this.scrollIntent = performance.now(); };
+  thread.addEventListener('wheel', intent, { passive: true });
+  thread.addEventListener('touchmove', intent, { passive: true });
+  thread.addEventListener('scroll-intent', intent);
+  thread.addEventListener('keydown', event => {
+   if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) intent();
+  });
   thread.addEventListener('click', event => this.onClick(event));
   thread.addEventListener('diagram-edit', event => this.onDiagramEdit(event));
   bottom.addEventListener('scroll-bottom', () => this.scrollToBottom());
@@ -838,7 +851,7 @@ class Chat {
  onScroll() {
   const top = this.thread.scrollTop, distance = this.thread.scrollHeight - top - this.thread.clientHeight;
   if (distance <= FOLLOW_DISTANCE) this.follow = true;
-  else if (top < this.lastTop - 1) this.follow = false;
+  else if (top < this.lastTop - 1 && performance.now() - this.scrollIntent < 900) this.follow = false;
   this.lastTop = top;
   this.syncBottom();
   this.loadOlder();
@@ -1494,7 +1507,14 @@ class Chat {
    // The Discord switch at the end of the mode menu: a DM with the fuller summary, sent
    // whether or not the toast was shown.
    if (window.DiscordNotify?.on && !conv.subagent && !turn.quiet) {
-    window.openghost?.discord?.dm?.({ title, outcome, summary: String(entry.content || '').replace(/\s+/g, ' ').trim().slice(0, 1200) });
+    // The reply goes over as the model wrote it (line breaks and markdown kept, split into
+    // Discord-sized messages), with the files the run attached. Never flattened to one line.
+    window.openghost?.discord?.dm?.({
+     title,
+     outcome,
+     summary: String(entry.content || '').trim().slice(0, 8000),
+     files: (turn.files || []).map(file => file.path).filter(Boolean),
+    });
    }
    window.ParallelRuns?.update(conv.id, { status: outcome, snippet: summary.slice(0, 140) });
    // A chime when a task ends, an approval card or question waits, or something breaks.

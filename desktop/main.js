@@ -566,8 +566,8 @@ ipcMain.on('notify', (event, payload) => {
  try {
   new Notification({ title, body, icon: ICON, silent: false }).show();
  } catch {}
- // Optional: the same message as a Discord DM, when a bot token is configured.
- void Discord.send(title, body, payload?.summary).catch(() => {});
+ // The Discord DM is a separate switch ("DM me on Discord" in the mode menu) and is sent by
+ // the discord:dm handler below; this toast must not also DM, or every finish arrives twice.
 });
 
 const fromApp = event => event.sender.getType() === 'window' && event.senderFrame?.url.startsWith('file:');
@@ -605,6 +605,7 @@ ipcMain.handle('discord:dm', (event, payload) => {
   typeof payload?.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Prism V2',
   typeof payload?.outcome === 'string' ? payload.outcome : 'completed',
   typeof payload?.summary === 'string' ? payload.summary : '',
+  Array.isArray(payload?.files) ? payload.files : [],
  );
 });
 ipcMain.handle('profile:info', event => {

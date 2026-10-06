@@ -28,7 +28,50 @@ function state() {
  return { enabled: Boolean(p.enabled), userId: String(p.userId || ''), hasToken: Boolean(p.token) };
 }
 
-async function send(title, outcome, summary) {
+// A message body over Discord's 2000-char limit is split on its own line breaks (then on
+// spaces, then hard) instead of being cut off — the finished reply arrives whole, markdown
+// and all, in as many messages as it takes.
+function chunks(text) {
+ const out = [];
+ let rest = String(text || '').trim();
+ while (rest.length > 1900) {
+  let at = rest.lastIndexOf('\n', 1900);
+  if (at < 400) at = rest.lastIndexOf(' ', 1900);
+  if (at < 400) at = 1900;
+  out.push(rest.slice(0, at));
+  rest = rest.slice(at).replace(/^[\s\n]+/, '');
+ }
+ if (rest) out.push(rest);
+ return out;
+}
+
+const MAX_FILE = 9 * 1024 * 1024;
+
+// Files the run produced (attach_file) ride along as real Discord attachments. Anything that
+// is missing or bigger than the safe upload size is skipped rather than failing the send.
+async function upload(token, channel, files) {
+ const attached = [];
+ for (const file of (Array.isArray(files) ? files : []).slice(0, 10)) {
+  const target = typeof file === 'string' ? file : file?.path;
+  if (!target) continue;
+  try {
+   const stat = fs.statSync(target);
+   if (!stat.isFile() || stat.size > MAX_FILE) continue;
+   const form = new FormData();
+   form.append('payload_json', JSON.stringify({}));
+   form.append('files[0]', new Blob([fs.readFileSync(target)]), path.basename(target));
+   const res = await fetch(`https://discord.com/api/v10/channels/${channel}/messages`, {
+    method: 'POST',
+    headers: { authorization: `Bot ${token}` },
+    body: form,
+   });
+   if (res.ok) attached.push(path.basename(target));
+  } catch {}
+ }
+ return attached;
+}
+
+async function send(title, outcome, summary, files = []) {
  const p = load();
  if (!p.enabled || !p.token || !p.userId) return { ok: false, error: 'not configured' };
  try {
@@ -39,14 +82,21 @@ async function send(title, outcome, summary) {
    body: JSON.stringify({ recipient_id: String(p.userId) }),
   });
   if (!dm.ok) return { ok: false, error: `dm channel ${dm.status}` };
-  const channel = await dm.json();
-  const content = `**${String(title).slice(0, 120)}** — ${String(outcome || 'completed')}${summary ? `\n${String(summary).slice(0, 1200)}` : ''}`;
-  const message = await fetch(`https://discord.com/api/v10/channels/${channel.id}/messages`, {
+  const channel = (await dm.json()).id;
+  const post = content => fetch(`https://discord.com/api/v10/channels/${channel}/messages`, {
    method: 'POST',
    headers,
    body: JSON.stringify({ content }),
-  });
-  return { ok: message.ok, error: message.ok ? '' : `message ${message.status}` };
+  }).then(res => res.ok, () => false);
+  // The header and the first piece of the reply share a message when they fit together.
+  const header = `**${String(title).slice(0, 120)}** — ${String(outcome || 'completed')}`;
+  const parts = chunks(summary);
+  let first = header;
+  if (parts.length && first.length + 2 + parts[0].length <= 2000) first += `\n${parts.shift()}`;
+  let ok = await post(first);
+  for (const part of parts) ok = (await post(part)) && ok;
+  const attached = await upload(p.token, channel, files);
+  return { ok, ...(attached.length ? { attached } : {}) };
  } catch (error) {
   return { ok: false, error: String(error?.message || error).slice(0, 200) };
  }
