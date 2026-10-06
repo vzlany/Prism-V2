@@ -56,7 +56,9 @@ function chip(raw, info, cwd) {
  return button;
 }
 
-const SKIP = 'pre, code, a, .md-code, .md-calc, .md-diagram, .path-chip, .artifact, .md-copy';
+// Inline `code` is deliberately not skipped: a path the agent wraps in backticks is the
+// common case in a summary, and it should still become a chip. Code blocks stay untouched.
+const SKIP = 'pre, .md-code, a, .md-calc, .md-diagram, .path-chip, .artifact, .md-copy';
 
 async function enhance(root, cwd) {
  if (!root || !window.openghost?.path?.info || root.dataset?.chips === 'on') return;

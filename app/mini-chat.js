@@ -102,7 +102,7 @@ class MiniChat {
   this.send = $('.composer-send');
   const thread = $('.thread'), bottom = $('.thread-bottom');
   bottom.style.setProperty('--glass-lens', getComputedStyle(document.querySelector('.thread-bottom')).getPropertyValue('--glass-lens'));
-  new SmoothHeight(this.field, this.input);
+  new SmoothHeight(this.field, this.input, { instant: true });
   new Scrollbar(this.input, $('.composer-scrollbar'));
   const scrollbar = new Scrollbar(thread, $('.thread-scrollbar'));
   this.text = new ComposerText(this.input, $('.composer-mirror'));

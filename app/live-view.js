@@ -64,7 +64,11 @@ class LiveView {
 
  paint(node, part) {
   if (node.kind === 'thinking') {
-   node.view.write(part.text || '', Boolean(part.live));
+   const live = Boolean(part.live);
+   node.view.write(part.text || '', live);
+   // The mirror used to leave the Thought box open forever: when the reasoning ends, the
+   // same finish the app runs locally must run here, or Auto collapses only after a reload.
+   if (!live) node.view.finish?.();
    return;
   }
   if (node.kind === 'tool') {

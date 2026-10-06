@@ -23,7 +23,8 @@ let instructionsPill = null;
 let effortSlider = null;
 let liveView = null;
 
-new SmoothHeight(composerField, composerInput);
+// instant: a new line in the composer must appear at once; the spring made typing lag.
+new SmoothHeight(composerField, composerInput, { instant: true });
 // Keeps the room above the composer and the composer's own top edge in two custom properties,
 // so anything that hangs from the composer (the pills, the welcome ghost) follows it everywhere.
 const measureComposer = () => {

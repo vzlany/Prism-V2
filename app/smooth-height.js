@@ -6,18 +6,22 @@ const SPRING = [260, 32];
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 class SmoothHeight {
- constructor(box, content) {
+ // options.instant skips the spring entirely: the box is never given an animated height, so a
+ // new line appears at once (the composer's growing field used to lag while typing).
+ constructor(box, content, options = {}) {
   this.box = box;
   this.h = null;
   this.v = 0;
   this.goal = 0;
   this.raf = 0;
   this.last = 0;
+  this.instant = options.instant === true;
   this.tick = this.tick.bind(this);
-  new ResizeObserver(entries => this.onResize(entries[entries.length - 1].borderBoxSize[0].blockSize)).observe(content);
+  if (!this.instant) new ResizeObserver(entries => this.onResize(entries[entries.length - 1].borderBoxSize[0].blockSize)).observe(content);
  }
 
  onResize(goal) {
+  if (this.instant) return;
   if (goal === this.goal && this.h !== null) return;
   this.goal = goal;
   if (this.h === null || reducedMotion()) { this.snap(); return; }
