@@ -4,7 +4,7 @@
 (() => {
 'use strict';
 
-const GROUPS = { chatgpt: 'ChatGPT', openai: 'OpenAI API', anthropic: 'Anthropic', deepseek: 'DeepSeek', 'opencode-go': 'OpenCode Go' };
+const GROUPS = { chatgpt: 'ChatGPT', openai: 'OpenAI API', anthropic: 'Anthropic', deepseek: 'DeepSeek', 'opencode-go': 'OpenCode Go', opencode: 'OpenCode Zen — Free' };
 
 // Windows are told the way providers tell them: 272K, 200K, 1M.
 function size(tokens) {

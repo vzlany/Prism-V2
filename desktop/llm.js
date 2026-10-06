@@ -9,9 +9,10 @@ const ChatGPT = require('./chatgpt');
 const OpenCodeGo = require('./opencode-go');
 
 const runs = new Map();
-const PROVIDERS = new Set(['openai', 'chatgpt', 'anthropic', 'opencode-go']);
+const PROVIDERS = new Set(['openai', 'chatgpt', 'anthropic', 'opencode-go', 'opencode']);
 
-const engine = provider => provider === 'anthropic' ? Claude : provider === 'opencode-go' ? OpenCodeGo : OpenAI;
+// OpenCode Go and OpenCode Zen share one engine (it picks the gateway by provider).
+const engine = provider => provider === 'anthropic' ? Claude : (provider === 'opencode-go' || provider === 'opencode') ? OpenCodeGo : OpenAI;
 
 async function start(sender, id, request) {
  const controller = new AbortController();

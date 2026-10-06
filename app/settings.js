@@ -4,7 +4,7 @@
 const STORAGE = { effort: 'deepseek.effort', mode: 'openghost.mode', model: 'openghost.model', catalog: 'openghost.catalog', catalogAt: 'openghost.catalogAt', apis: 'openghost.apis', apiActive: 'openghost.apiActive' };
 const KEYS = { openai: 'openai.apiKey', anthropic: 'anthropic.apiKey', deepseek: 'deepseek.apiKey', 'opencode-go': 'opencode-go.apiKey' };
 // The order providers appear in, in the settings and in the model picker.
-const ORDER = ['opencode-go', 'chatgpt', 'openai', 'anthropic', 'deepseek'];
+const ORDER = ['opencode-go', 'opencode', 'chatgpt', 'openai', 'anthropic', 'deepseek'];
 const DEFAULT_MODEL = 'deepseek-flash';
 const EFFORTS = ['none', 'low', 'high', 'max'];
 const DEFAULT_EFFORT = 'high';
@@ -298,7 +298,7 @@ class Settings {
  readCatalog() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(STORAGE.catalog)) || {}; } catch {}
-  return { chatgpt: [], openai: [], anthropic: [], 'opencode-go': [], ...saved, deepseek: saved.deepseek?.length ? saved.deepseek : KNOWN_DEEPSEEK.slice() };
+  return { chatgpt: [], openai: [], anthropic: [], 'opencode-go': [], opencode: [], ...saved, deepseek: saved.deepseek?.length ? saved.deepseek : KNOWN_DEEPSEEK.slice() };
  }
 
  saveCatalog() {
@@ -326,6 +326,8 @@ class Settings {
 
  connected(provider) {
   if (provider === 'chatgpt') return !!this.account.connected || Boolean(this.shared?.[provider]?.length && window.openghost?.app?.connected?.());
+  // Only OpenCode Zen's Free tier is offered, and those models take no key: always connected.
+  if (provider === 'opencode') return true;
   return !!this.keys[provider] || Boolean(this.shared?.[provider]?.length && window.openghost?.app?.connected?.());
  }
 

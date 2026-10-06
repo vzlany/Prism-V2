@@ -10,8 +10,13 @@ const path = require('node:path');
 const OpenAI = require('./openai');
 const Claude = require('./anthropic');
 
-const BASE = 'https://opencode.ai/zen/go/v1';
-const MESSAGES_BASE = 'https://opencode.ai/zen/go';
+// Two OpenCode gateways share this engine: Go (one key, the whole zoo) and Zen, whose model
+// catalog is public and whose Free models answer without any key at all.
+const PROVIDERS = {
+ 'opencode-go': { base: 'https://opencode.ai/zen/go/v1', messages: 'https://opencode.ai/zen/go', label: 'OpenCode Go' },
+ opencode: { base: 'https://opencode.ai/zen/v1', messages: 'https://opencode.ai/zen', label: 'OpenCode Zen' },
+};
+const conf = provider => PROVIDERS[provider] || PROVIDERS['opencode-go'];
 const NO_VISION = '[A picture was here, but the selected model can\'t see pictures]';
 const MAX_OUTPUT = 64000;
 
@@ -71,20 +76,21 @@ const REASONING = {
 };
 
 // The OpenCode cache carries the same catalog and stays fresh as models come and go.
-let cache;
-function catalog() {
- if (cache !== undefined) return cache;
- cache = null;
+const caches = new Map();
+function catalog(provider = 'opencode-go') {
+ if (caches.has(provider)) return caches.get(provider);
+ let models = null;
  try {
   const file = path.join(os.homedir(), '.cache', 'opencode', 'models.json');
-  cache = JSON.parse(fs.readFileSync(file, 'utf8'))?.['opencode-go']?.models || null;
+  models = JSON.parse(fs.readFileSync(file, 'utf8'))?.[provider]?.models || null;
  } catch {}
- return cache;
+ caches.set(provider, models);
+ return models;
 }
 
 // The levels a model takes, and whether its thinking can be switched off entirely.
-function reasoningOf(id) {
- const live = catalog()?.[id];
+function reasoningOf(id, provider = 'opencode-go') {
+ const live = catalog(provider)?.[id];
  let levels = null, toggle = false;
  if (live && Array.isArray(live.reasoning_options)) {
   const effort = live.reasoning_options.find(option => option?.type === 'effort');
@@ -105,16 +111,16 @@ function reasoningOf(id) {
  return { levels, toggle, known: true };
 }
 
-function effortsOf(id) {
- const { levels } = reasoningOf(id);
+function effortsOf(id, provider = 'opencode-go') {
+ const { levels } = reasoningOf(id, provider);
  // "Default" always comes first: it means the model decides, nothing is sent.
  return levels.length ? ['default', ...levels] : [];
 }
 
 // The thinking switch and effort a model takes; "default" sends nothing at all.
-function reasoningPayload(model, effort) {
+function reasoningPayload(model, effort, provider = 'opencode-go') {
  if (!effort || effort === 'default') return {};
- const { levels } = reasoningOf(model);
+ const { levels } = reasoningOf(model, provider);
  if (!levels.includes(effort)) return {};
  const payload = {};
  if (/^deepseek/.test(model)) payload.thinking = { type: effort === 'none' ? 'disabled' : 'enabled' };
@@ -174,9 +180,9 @@ const NAMES = {
 // for everything else; the names below are the DeepSeek flash family, which accepts images
 // natively even when a catalog entry leaves the image modality out (or the cache is stale).
 const VISION = /(vision|omni|^gpt-|^grok-|^muse-spark|qwen3\.8-flash|^deepseek-(flash|v4\.1-flash|v4-flash)$)/;
-function visionOf(id) {
+function visionOf(id, provider = 'opencode-go') {
  if (VISION.test(id)) return true;
- const live = catalog()?.[id];
+ const live = catalog(provider)?.[id];
  if (live) {
   if (Array.isArray(live.modalities?.input)) return live.modalities.input.includes('image');
   if (typeof live.attachment === 'boolean') return live.attachment;
@@ -194,16 +200,16 @@ const CONTEXT = id => {
 
 const pretty = id => NAMES[id] || id.split(/[-_]/).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 
-function describe(id) {
- const efforts = effortsOf(id);
- const live = catalog()?.[id];
+function describe(id, provider = 'opencode-go') {
+ const efforts = effortsOf(id, provider);
+ const live = catalog(provider)?.[id];
  return {
-  id: `opencode-go:${id}`,
-  provider: 'opencode-go',
+  id: `${provider}:${id}`,
+  provider,
   api: id,
   name: NAMES[id] || live?.name || pretty(id),
   context: live?.limit?.context || CONTEXT(id),
-  vision: visionOf(id),
+  vision: visionOf(id, provider),
   efforts,
   defaultEffort: efforts.includes('high') ? 'high' : efforts[efforts.length - 1] || '',
   // The Messages models take a plain effort (or a thinking switch), no budget.
@@ -223,11 +229,13 @@ function sessionOf(request) {
  return 'prism-' + crypto.createHash('sha1').update(seed || 'empty').digest('hex').slice(0, 24);
 }
 
-async function call(path, key, options = {}) {
- if (!/^[\x21-\x7e]+$/.test(key)) throw error('The OpenCode Go key is missing or malformed', 401);
+async function call(path, { provider, key }, options = {}) {
+ const { base, label } = conf(provider);
+ // Go always needs its key; Zen allows an empty one, because its Free models run without it.
+ if (provider === 'opencode-go' && !/^[\x21-\x7e]+$/.test(key)) throw error(`The ${label} key is missing or malformed`, 401);
  let response;
  try {
-  response = await fetch(BASE + path, { ...options, headers: { Authorization: `Bearer ${key}`, ...options.headers } });
+  response = await fetch(base + path, { ...options, headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), ...options.headers } });
  } catch (cause) {
   if (cause.name === 'AbortError') throw cause;
   throw error('network', 0, 'network');
@@ -238,13 +246,20 @@ async function call(path, key, options = {}) {
   const body = await response.json();
   detail = body.error?.message || body.message || '';
  } catch {}
- throw error(detail || `OpenCode Go returned error ${response.status}`, response.status);
+ if (response.status === 401 && !key) throw error('This model needs an OpenCode Zen key — add one in Settings → Providers, then pick the model again.', 401);
+ throw error(detail || `${label} returned error ${response.status}`, response.status);
 }
 
-async function models({ key }) {
- cache = undefined; // a fresh listing re-reads the catalog
- const body = await (await call('/models', key)).json();
- return (body.data || []).filter(entry => entry?.id).map(entry => describe(entry.id));
+// Zen's paid models are deliberately not offered: the picker lists only its Free tier, which
+// needs no key at all. OpenCode Go stays the way to reach the paid zoo.
+const FREE = /-free$/i;
+
+async function models({ provider = 'opencode-go', key } = {}) {
+ caches.delete(provider); // a fresh listing re-reads the catalog
+ const body = await (await call('/models', { provider, key })).json();
+ return (body.data || [])
+  .filter(entry => entry?.id && (provider !== 'opencode' || FREE.test(entry.id)))
+  .map(entry => describe(entry.id, provider));
 }
 
 // A text-only model rejects image parts, so pictures in the history turn into a short note instead.
@@ -257,9 +272,10 @@ function textOnly(messages) {
 }
 
 async function chat(request, { signal, onEvent = () => {} }) {
+ const provider = request.provider || 'opencode-go';
  const { key, model, effort, vision = true, messages, tools, maxTokens } = request;
- const reasoning = reasoningPayload(model, effort);
- const response = await call('/chat/completions', key, {
+ const reasoning = reasoningPayload(model, effort, provider);
+ const response = await call('/chat/completions', { provider, key }, {
   method: 'POST',
   signal,
   headers: { 'Content-Type': 'application/json', 'x-opencode-session': sessionOf(request) },
@@ -299,7 +315,7 @@ async function chat(request, { signal, onEvent = () => {} }) {
     } catch {
      continue;
     }
-    if (chunk.error) throw error(chunk.error.message || 'OpenCode Go stopped the answer', Number(chunk.error.code) || 0);
+    if (chunk.error) throw error(chunk.error.message || `${conf(provider).label} stopped the answer`, Number(chunk.error.code) || 0);
     if (chunk.usage) result.usage = chunk.usage;
     const choice = chunk.choices && chunk.choices[0];
     if (!choice) continue;
@@ -335,12 +351,14 @@ async function stream(request, context) {
  // "Default" means the model decides: nothing is sent, whichever API it speaks.
  if (request.effort === 'default') request = { ...request, effort: '' };
  // Route by how the model is served; the Responses and Messages paths reuse the other engines.
+ const provider = request.provider || 'opencode-go';
+ const { base, messages: messagesBase } = conf(provider);
  const session = sessionOf(request);
  if (RESPONSES.test(request.model)) {
-  return OpenAI.stream({ ...request, provider: 'opencode-go' }, { ...context, apiUrl: BASE, extraHeaders: { 'x-opencode-session': session } });
+  return OpenAI.stream({ ...request, provider }, { ...context, apiUrl: base, extraHeaders: { 'x-opencode-session': session } });
  }
  if (MESSAGES.test(request.model)) {
-  return Claude.stream(request, { ...context, baseURL: MESSAGES_BASE, defaultHeaders: { 'x-opencode-session': session } });
+  return Claude.stream(request, { ...context, baseURL: messagesBase, defaultHeaders: { 'x-opencode-session': session } });
  }
  return chat(request, context);
 }

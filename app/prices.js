@@ -13,7 +13,7 @@ const CACHE_KEY = 'openghost.prices.catalog';
 const OVERRIDE_KEY = 'openghost.prices';
 const TTL = 6 * 60 * 60 * 1000;
 // The providers this app can talk to; the catalog is trimmed to them when it is cached.
-const USED = ['opencode-go', 'chatgpt', 'openai', 'anthropic', 'deepseek'];
+const USED = ['opencode-go', 'opencode', 'chatgpt', 'openai', 'anthropic', 'deepseek'];
 
 const TABLE = {
  'deepseek-flash': { in: 0.27, cached: 0.07, out: 1.1 },
