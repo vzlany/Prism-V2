@@ -64,8 +64,13 @@ class StreamView {
    if (el && el.__html === html) continue;
    template.innerHTML = html;
    const node = document.importNode(template.content.firstElementChild, true);
-   if (el) el.replaceWith(node);
-   else root.appendChild(node);
+   if (el) {
+    // The block is an update of something already on screen, not a new arrival: replaying
+    // its entrance animation here is what made a code block in a live Thought flash on
+    // every repaint (the animation plays again each time the node is re-created).
+    node.style.animation = 'none';
+    el.replaceWith(node);
+   } else root.appendChild(node);
    node.__html = html;
    if (!diagrams && html.includes('md-diagram')) diagrams = true;
   }
