@@ -25,10 +25,14 @@ export function createEngineHost({ profile = "" } = {}) {
    }
   }
  } catch {}
+ const home = process.env.USERPROFILE || process.env.HOME || ".";
  const paths = {
   userData: USER_DATA,
   appData: APP_DATA,
-  home: process.env.USERPROFILE || process.env.HOME || ".",
+  home,
+  // The same Documents folder Electron hands the app (app.getPath('documents')): the shared
+  // Chats/Public workspaces must resolve to one path in both engines, or the list shows them twice.
+  documents: process.env.XDG_DOCUMENTS_DIR || join(home, "Documents"),
   temp: process.env.TEMP || "/tmp",
  };
 
@@ -103,6 +107,7 @@ export function createEngineHost({ profile = "" } = {}) {
   typeof payload?.title === "string" && payload.title.trim() ? payload.title.trim() : "Prism V2",
   typeof payload?.outcome === "string" ? payload.outcome : "completed",
   typeof payload?.summary === "string" ? payload.summary : "",
+  Array.isArray(payload?.files) ? payload.files : [],
  ));
  MCP.init().catch(() => {});
 
@@ -146,7 +151,7 @@ export function createEngineHost({ profile = "" } = {}) {
  handlers.set("path:open", (event, target, cwd) => typeof target === "string" && target ? electron.shell.openPath(fullPath(target, cwd)) : false);
  // A folder without picking one: the shared Chats folder, or the shared Public one.
  handlers.set("workspace:create", (event, kind) => {
-  const base = join(process.env.USERPROFILE || process.env.HOME || ".", "Prism V2");
+  const base = join(paths.documents, "Prism V2");
   const name = kind === "public" ? "Public" : "Chats";
   const folder = join(base, name);
   try { mkdirSync(folder, { recursive: true }); return { path: folder, name }; } catch { return null; }

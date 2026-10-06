@@ -7,8 +7,14 @@ const TITLE_MAX = 60;
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const baseName = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
-const samePath = (a, b) => a.toLowerCase() === b.toLowerCase();
-const key = path => String(path || '').toLowerCase();
+// Paths are compared the way Windows does: case-insensitive, both slash kinds, no trailing one.
+const canonical = value => String(value || '').toLowerCase().replace(/\//g, '\\').replace(/\\+$/, '');
+const samePath = (a, b) => canonical(a) === canonical(b);
+const key = path => canonical(path);
+// The Discord bridge keeps its conversations in a folder of its own; it is not a workspace the
+// user chose, so it must never become the default folder of a new chat.
+const INTERNAL_PATH = /[\\/]Prism V2[\\/]Discord[\\/]?$/i;
+const internalFolder = folder => /^[-_]/.test(String(folder?.name || '')) || INTERNAL_PATH.test(String(folder?.path || ''));
 
 function titleFrom(text, attachments) {
  const lines = text.split('\n').map(part => part.trim()).filter(Boolean);
@@ -43,7 +49,30 @@ class Library {
    delete chat.archived;
    this.folder({ path: chat.folder });
   }
+  this.mergeLegacyFolders();
   this.onChange();
+ }
+
+ // The web engine of an older build made the shared Chats/Public workspaces under
+ // %USERPROFILE%\Prism V2 while the app made them under Documents\Prism V2, so the same
+ // workspace could be listed twice. Fold the legacy record into the Documents one and move
+ // its chats over; only a real pair of records is ever merged.
+ mergeLegacyFolders() {
+  let changed = false;
+  for (let i = this.folders.length - 1; i >= 0; i--) {
+   const folder = this.folders[i];
+   const match = String(folder.path || '').match(/^(.*?)[\\/]Prism V2[\\/]([^\\/]+)[\\/]?$/i);
+   if (!match || /[\\/]Documents[\\/]?$/i.test(match[1])) continue;
+   const sep = match[1].includes('/') ? '/' : '\\';
+   const candidate = `${match[1]}${sep}Documents${sep}Prism V2${sep}${match[2]}`;
+   const target = this.folders.find(item => item !== folder && samePath(item.path, candidate));
+   if (!target) continue;
+   for (const chat of this.chats) if (samePath(chat.folder, folder.path)) chat.folder = target.path;
+   if (folder.collapsed) target.collapsed = true;
+   this.folders.splice(i, 1);
+   changed = true;
+  }
+  return changed;
  }
 
  save() {
@@ -87,21 +116,33 @@ class Library {
  }
 
  // The folder most recently worked in: the newest chat's folder, else the newest folder.
+ // The Discord bridge's folder is skipped: a message there must not make every new chat on
+ // the app (or web) start out filed under "-Discord".
+ internalPath(path) {
+  const folder = this.folders.find(item => samePath(item.path, path));
+  return folder ? internalFolder(folder) : INTERNAL_PATH.test(String(path || ''));
+ }
+
  lastFolder() {
-  const recent = [...this.chats].sort((a, b) => (b.updated || 0) - (a.updated || 0))[0];
+  const recent = [...this.chats]
+   .filter(chat => !this.internalPath(chat.folder))
+   .sort((a, b) => (b.updated || 0) - (a.updated || 0))[0];
   const byChat = recent && this.folders.find(folder => samePath(folder.path, recent.folder));
   if (byChat) return byChat;
-  return [...this.folders].sort((a, b) => (b.added || 0) - (a.added || 0))[0] || null;
+  return [...this.folders].filter(folder => !internalFolder(folder)).sort((a, b) => (b.added || 0) - (a.added || 0))[0] || null;
  }
 
  async pick(quick = false) {
-  // A chat that just needs a folder takes the only one there is.
-  if (quick && this.folders.length === 1) {
-   const only = this.folders[0];
-   only.collapsed = false;
-   only.added = Date.now();
-   this.changed();
-   return { path: only.path, name: only.name };
+  // A chat that just needs a folder takes the only user workspace there is.
+  if (quick) {
+   const mine = this.folders.filter(folder => !internalFolder(folder));
+   if (mine.length === 1) {
+    const only = mine[0];
+    only.collapsed = false;
+    only.added = Date.now();
+    this.changed();
+    return { path: only.path, name: only.name };
+   }
   }
   const last = this.lastFolder();
   let picked = null;
@@ -181,6 +222,7 @@ class Library {
   }
   // A chat can arrive before its folder entry: make sure the folder exists for the list.
   for (const chat of this.chats) if (!folders.some(folder => samePath(folder.path, chat.folder))) this.folder({ path: chat.folder });
+  if (this.mergeLegacyFolders()) changes++;
   if (changes) this.changed();
   return changes;
  }
