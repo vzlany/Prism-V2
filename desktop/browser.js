@@ -431,6 +431,10 @@ async function state(guest, { full = false, note = '' } = {}) {
  head.push(screens > 1.05 ? `Viewport ${scroll.vw}×${scroll.vh}, scrolled ${percent(scroll)}% of a page ${screens.toFixed(1)} screens tall.` : `Viewport ${scroll.vw}×${scroll.vh}, the whole page fits on screen.`);
  const fresh = downloads.filter(item => !item.told);
  for (const item of fresh) { item.told = true; head.push(`Downloaded: ${item.file}`); }
+ // A told entry is only useful the moment it is reported: keep the list bounded instead of
+ // letting it grow for the whole session.
+ for (let i = downloads.length - 1; i >= 0; i--) if (downloads[i].told) downloads.splice(i, 1);
+ while (downloads.length > 20) downloads.shift();
  const tail = [];
  if (snap.skipped) tail.push(`[… ${snap.skipped} more lines not shown. ${full ? 'Scroll to them and take a snapshot' : 'Call browser_snapshot with full true or scroll'}.]`);
  else if (!full && scroll.below > 8) tail.push('[More content below: scroll down to see it.]');

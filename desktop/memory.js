@@ -22,11 +22,18 @@ function load() {
  return items;
 }
 
+// One write queue for the whole file: memory_save can arrive from several parallel runs, and
+// a synchronous write blocked the main process for every one of them.
+let writes = Promise.resolve();
 function save() {
- try {
-  fs.mkdirSync(path.dirname(file()), { recursive: true });
-  fs.writeFileSync(file(), JSON.stringify({ version: 1, items: load() }, null, 2));
- } catch {}
+ const data = JSON.stringify({ version: 1, items: load() }, null, 2);
+ writes = writes.catch(() => {}).then(async () => {
+  await fs.promises.mkdir(path.dirname(file()), { recursive: true });
+  const temp = `${file()}.tmp`;
+  await fs.promises.writeFile(temp, data, 'utf8');
+  await fs.promises.rename(temp, file());
+ }).catch(() => {});
+ return writes;
 }
 
 const list = () => load().map(({ id, text, created, updated }) => ({ id, text, created, updated }));

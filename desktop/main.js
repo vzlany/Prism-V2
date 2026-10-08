@@ -199,13 +199,27 @@ ipcMain.on('presence:set', (event, id, info) => {
 });
 
 // A heartbeat so `prism web` knows the app is running and can hand it the turns started on
-// the website (and only then: without the app, the web runs them itself).
+// the website (and only then: without the app, the web runs them itself). With no page
+// connected it is a disk write for nobody, so it only runs while a page is open; the web
+// server's web-clients.json changing wakes it the moment one connects.
+function webClientsOpen() {
+ try {
+  const data = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'web-clients.json'), 'utf8'));
+  return Array.isArray(data?.clients) && data.clients.some(entry => Date.now() - (Number(entry?.at) || 0) < 120000);
+ } catch {
+  return false;
+ }
+}
 function beatApp() {
+ if (!webClientsOpen()) return;
  const file = path.join(app.getPath('userData'), 'app.json');
  fs.promises.writeFile(file, JSON.stringify({ at: Date.now(), version: app.getVersion(), pid: process.pid })).catch(() => {});
 }
 beatApp();
 setInterval(beatApp, 10000);
+try {
+ fs.watch(app.getPath('userData'), (event, name) => { if (name === 'web-clients.json') beatApp(); });
+} catch {}
 
 // --------------------------------------------------------------- Settings -> Auto + tray
 // Launching with Windows (optionally hidden, straight into the tray), and running the web

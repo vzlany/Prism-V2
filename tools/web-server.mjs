@@ -6,6 +6,7 @@
 //
 //   node tools/web-server.mjs [--port 8787] [--host 127.0.0.1] [--profile work] [--no-open]
 import { existsSync, createReadStream, mkdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve } from "node:path";
@@ -62,17 +63,26 @@ const page = () => readFileSync(join(ROOT, "app", "index.html"), "utf8")
 const stamp = () => new Date().toISOString().slice(11, 19);
 let connections = 0;
 
+// Dev serves every file fresh (a cached chat.js looks like a change that never happened);
+// production answers a phone reload with a cheap 304 instead of re-sending styles.css and
+// every module. `--dev` or PRISM_WEB_DEV=1 restores the old behaviour.
+const DEV = process.env.PRISM_WEB_DEV === "1" || process.argv.includes("--dev");
+
 const server = createServer((req, res) => {
  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
  const send = (status, body, type) => {
-  // The renderer gets edited by hand while it is being worked on, and a browser holding an old
-  // copy of chat.js or styles.css looks exactly like a change that never happened. Never cache.
-  res.writeHead(status, {
-   "content-type": type || MIME[extname(url.pathname)] || "application/octet-stream",
-   "cache-control": "no-store, no-cache, must-revalidate",
-   "pragma": "no-cache",
-   "expires": "0",
-  });
+  const headers = { "content-type": type || MIME[extname(url.pathname)] || "application/octet-stream" };
+  if (DEV) {
+   headers["cache-control"] = "no-store, no-cache, must-revalidate";
+   headers.pragma = "no-cache";
+   headers.expires = "0";
+  } else {
+   const etag = `"${createHash("md5").update(body).digest("hex").slice(0, 16)}"`;
+   headers.etag = etag;
+   headers["cache-control"] = "public, max-age=3600, must-revalidate";
+   if (req.headers["if-none-match"] === etag) { res.writeHead(304); res.end(); return; }
+  }
+  res.writeHead(status, headers);
   res.end(body);
  };
  if (url.pathname === "/ws") { res.writeHead(426); res.end("websocket only"); return; }
