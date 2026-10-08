@@ -32,7 +32,7 @@ svg{display:block;width:100%;height:100%;overflow:visible}
 .shape{fill:rgb(var(--ghost-rgb,250,250,250))}
 .eye{fill:var(--ghost-eye,rgb(25,25,25))}
 /* The Zzz of a waiting ghost: hidden while it works, drifting up once it dozes off. */
-.zzz{position:absolute;top:-5px;right:-7px;display:flex;align-items:baseline;gap:1px;pointer-events:none;opacity:0;transform:translateY(3px);transition:opacity .45s ease,transform .45s ease;font:700 8px/1 system-ui,sans-serif;color:rgb(var(--ghost-rgb,250,250,250))}
+.zzz{position:absolute;top:-5px;right:-11px;display:flex;align-items:baseline;gap:1px;pointer-events:none;opacity:0;transform:translateY(3px);transition:opacity .45s ease,transform .45s ease;font:700 8px/1 system-ui,sans-serif;color:rgb(var(--ghost-rgb,250,250,250))}
 .zzz i{font-style:normal}
 :host([sleepy]) .zzz{opacity:.85;transform:none}
 :host([sleepy]) .zzz i{animation:zzz-drift 1.9s ease-in-out infinite}

@@ -1985,9 +1985,9 @@ class Chat {
   if (view.el.closest('.thread-list') === this.active?.list) this.followBottom();
  }
 
- // The working ghost stays awake while something is happening; after a moment of waiting (the
- // model is thinking, a tool is running, the next step has not started) it dozes off with Zzz.
- // Any new activity pokes it awake, and the swap between the two is a smooth droop-and-lift.
+ // The working ghost stays awake while something is happening; after five seconds of waiting
+ // (the model is thinking, a tool is running, the next step has not started) it dozes off
+ // with Zzz. Any new activity pokes it awake, with a smooth droop-and-lift.
  pokeGhost(view) {
   const status = view.status;
   if (!status?.isConnected || status.classList.contains('is-leaving')) return;
@@ -1997,7 +1997,7 @@ class Chat {
   clearTimeout(view.ghostTimer);
   view.ghostTimer = setTimeout(() => {
    if (status.isConnected && !status.classList.contains('is-leaving')) ghost.setAttribute('sleepy', '');
-  }, 1500);
+  }, 5000);
  }
 
  dismissGhost(view) {
