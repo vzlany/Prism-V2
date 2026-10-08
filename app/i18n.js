@@ -11,6 +11,8 @@ const STRINGS = {
   'chat.new': 'New chat',
   'chat.loading': 'Loading conversation…',
   'chats.label': 'Chats',
+  'chats.foldRuns': 'Collapse the parallel runs',
+  'chats.unfoldRuns': 'Expand the parallel runs',
   'chats.pinned': 'Pinned',
   'chats.folders': 'Folders',
   'chats.empty': 'No chats yet',

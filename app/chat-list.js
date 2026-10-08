@@ -87,6 +87,12 @@ class ChatList {
   this.rows = new Map();
   // How deep a child chat sits under its parent (main -> parallel run -> its own runs).
   this.depths = new Map();
+  // Which parents have their runs folded away, which were working last render, and which
+  // have been seen at all: the moment the last run finishes, its subtree folds itself.
+  this.folded = new Set();
+  this.busyParents = new Set();
+  this.seenParents = new Set();
+  this.childrenOf = new Map();
   this.groups = new Map();
   this.glide = element('div', 'chats-glide');
   this.glide.setAttribute('aria-hidden', 'true');
@@ -187,7 +193,7 @@ class ChatList {
   actions.append(rename, lock, pin, remove);
   meta.append(time, actions);
   row.append(mark, title, meta);
-  return { row, mark, title, time, rename, lock, pin, remove, input: null, ghost: null, pinned: null, guarded: null, locked: null, veil: 0, confirm: false, timer: 0 };
+  return { row, mark, title, time, rename, lock, pin, remove, input: null, ghost: null, arrow: null, pinned: null, guarded: null, locked: null, veil: 0, confirm: false, timer: 0 };
  }
 
  paint(item, chat) {
@@ -210,6 +216,8 @@ class ChatList {
   const depth = Math.min(this.depths.get(chat.id) || 0, 5);
   item.row.classList.toggle('is-child', depth > 0);
   item.row.style.setProperty('--chat-depth', String(Math.max(1, depth)));
+  // A chat with runs under it gets the fold arrow; finished runs fold themselves away.
+  this.arrow(item, Boolean(this.childrenOf.get(chat.id)?.length), !this.folded.has(chat.id));
   // Locking waits for the reply to finish, the same as changing the model.
   item.lock.disabled = busy;
  }
@@ -226,18 +234,54 @@ class ChatList {
    kids.push(chat);
    children.set(chat.parent, kids);
   }
+  // While any run under a chat works, the subtree is open; the moment the last one stops, it
+  // folds itself away. A parent seen for the first time (a reload) starts folded too, so old
+  // finished runs do not reopen on every app start.
+  for (const [id, kids] of children) this.childrenOf.set(id, kids);
+  for (const id of children.keys()) {
+   const busy = this.subtreeBusy(id);
+   const seen = this.seenParents.has(id);
+   if (busy) {
+    this.busyParents.add(id);
+    this.folded.delete(id);
+   } else {
+    const was = this.busyParents.has(id);
+    this.busyParents.delete(id);
+    if (was || !seen) this.folded.add(id);
+   }
+   this.seenParents.add(id);
+  }
+  const foldedBelow = chat => {
+   let at = chat, hops = 0;
+   while (at?.parent && hops++ < 20) {
+    if (this.folded.has(at.parent)) return true;
+    at = list.find(item => item.id === at.parent);
+    if (!at) break;
+   }
+   return false;
+  };
   const out = [], placed = new Set();
   const push = (chat, depth) => {
    if (placed.has(chat.id)) return;
    placed.add(chat.id);
    this.depths.set(chat.id, depth);
    out.push(chat);
+   if (this.folded.has(chat.id)) return;
    const kids = children.get(chat.id);
    if (kids) for (const kid of kids.sort((a, b) => (a.created || 0) - (b.created || 0))) push(kid, depth + 1);
   };
   for (const chat of list) if (!chat.parent || !ids.has(chat.parent)) push(chat, 0);
-  for (const chat of list) if (!placed.has(chat.id)) push(chat, 0);
+  for (const chat of list) if (!placed.has(chat.id) && !foldedBelow(chat)) push(chat, 0);
   return out;
+ }
+
+ // Whether anything in this chat's subtree — itself included — is working right now.
+ subtreeBusy(id, seen = new Set()) {
+  if (seen.has(id)) return false;
+  seen.add(id);
+  if (this.chat.isBusy(id)) return true;
+  for (const kid of this.childrenOf.get(id) || []) if (this.subtreeBusy(kid.id, seen)) return true;
+  return false;
  }
 
  // A protected chat wears a small padlock instead of the dot, shut while the chat is locked; its title then hides behind a blur.
@@ -285,6 +329,32 @@ class ChatList {
    ghost.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.4)' }], { duration: GHOST.leave, easing: 'ease-in', fill: 'forwards' })
     .finished.then(() => ghost.remove(), () => ghost.remove());
   }
+ }
+
+ // The fold arrow on a chat that has runs under it: hides the whole subtree, or brings it
+ // back. Clicking it never opens the chat itself.
+ arrow(item, has, open) {
+  if (has && !item.arrow) {
+   const arrow = item.arrow = element('button', 'chat-arrow', '▸');
+   arrow.type = 'button';
+   arrow.tabIndex = -1;
+   arrow.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const id = item.row.dataset.id;
+    if (this.folded.has(id)) this.folded.delete(id);
+    else this.folded.add(id);
+    this.render();
+   });
+   item.row.prepend(arrow);
+  } else if (!has && item.arrow) {
+   item.arrow.remove();
+   item.arrow = null;
+  }
+  if (!item.arrow) return;
+  item.arrow.classList.toggle('is-open', open);
+  item.arrow.setAttribute('aria-expanded', String(open));
+  item.arrow.setAttribute('aria-label', I18n.t(open ? 'chats.foldRuns' : 'chats.unfoldRuns'));
  }
 
  item(chat, seen) {
@@ -393,6 +463,7 @@ class ChatList {
 
  render() {
   this.depths.clear();
+  this.childrenOf.clear();
   const lib = this.library, query = this.query.trim().toLowerCase(), seen = new Set();
   // A locked chat's title is sealed, so a search never finds it.
   const match = chat => !query || (this.library.titleOf(chat) || '').toLowerCase().includes(query);
