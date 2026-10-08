@@ -27,10 +27,18 @@ const SWAY = { period: 1.3, amp: 1.3 };
 const GAZE_HOLD = 1800;
 
 const STYLE = `
-:host{display:block}
+:host{display:block;position:relative}
 svg{display:block;width:100%;height:100%;overflow:visible}
 .shape{fill:rgb(var(--ghost-rgb,250,250,250))}
 .eye{fill:var(--ghost-eye,rgb(25,25,25))}
+/* The Zzz of a waiting ghost: hidden while it works, drifting up once it dozes off. */
+.zzz{position:absolute;top:-5px;right:-7px;display:flex;align-items:baseline;gap:1px;pointer-events:none;opacity:0;transform:translateY(3px);transition:opacity .45s ease,transform .45s ease;font:700 8px/1 system-ui,sans-serif;color:rgb(var(--ghost-rgb,250,250,250))}
+.zzz i{font-style:normal}
+:host([sleepy]) .zzz{opacity:.85;transform:none}
+:host([sleepy]) .zzz i{animation:zzz-drift 1.9s ease-in-out infinite}
+.zzz i:nth-child(2){font-size:10px;animation-delay:.4s}
+.zzz i:nth-child(3){font-size:12px;animation-delay:.8s}
+@keyframes zzz-drift{0%{opacity:0;transform:translateY(3px) scale(.85)}30%{opacity:.95}100%{opacity:0;transform:translateY(-8px) scale(1.05)}}
 `;
 
 const random = ([min, max]) => min + Math.random() * (max - min);
@@ -72,7 +80,8 @@ class GhostThinking extends HTMLElement {
   super();
   this.attachShadow({ mode: 'open' }).innerHTML = `<style>${STYLE}</style>
    <svg viewBox="-3 -5 64 70" aria-hidden="true"><g class="body"><path class="shape" d="${bodyPath(0)}"/>
-   <ellipse class="eye" rx="3.8" ry="4.1" transform="translate(${EYE_X[0]} ${EYE_Y})"/><ellipse class="eye" rx="3.8" ry="4.1" transform="translate(${EYE_X[1]} ${EYE_Y})"/></g></svg>`;
+   <ellipse class="eye" rx="3.8" ry="4.1" transform="translate(${EYE_X[0]} ${EYE_Y})"/><ellipse class="eye" rx="3.8" ry="4.1" transform="translate(${EYE_X[1]} ${EYE_Y})"/></g></svg>
+   <span class="zzz" aria-hidden="true"><i>z</i><i>z</i><i>z</i></span>`;
   this.body = this.shadowRoot.querySelector('.body');
   this.shape = this.shadowRoot.querySelector('.shape');
   this.eyes = [...this.shadowRoot.querySelectorAll('.eye')];
@@ -93,6 +102,10 @@ class GhostThinking extends HTMLElement {
   this.nextBlink = now + random(BLINK_EVERY) * 0.5;
   this.blinkAt = -Infinity;
   this.eye = { x: [0, 0], y: [0, 0], sx: [1, 0], sy: [1, 0] };
+  // 0 = awake, 1 = asleep: springs between the two so the eyes droop and the Zzz drift in
+  // instead of snapping when the sleepy attribute toggles.
+  this.sleep = 0;
+  this.sleepV = 0;
   subscribe(this);
  }
 
@@ -124,6 +137,10 @@ class GhostThinking extends HTMLElement {
   this.rendered = now;
   const dt = Math.min((now - this.last) / 1000, 0.032);
   this.last = now;
+  // Doze off (or wake up): a soft spring toward the sleepy attribute, so the change is smooth.
+  const sleepGoal = this.hasAttribute('sleepy') ? 1 : 0;
+  this.sleepV += ((sleepGoal - this.sleep) * 90 - this.sleepV * 16) * dt;
+  this.sleep = Math.max(0, Math.min(1, this.sleep + this.sleepV * dt));
   if (this.gaze && now >= this.gazeUntil) {
    this.gaze = null;
    this.nextPose = now + random(HOLD) * 0.5;
@@ -145,8 +162,11 @@ class GhostThinking extends HTMLElement {
   const blinkT = (now - this.blinkAt) / BLINK_DURATION;
   const blink = blinkT < 1 ? 1 - 0.92 * Math.sin(Math.PI * blinkT) : 1;
   const t = (now - this.start) / 1000;
-  const float = Math.sin(t * 2 * Math.PI / FLOAT.period) * FLOAT.amp;
+  // Asleep, the ghost breathes slower and its eyes droop.
+  const rest = 1 - 0.4 * this.sleep;
+  const float = Math.sin(t * 2 * Math.PI / FLOAT.period) * FLOAT.amp * rest;
   const sway = Math.sin(t * 2 * Math.PI / SWAY.period) * SWAY.amp;
+  const lid = 1 - 0.62 * this.sleep;
   const { x, y, sx, sy } = this.eye;
   this.body.style.transform = `translateY(${fixed(float)}px)`;
   // Rebuilding the path string is the expensive half: only do it when the sway actually moved.
@@ -155,7 +175,7 @@ class GhostThinking extends HTMLElement {
    this.shape.setAttribute('d', bodyPath(sway));
   }
   for (let i = 0; i < 2; i++) {
-   this.eyes[i].style.transform = `translate(${fixed(EYE_X[i] + x[0])}px, ${fixed(EYE_Y + y[0])}px) scale(${sx[0].toFixed(3)}, ${Math.max(0.05, sy[0] * blink).toFixed(3)})`;
+   this.eyes[i].style.transform = `translate(${fixed(EYE_X[i] + x[0])}px, ${fixed(EYE_Y + y[0])}px) scale(${sx[0].toFixed(3)}, ${Math.max(0.05, sy[0] * blink * lid).toFixed(3)})`;
   }
  }
 }

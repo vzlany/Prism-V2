@@ -1285,6 +1285,9 @@ class Chat {
 
  async request(conv, turn) {
   const part = turn.part, view = part.view, base = part.entry.content;
+  // The ghost may already be on screen from the previous step: it starts its doze timer the
+  // moment the model is asked again, so a long wait reads as a nap.
+  this.pokeGhost(view);
   const messages = [{ role: 'system', content: await this.system(conv) }, ...this.history(conv)];
   let result;
   const clearReconnect = () => {
@@ -1322,6 +1325,8 @@ class Chat {
      clearReconnect();
      part.entry.thinking = (part.entry.thinking || '') + delta;
      view.thinking?.write(part.entry.thinking, true);
+     // Thinking is work: the ghost stays awake while words are arriving.
+     this.pokeGhost(view);
      if (conv === this.active) this.followBottom();
      this.publishLive(conv, turn);
     },
@@ -1968,6 +1973,7 @@ class Chat {
   const current = view.status;
   if (current?.isConnected && !current.classList.contains('is-leaving')) {
    if (current !== view.el.lastElementChild && view.content.hasChildNodes()) view.el.append(current);
+   this.pokeGhost(view);
    return;
   }
   const status = document.createElement('div');
@@ -1975,12 +1981,30 @@ class Chat {
   status.innerHTML = '<ghost-thinking></ghost-thinking>';
   view.el.append(status);
   view.status = status;
+  this.pokeGhost(view);
   if (view.el.closest('.thread-list') === this.active?.list) this.followBottom();
+ }
+
+ // The working ghost stays awake while something is happening; after a moment of waiting (the
+ // model is thinking, a tool is running, the next step has not started) it dozes off with Zzz.
+ // Any new activity pokes it awake, and the swap between the two is a smooth droop-and-lift.
+ pokeGhost(view) {
+  const status = view.status;
+  if (!status?.isConnected || status.classList.contains('is-leaving')) return;
+  const ghost = status.querySelector('ghost-thinking');
+  if (!ghost) return;
+  ghost.removeAttribute('sleepy');
+  clearTimeout(view.ghostTimer);
+  view.ghostTimer = setTimeout(() => {
+   if (status.isConnected && !status.classList.contains('is-leaving')) ghost.setAttribute('sleepy', '');
+  }, 1500);
  }
 
  dismissGhost(view) {
   const status = view.status;
   if (!status?.isConnected || status.classList.contains('is-leaving')) return;
+  clearTimeout(view.ghostTimer);
+  view.ghostTimer = 0;
   status.classList.add('is-leaving');
   if (reducedMotion()) { status.remove(); return; }
   const style = getComputedStyle(status);
