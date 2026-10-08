@@ -85,6 +85,8 @@ class ChatList {
   this.onDashboard = onDashboard;
   this.query = '';
   this.rows = new Map();
+  // How deep a child chat sits under its parent (main -> parallel run -> its own runs).
+  this.depths = new Map();
   this.groups = new Map();
   this.glide = element('div', 'chats-glide');
   this.glide.setAttribute('aria-hidden', 'true');
@@ -202,31 +204,39 @@ class ChatList {
    label(item.pin, I18n.t(chat.pinned ? 'chat.unpin' : 'chat.pin'));
   }
   const busy = this.chat.isBusy(chat.id);
-  this.busy(item, busy);
-  // A parallel run or subagent sits under the conversation that started it.
-  item.row.classList.toggle('is-child', Boolean(chat.parent));
+  this.busy(item, busy, Boolean(chat.parent));
+  // A parallel run or subagent sits under the conversation that started it, indented by
+  // however many generations deep it is.
+  const depth = Math.min(this.depths.get(chat.id) || 0, 5);
+  item.row.classList.toggle('is-child', depth > 0);
+  item.row.style.setProperty('--chat-depth', String(Math.max(1, depth)));
   // Locking waits for the reply to finish, the same as changing the model.
   item.lock.disabled = busy;
  }
 
- // A run started from a chat is drawn as that chat's child, right below it.
+ // A run started from a chat is drawn as that chat's child, right below it. A run can start
+ // runs of its own (a parallel agent launching its own parallel agents), so the nesting is
+ // recursive — each level indents one step deeper. A cycle or an orphan still gets a row.
  withChildren(list) {
   const ids = new Set(list.map(chat => chat.id));
   const children = new Map();
   for (const chat of list) {
-   if (!chat.parent || !ids.has(chat.parent)) continue;
+   if (!chat.parent || chat.parent === chat.id || !ids.has(chat.parent)) continue;
    const kids = children.get(chat.parent) || [];
    kids.push(chat);
    children.set(chat.parent, kids);
   }
-  if (!children.size) return list;
-  const out = [];
-  for (const chat of list) {
-   if (chat.parent && ids.has(chat.parent)) continue;
+  const out = [], placed = new Set();
+  const push = (chat, depth) => {
+   if (placed.has(chat.id)) return;
+   placed.add(chat.id);
+   this.depths.set(chat.id, depth);
    out.push(chat);
    const kids = children.get(chat.id);
-   if (kids) for (const child of kids.sort((a, b) => (a.created || 0) - (b.created || 0))) out.push(child);
-  }
+   if (kids) for (const kid of kids.sort((a, b) => (a.created || 0) - (b.created || 0))) push(kid, depth + 1);
+  };
+  for (const chat of list) if (!chat.parent || !ids.has(chat.parent)) push(chat, 0);
+  for (const chat of list) if (!placed.has(chat.id)) push(chat, 0);
   return out;
  }
 
@@ -257,10 +267,15 @@ class ChatList {
   else item.title.textContent = text;
  }
 
- busy(item, on) {
+ busy(item, on, child = false) {
   item.row.classList.toggle('is-busy', on);
   if (on && !item.ghost) {
-   const ghost = item.ghost = document.createElement('ghost-thinking');
+   // The main chat keeps the ghost; a parallel run or subagent wears a spinning blue circle.
+   const ghost = item.ghost = document.createElement(child ? 'span' : 'ghost-thinking');
+   if (child) {
+    ghost.className = 'chat-spinner';
+    ghost.setAttribute('aria-hidden', 'true');
+   }
    item.mark.append(ghost);
    if (!reducedMotion()) ghost.animate([{ opacity: 0, transform: 'scale(0.3)' }, { opacity: 1, transform: 'none' }], { duration: GHOST.enter, easing: GHOST.easing });
   } else if (!on && item.ghost) {
@@ -371,6 +386,7 @@ class ChatList {
  }
 
  render() {
+  this.depths.clear();
   const lib = this.library, query = this.query.trim().toLowerCase(), seen = new Set();
   // A locked chat's title is sealed, so a search never finds it.
   const match = chat => !query || (this.library.titleOf(chat) || '').toLowerCase().includes(query);

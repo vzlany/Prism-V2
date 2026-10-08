@@ -135,49 +135,92 @@ class RunsView {
   this.list = document.createElement('div');
   this.list.className = 'runs-list';
   this.el.append(this.list);
+  // One row per run, patched in place: a working run's snippet updates as the answer grows,
+  // which must not rebuild the panel.
+  this.items = new Map();
   this.off = window.ParallelRuns.on(() => this.render());
   this.render();
-  // Rows are rebuilt only when a run is added or changes state. The per-second tick touches
-  // just the running-time text on existing rows — the panel used to reflow (innerHTML) every
-  // second, which read as a 1 Hz flicker while any run was active.
+  // Rows are rebuilt only when a run is added or removed. The per-second tick touches just
+  // the running-time text on existing rows.
   this.timer = setInterval(() => this.tickClocks(), 1000);
  }
 
  tickClocks() {
   const runs = window.ParallelRuns.runs;
   if (!runs.some(run => run.status === 'running')) return;
-  for (const row of this.list.querySelectorAll('.run-item')) {
-   const run = runs.find(item => item.id === row.dataset.id);
-   if (run?.status !== 'running') continue;
-   const status = row.querySelector('.run-status');
-   if (status) status.textContent = `${I18n.t('runs.running')} · ${clock(run.started)}`;
+  for (const run of runs) {
+   if (run.status !== 'running') continue;
+   const item = this.items.get(run.id);
+   if (item) item.statusEl.textContent = `${I18n.t('runs.running')} · ${clock(run.started)}`;
   }
  }
 
  render() {
   const runs = window.ParallelRuns.runs;
   if (!runs.length) {
-   this.list.innerHTML = `<div class="runs-empty">${escapeHtml(I18n.t('runs.empty'))}</div>`;
+   if (!this.list.querySelector('.runs-empty')) this.list.innerHTML = `<div class="runs-empty">${escapeHtml(I18n.t('runs.empty'))}</div>`;
+   this.items.clear();
    return;
   }
-  this.list.innerHTML = runs.map(run => `
-   <button type="button" class="run-item${run.status === 'running' ? ' is-running' : ''}" data-id="${escapeAttr(run.id)}">
-    <span class="run-top">
-     ${run.status === 'running' ? '<span class="run-pulse" aria-hidden="true"></span>' : ''}
-     <span class="run-model">${escapeHtml(run.model || '')}</span>
-     <span class="run-status is-${escapeAttr(run.status)}">${escapeHtml(I18n.t(STATUS_KEY[run.status] || 'runs.running'))}${run.status === 'running' ? ` · ${escapeHtml(clock(run.started))}` : ''}</span>
-    </span>
-    <span class="run-title">${escapeHtml(run.title || '')}</span>
-    ${run.snippet ? `<span class="run-snippet">${escapeHtml(run.snippet)}</span>` : ''}
-   </button>`).join('');
-  for (const item of this.list.querySelectorAll('.run-item')) {
-   item.addEventListener('click', async () => {
+  if (this.list.querySelector('.runs-empty')) this.list.innerHTML = '';
+  const seen = new Set();
+  for (const run of runs) {
+   seen.add(run.id);
+   let item = this.items.get(run.id);
+   if (!item) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'run-item';
+    row.dataset.id = run.id;
+    row.innerHTML = '<span class="run-top">'
+     + '<span class="run-pulse" aria-hidden="true" hidden></span>'
+     + '<span class="run-model"></span>'
+     + '<span class="run-status"></span>'
+     + '</span><span class="run-title"></span><span class="run-snippet" hidden></span>';
+    item = {
+     row,
+     pulse: row.querySelector('.run-pulse'),
+     modelEl: row.querySelector('.run-model'),
+     statusEl: row.querySelector('.run-status'),
+     titleEl: row.querySelector('.run-title'),
+     snippetEl: row.querySelector('.run-snippet'),
+     model: null,
+     title: null,
+     snippet: null,
+    };
     // Opening the run is the point: the right panel steps aside so its conversation fills
     // the window, the way OpenCode opens the session a background task belongs to.
-    const id = item.dataset.id;
-    await this.chat.open(id);
-    window.browserPanel?.hide?.();
-   });
+    row.addEventListener('click', async () => {
+     await this.chat.open(run.id);
+     window.browserPanel?.hide?.();
+    });
+    this.items.set(run.id, item);
+    this.list.append(row);
+   }
+   this.patch(item, run);
+  }
+  for (const [id, item] of [...this.items]) {
+   if (seen.has(id)) continue;
+   item.row.remove();
+   this.items.delete(id);
+  }
+ }
+
+ patch(item, run) {
+  const running = run.status === 'running';
+  item.row.classList.toggle('is-running', running);
+  item.pulse.hidden = !running;
+  item.statusEl.className = `run-status is-${run.status}`;
+  item.statusEl.textContent = `${I18n.t(STATUS_KEY[run.status] || 'runs.running')}${running ? ` · ${clock(run.started)}` : ''}`;
+  const model = run.model || '';
+  if (item.model !== model) { item.model = model; item.modelEl.textContent = model; }
+  const title = run.title || '';
+  if (item.title !== title) { item.title = title; item.titleEl.textContent = title; }
+  const snippet = run.snippet || '';
+  if (item.snippet !== snippet) {
+   item.snippet = snippet;
+   item.snippetEl.textContent = snippet;
+   item.snippetEl.hidden = !snippet;
   }
  }
 }

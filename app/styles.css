@@ -8864,7 +8864,7 @@ body.has-lightbox{overflow:hidden}
 @media (prefers-reduced-motion: reduce){
   .tool.is-running .tool-snake rect{animation:none}
   .context-circle.is-lapped .context-fill{animation:none}
-  .run-pulse,.parallels-dots i{animation:none}
+  .run-pulse,.parallels-dots i,.chat-spinner{animation:none}
 }
 .composer-tags .composer-instructions{flex:none;max-width:280px}
 .composer-tags{display:flex;align-items:center;flex-wrap:wrap}
@@ -8981,8 +8981,11 @@ body.has-lightbox{overflow:hidden}
 .folder-item-new .glyph{width:15px;height:15px;color:rgba(var(--fg-rgb),.7)}
 
 /* Prism V2: a parallel run drawn as the child of its conversation */
-.chat-row.is-child{position:relative;padding-left:24px}
-.chat-row.is-child::before{content:"";position:absolute;left:11px;top:-2px;bottom:-2px;width:1px;background:rgba(var(--fg-rgb),.10)}
+.chat-row.is-child{position:relative;padding-left:calc(10px + var(--chat-depth,1) * 14px)}
+.chat-row.is-child::before{content:"";position:absolute;left:calc(var(--chat-depth,1) * 14px - 3px);top:-2px;bottom:-2px;width:1px;background:rgba(var(--fg-rgb),.10)}
+/* A parallel run or subagent at work wears a spinning blue circle instead of the ghost. */
+.chat-spinner{flex:none;width:13px;height:13px;border-radius:50%;border:2px solid rgba(138,180,255,.28);border-top-color:#8ab4ff;animation:chat-spin .8s linear infinite}
+@keyframes chat-spin{to{transform:rotate(360deg)}}
 .chat-row.is-child .chat-title{font-size:12.5px;opacity:.82}
 .chat-row.is-child .chat-time{opacity:.75}
 .chat-row.is-child .chat-mark{opacity:.8}

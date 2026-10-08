@@ -144,11 +144,17 @@ window.Presence?.on?.(() => {
   setTimeout(() => chat.refresh(id).catch(() => {}), 350);
  }
  presenceBusy = now;
- // Parallel runs the app started appear in the Runs tab here too (their presence says so).
+ // Parallel runs the app started appear in the Runs tab here too (their presence says so),
+ // and a working run's snippet follows the text it has written so far.
  for (const entry of window.Presence.list()) {
   if (!entry.parallel) continue;
   const known = (window.ParallelRuns?.runs || []).some(run => run.id === entry.id);
-  if (!known) window.ParallelRuns?.add({ id: entry.id, title: entry.title || '', model: entry.model || '', status: 'running', snippet: '' });
+  if (!known) {
+   window.ParallelRuns?.add({ id: entry.id, title: entry.title || '', model: entry.model || '', status: 'running', snippet: '' });
+   continue;
+  }
+  const text = (entry.parts || []).filter(part => part.kind === 'text').map(part => part.text).join(' ').replace(/\s+/g, ' ').trim();
+  if (text) window.ParallelRuns?.update(entry.id, { snippet: text.length > 160 ? `…${text.slice(-160)}` : text });
  }
  // The app picked up a delegated turn: the wait is over and its run is being mirrored.
  for (const [id, conv] of chat.conversations) {

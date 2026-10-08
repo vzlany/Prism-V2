@@ -1041,6 +1041,20 @@ class Chat {
   return count;
  }
 
+ // The Runs tab follows a working run, not only its ending: the newest words of the reply go
+ // into the run's snippet, throttled so the panel is not rebuilt for every token.
+ runSnippet(conv, text) {
+  const run = window.ParallelRuns?.runs?.find(item => item.id === conv.id);
+  if (!run || run.status !== 'running') return;
+  const turn = conv.turn;
+  const now = performance.now();
+  if (turn?.snippetAt && now - turn.snippetAt < 700) return;
+  if (turn) turn.snippetAt = now;
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!value) return;
+  window.ParallelRuns.update(conv.id, { snippet: value.length > 160 ? `…${value.slice(-160)}` : value });
+ }
+
  // What the running turn looks like right now, small enough to mirror to the web: its last
  // thoughts, its tool cards with their state, and the answer being written. A device
  // watching the same chat (the phone on `prism web`) draws this as a live card.
@@ -1297,6 +1311,7 @@ class Chat {
      part.entry.content = join(base, stream.content);
      this.dismissGhost(view);
      view.stream.push(part.entry.content);
+     this.runSnippet(conv, part.entry.content);
      this.publishLive(conv, turn);
     },
     onReasoning: delta => {
