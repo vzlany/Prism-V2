@@ -106,9 +106,11 @@ class StreamView {
   this.raf = 0;
   this.last = 0;
   this.lastPaint = 0;
-  // A parked conversation (parallel runs run in the background) keeps its state but stops
-  // scheduling frames: its text still arrives, the DOM is only repainted when it is shown.
+  // A parked conversation (parallel runs run in the background) stops its per-frame loop;
+  // a slow timer keeps its DOM nearly current instead, so opening it has almost nothing to
+  // catch up (the whole unpainted backlog used to render in one blocking paint).
   this.paused = false;
+  this.idleTimer = 0;
   this.tick = this.tick.bind(this);
   this.finished = new Promise(resolve => { this.resolve = resolve; });
  }
@@ -118,20 +120,41 @@ class StreamView {
   this.paused = true;
   cancelAnimationFrame(this.raf);
   this.raf = 0;
+  // While parked, paint every ~2 s (with a little jitter so several runs never land on the
+  // same frame). Closed markdown blocks come from the cache, so this is far cheaper than
+  // the per-frame repaint it replaces, and the view stays readable when switched to.
+  clearInterval(this.idleTimer);
+  this.idleTimer = setInterval(() => this.idlePaint(), 2000 + Math.round(Math.random() * 800));
  }
 
  resume() {
   if (!this.paused) return;
   this.paused = false;
-  // A stream parked for a while is far behind: typing out the backlog would re-parse the
-  // whole markdown every frame for seconds (that read as lag when opening a working
-  // parallel run). Snap to the end — the reader wants the current state — and let the
-  // deltas that arrive from now on get the normal typing effect.
+  clearInterval(this.idleTimer);
+  this.idleTimer = 0;
+  // A stream parked for a long time (or while the window was hidden) can still be behind:
+  // typing out the backlog would re-parse the whole markdown every frame for seconds. Snap
+  // to the end — the reader wants the current state — and let new deltas animate.
   if (this.source.length - this.shown > 2000) {
    this.shown = this.source.length;
    this.painted = -1;
   }
   this.wake();
+ }
+
+ // One repaint for a parked stream: no typewriter, no animations, just the current text.
+ idlePaint() {
+  if (!this.paused || this.done || !this.root.isConnected) {
+   clearInterval(this.idleTimer);
+   this.idleTimer = 0;
+   return;
+  }
+  if (document.hidden || !this.source.length || this.painted === this.source.length) return;
+  this.shown = this.source.length;
+  this.final = this.done;
+  this.painted = this.shown;
+  this.lastPaint = performance.now();
+  this.paint(this.shown, this.done, this.lastPaint, 0, true);
  }
 
  push(source) {
@@ -191,12 +214,13 @@ class StreamView {
   return n;
  }
 
- paint(count, final, now, dt) {
+ paint(count, final, now, dt, idle = false) {
   this.painted = count;
   this.final = final;
   this.lastPaint = now;
   const blocks = Markdown.blocks(this.source.slice(0, count), { live: !final, tones: this.tones, cache: this.cache });
-  const wave = { spans: [], animate: !reducedMotion() && window.Effects?.typing() !== false };
+  // An idle repaint (a parked stream) is silent: no typing wave, no animation bookkeeping.
+  const wave = { spans: [], animate: !idle && !reducedMotion() && window.Effects?.typing() !== false };
   const kids = this.root.children;
   let diagrams = false;
   for (let k = 0; k < blocks.length; k++) {
