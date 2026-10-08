@@ -8986,9 +8986,10 @@ body.has-lightbox{overflow:hidden}
 /* A parallel run or subagent at work wears a spinning blue circle instead of the ghost. */
 .chat-spinner{flex:none;width:13px;height:13px;border-radius:50%;border:2px solid rgba(138,180,255,.28);border-top-color:#8ab4ff;animation:chat-spin .8s linear infinite}
 @keyframes chat-spin{to{transform:rotate(360deg)}}
-/* The fold arrow on a chat with runs under it: points right folded, rotates down when open. */
-.chat-arrow{flex:none;width:14px;height:14px;margin-right:-5px;padding:0;border:0;background:transparent;color:var(--fg-tertiary);font-size:10px;line-height:1;cursor:pointer;transition:transform .18s ease,color .15s ease}
-.chat-arrow:hover{color:rgba(var(--fg-rgb),.85)}
+/* The fold arrow on a chat with runs under it: points right folded, rotates down when open.
+   It carries its own faint chip so it reads at a glance, brighter on hover. */
+.chat-arrow{flex:none;display:grid;place-items:center;width:18px;height:18px;margin-right:-6px;padding:0;border:0;border-radius:6px;background:rgba(var(--fg-rgb),.07);color:rgba(var(--fg-rgb),.7);font-size:12px;line-height:1;cursor:pointer;transition:transform .18s ease,color .15s ease,background-color .15s ease}
+.chat-arrow:hover{color:rgba(var(--fg-rgb),.98);background:rgba(var(--fg-rgb),.16)}
 .chat-arrow.is-open{transform:rotate(90deg)}
 .chat-row.is-child .chat-title{font-size:12.5px;opacity:.82}
 .chat-row.is-child .chat-time{opacity:.75}

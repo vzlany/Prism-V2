@@ -355,6 +355,7 @@ class ChatList {
   item.arrow.classList.toggle('is-open', open);
   item.arrow.setAttribute('aria-expanded', String(open));
   item.arrow.setAttribute('aria-label', I18n.t(open ? 'chats.foldRuns' : 'chats.unfoldRuns'));
+  item.arrow.title = I18n.t(open ? 'chats.foldRuns' : 'chats.unfoldRuns');
  }
 
  item(chat, seen) {
