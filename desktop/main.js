@@ -428,6 +428,31 @@ function external(url) {
  if (/^(https?|mailto):/i.test(url)) shell.openExternal(url);
 }
 
+// A chat finished while the app was not in front: the taskbar button flashes natively and a
+// red badge blinks on it (the native flash respects Windows' own "flash taskbar" setting,
+// the badge always shows). Focusing the window clears both.
+const ATTENTION = { every: 600, icon: null, timer: 0 };
+function stopAttention(win) {
+ clearInterval(ATTENTION.timer);
+ ATTENTION.timer = 0;
+ if (!win || win.isDestroyed()) return;
+ try { win.setOverlayIcon(null, ''); } catch {}
+ try { win.flashFrame(false); } catch {}
+}
+function startAttention(win) {
+ if (!win || win.isDestroyed() || process.platform !== 'win32') return;
+ ATTENTION.icon ||= nativeImage.createFromPath(path.join(__dirname, 'attention.png'));
+ clearInterval(ATTENTION.timer);
+ let on = false;
+ const tick = () => {
+  on = !on;
+  try { win.setOverlayIcon(on ? ATTENTION.icon : null, on ? 'Conversation finished' : ''); } catch {}
+ };
+ tick();
+ ATTENTION.timer = setInterval(tick, ATTENTION.every);
+ try { win.flashFrame(true); } catch {}
+}
+
 function createWindow() {
  // The window follows the monitor: a little wider and taller than the old fixed 1280×840,
  // with sensible bounds for very small and very large screens.
@@ -463,6 +488,9 @@ function createWindow() {
   },
  });
  win.once('ready-to-show', () => { if (!HIDDEN) win.show(); });
+ // Coming back to the app stops the alert: the user has seen it.
+ win.on('focus', () => stopAttention(win));
+ win.on('closed', () => stopAttention(win));
  // Closing the window hides it: Prism keeps running in the tray, the web server and the
  // Discord bot stay up, and a running turn is not interrupted. Tray -> Quit really quits.
  win.on('close', event => {
@@ -581,6 +609,8 @@ ipcMain.on('notify', (event, payload) => {
  try {
   new Notification({ title, body, icon: ICON, silent: false }).show();
  } catch {}
+ // The app is in the background: blink the taskbar button until the window is focused.
+ startAttention(win);
  // The Discord DM is a separate switch ("DM me on Discord" in the mode menu) and is sent by
  // the discord:dm handler below; this toast must not also DM, or every finish arrives twice.
 });
