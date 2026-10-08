@@ -13,6 +13,17 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const label = (key, fallback) => (window.I18n && I18n.t ? I18n.t(key) : fallback);
 const CHEVRON = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 2.5 4 6l3.5 3.5"/></svg>';
 
+// Pointer and wheel events can fire far faster than a frame; keep only the last one per frame.
+const rafCoalesce = fn => {
+ let scheduled = false, last = null;
+ return event => {
+  last = event;
+  if (scheduled) return;
+  scheduled = true;
+  requestAnimationFrame(() => { scheduled = false; fn(last); });
+ };
+};
+
 class Lightbox {
  constructor() {
   this.images = [];
@@ -54,13 +65,16 @@ class Lightbox {
   this.stage.addEventListener('click', e => { if (e.target === this.stage && !this.panned) this.close(); });
 
   this.stage.addEventListener('pointerdown', e => this.onDown(e));
-  this.stage.addEventListener('pointermove', e => this.onMove(e));
+  // Pinch/pan reads layout and settles the frame; one run per frame is smooth enough.
+  this.stage.addEventListener('pointermove', rafCoalesce(e => this.onMove(e)));
   this.stage.addEventListener('pointerup', e => this.onUp(e));
   this.stage.addEventListener('pointercancel', e => this.onUp(e));
-  this.stage.addEventListener('wheel', e => this.onWheel(e), { passive: false });
+  // preventDefault must happen in the event itself, so the zoom work is what gets coalesced.
+  this.stage.addEventListener('wheel', e => { e.preventDefault(); this.coalescedWheel(e); }, { passive: false });
   el.addEventListener('dblclick', e => { e.preventDefault(); this.toggle(e.clientX, e.clientY); });
   document.addEventListener('keydown', e => { if (!el.hidden) this.onKey(e); });
 
+  this.coalescedWheel = rafCoalesce(e => this.onWheel(e));
   const frame = () => { el.style.setProperty('--stage-w', `${this.stage.clientWidth}px`); };
   new ResizeObserver(frame).observe(this.stage);
   document.body.append(el);

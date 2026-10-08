@@ -134,11 +134,14 @@ const presenceList = () => {
  for (const run of desktopPresence) if (!presence.has(run.id)) list.push(run);
  return list;
 };
-function broadcastPresence() {
+// The client that just published its own presence already knows it: echoing the same list
+// back made every page re-render its chat list for its own heartbeat.
+function broadcastPresence(except = null) {
  const list = presenceList();
+ const frame = JSON.stringify({ t: "event", channel: "presence:event", args: [list] });
  for (const client of wss.clients) {
-  if (client.readyState !== 1) continue;
-  try { client.send(JSON.stringify({ t: "event", channel: "presence:event", args: [list] })); } catch {}
+  if (client === except || client.readyState !== 1) continue;
+  try { client.send(frame); } catch {}
  }
 }
 // The desktop app cannot talk to this server directly, so it drops a heartbeat into
@@ -296,7 +299,7 @@ wss.on("connection", (ws, req) => {
      const [id, info] = msg.args || [];
      if (info && id) { mine.add(id); presence.set(id, { id, ...info }); }
      else if (id) { mine.delete(id); presence.delete(id); }
-     broadcastPresence();
+     broadcastPresence(ws);
      return;
     }
     if (msg.channel === "delegate:add") {

@@ -197,7 +197,8 @@ class MediaSlider {
   while (drag.samples.length > 2 && e.timeStamp - drag.samples[0][0] > SAMPLE_WINDOW) drag.samples.shift();
   this.pos = this.shape(drag.from - dx / this.width);
   this.vel = 0;
-  this.render();
+  // One paint per frame, not one per pointermove: the state above is all onUp needs.
+  this.wake();
  }
 
  onUp(e) {
@@ -246,7 +247,7 @@ class MediaSlider {
   swipe.at = now;
   this.pos = this.shape(swipe.from + swipe.sum / this.width);
   this.vel = 0;
-  this.render();
+  this.wake();
   const moved = Math.abs(this.pos - swipe.base);
   if (moved >= WHEEL.page || (swipe.fading && moved >= WHEEL.nudge)) this.commitSwipe();
   this.armWheelEnd();

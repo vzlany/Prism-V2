@@ -847,7 +847,10 @@ function blocks(text, { live = false, tones = TONES, cache = null } = {}) {
    state.heading++;
    state.tone = tones[state.heading % tones.length];
   }
-  const isLive = live && k === parsed.length - 1;
+  // A trailing block whose container has already closed (a fence that ended) is safe to
+  // cache even while the stream continues: without this a 200-line code block was
+  // re-highlighted every 32 ms until the whole turn ended.
+  const isLive = live && k === parsed.length - 1 && !block.closed;
   const key = cache && !isLive ? `${block.type}\u0001${state.heading}\u0001${block.src}` : '';
   const html = (key && cache.get(key)) || render(block, state, isLive);
   if (key) used.set(key, html);

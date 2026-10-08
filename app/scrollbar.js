@@ -24,7 +24,7 @@ class Scrollbar {
   this.scrollTop=viewport.scrollTop;
   this.edges={top:{wheel:-Infinity,force:0,start:-Infinity,amp:0},bottom:{wheel:-Infinity,force:0,start:-Infinity,amp:0}};
   this.tick=this.tick.bind(this);
-  viewport.addEventListener('scroll',()=>this.onScroll());
+  viewport.addEventListener('scroll',()=>this.onScroll(),{passive:true});
   viewport.addEventListener('input',()=>this.update());
   viewport.addEventListener('wheel',e=>this.onWheel(e),{passive:true});
   const resize=this.resize=new ResizeObserver(()=>this.update());

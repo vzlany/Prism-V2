@@ -3,7 +3,6 @@
 
 const CHAR_DURATION = 0.22;
 const RISE = 0.35;
-const BLUR = 2;
 const GHOST_DURATION = 240;
 const GHOST_WAVE = 300;
 const MAX_MANUAL_DELETE = 200;
@@ -56,7 +55,7 @@ class ComposerText {
   this.selection = () => this.onSelection();
   input.addEventListener('beforeinput', e => this.onBeforeInput(e));
   input.addEventListener('input', () => this.onInput());
-  input.addEventListener('scroll', () => this.onScroll());
+  input.addEventListener('scroll', () => this.onScroll(), { passive: true });
   input.addEventListener('paste', e => this.onPaste(e));
   input.addEventListener('copy', e => this.onCopy(e, false));
   input.addEventListener('cut', e => this.onCopy(e, true));
@@ -422,7 +421,8 @@ class ComposerText {
   for (let i2 = Math.max(start, w.a), stop = Math.min(end, w.b); i2 < stop; i2++) {
    const width = isHighSurrogate(this.value.charCodeAt(i2)) && i2 + 1 < end ? 2 : 1;
    const p = easeOut(Math.min(1, Math.max(0, (w.t - this.seg.starts[i2 - this.seg.from]) / CHAR_DURATION)));
-   html += `<span class="composer-wave" style="opacity:${p.toFixed(3)};top:${((1 - p) * RISE).toFixed(3)}em;filter:blur(${((1 - p) * BLUR).toFixed(2)}px)">${escapeHtml(this.value.slice(i2, i2 + width))}</span>`;
+   // Opacity + rise only: a per-character blur stacked a GPU layer for every typed letter.
+   html += `<span class="composer-wave" style="opacity:${p.toFixed(3)};top:${((1 - p) * RISE).toFixed(3)}em">${escapeHtml(this.value.slice(i2, i2 + width))}</span>`;
    i2 += width - 1;
   }
   const ha = Math.max(start, w.b), hb = Math.min(end, w.end);

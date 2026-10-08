@@ -45,7 +45,13 @@ const settleComposer = () => {
 };
 new ResizeObserver(measureComposer).observe(composer);
 new MutationObserver(settleComposer).observe(main, { attributes: true, attributeFilter: ['class'] });
-window.addEventListener('resize', measureComposer);
+// A resize drag fires dozens of events a second, each one measuring the composer with several
+// forced reflows; measure once the drag settles instead.
+let composerResizeTimer = 0;
+window.addEventListener('resize', () => {
+ clearTimeout(composerResizeTimer);
+ composerResizeTimer = setTimeout(measureComposer, 100);
+});
 new Scrollbar(composerInput, document.querySelector('.composer-scrollbar'));
 const threadScrollbar = new Scrollbar(thread, document.querySelector('.thread-scrollbar'));
 new Scrollbar(document.querySelector('.chats-scroll'), document.querySelector('.chats-scrollbar'));
@@ -98,6 +104,16 @@ const parallelMeter = new ParallelMeter({ button: document.querySelector('.compo
 // ghost here: the list has to be repainted when presence arrives, not only on local changes.
 // When such a run finishes, the chat is read again so its answer appears without a reload.
 let presenceBusy = new Set();
+// The busy bits the list actually draws; a render is scheduled only when one of them changes.
+let presenceSignature = '';
+let presenceRenderTimer = 0;
+function presenceRender(list) {
+ const signature = JSON.stringify((list || []).map(entry => [entry.id, entry.state || '', entry.parallel ? 1 : 0]));
+ if (signature === presenceSignature) return;
+ presenceSignature = signature;
+ if (presenceRenderTimer) return;
+ presenceRenderTimer = setTimeout(() => { presenceRenderTimer = 0; chatList?.render(); }, 2000);
+}
 // The chat on screen running on another device: its live card sits at the end of the thread
 // and is rebuilt from the presence updates. When it ends the real conversation is read.
 function syncLive() {
@@ -140,7 +156,9 @@ window.Presence?.on?.(() => {
   clearTimeout(conv.waitingTimer);
   conv.waiting = 0;
  }
- if (chatList) chatList.render();
+ // Presence arrives several times a minute (every branch heartbeats). Repaint the list only
+ // when the busy picture actually changed, and at most once per two seconds.
+ presenceRender(window.Presence.list());
  syncLive();
  syncComposer();
 });
