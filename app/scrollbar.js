@@ -67,11 +67,11 @@ class Scrollbar {
  }
  // Handled scrolling tells the viewport it was the user (a chat keeps following the bottom
  // unless the reader really scrolled away).
- intent(){try{this.viewport.dispatchEvent(new CustomEvent('scroll-intent'))}catch{}}
+ intent(up=false){try{this.viewport.dispatchEvent(new CustomEvent('scroll-intent',{detail:{up}}))}catch{}}
  onWheel(e){
   const v=this.viewport,max=v.scrollHeight-v.clientHeight;
   if(max<=1||!e.deltaY)return;
-  this.intent();
+  this.intent(e.deltaY<0);
   const down=e.deltaY>0,edge=this.edges[down?'bottom':'top'],now=performance.now();
   const fresh=now-edge.wheel>GESTURE_GAP;
   edge.wheel=now;
@@ -91,19 +91,20 @@ class Scrollbar {
  }
  onPointerDown(e){
   if(!this.visible||e.button!==0)return;
-  this.intent();
   if(e.target!==this.thumb){
    const y=e.clientY-this.track.getBoundingClientRect().top;
+   this.intent(y<this.thumbTop());
    this.viewport.scrollBy({top:(y<this.thumbTop()?-1:1)*this.viewport.clientHeight*.9,behavior:'smooth'});
    return;
   }
+  this.intent(false);
   this.drag={y:e.clientY,scroll:this.viewport.scrollTop};
   this.track.setPointerCapture(e.pointerId);
   this.track.classList.add('is-dragging');
  }
  onPointerMove(e){
   if(!this.drag||!this.visible)return;
-  this.intent();
+  this.intent(e.clientY<this.drag.y);
   const {h,trackH,max}=this.target;
   this.viewport.scrollTop=this.drag.scroll+(e.clientY-this.drag.y)*max/Math.max(1,trackH-h);
  }

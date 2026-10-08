@@ -329,12 +329,25 @@ class Chat {
   // Real scrolling turns following off; a Thought folding or a tool card closing above the
   // viewport fires a scroll event too, and those must not be mistaken for the reader leaving
   // the bottom (that made the page "teleport up" when a tool started or a thought ended).
-  const intent = () => { this.scrollIntent = performance.now(); };
+  // An upward scroll must leave the bottom at once: while a reply streams, the follow spring
+  // writes scrollTop every frame, and waiting for the (frame-coalesced) scroll handler lets
+  // it drag the reader back down before following is switched off.
+  const intent = event => {
+   this.scrollIntent = performance.now();
+   const up = event.type === 'wheel' ? event.deltaY < 0
+    : event.type === 'scroll-intent' ? event.detail?.up === true
+    : event.type === 'touchmove' ? (this.touchY != null && event.clientY > this.touchY)
+    : event.type === 'keydown' ? ['ArrowUp', 'PageUp', 'Home'].includes(event.key)
+    : false;
+   if (event.type === 'touchmove') this.touchY = event.clientY;
+   if (up) this.leaveBottom();
+  };
   thread.addEventListener('wheel', intent, { passive: true });
   thread.addEventListener('touchmove', intent, { passive: true });
+  thread.addEventListener('touchstart', event => { this.touchY = event.touches?.[0]?.clientY ?? null; }, { passive: true });
   thread.addEventListener('scroll-intent', intent);
   thread.addEventListener('keydown', event => {
-   if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) intent();
+   if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) intent(event);
   });
   thread.addEventListener('click', event => this.onClick(event));
   thread.addEventListener('diagram-edit', event => this.onDiagramEdit(event));
@@ -898,11 +911,22 @@ class Chat {
 
  onScroll() {
   const top = this.thread.scrollTop, distance = this.thread.scrollHeight - top - this.thread.clientHeight;
-  if (distance <= FOLLOW_DISTANCE) this.follow = true;
-  else if (top < this.lastTop - 1 && performance.now() - this.scrollIntent < 900) this.follow = false;
+  // Any real upward scroll leaves the bottom, however small; coming back near the bottom
+  // starts following again. Content-driven scroll events (cards folding, older messages
+  // loading) carry no scroll intent, so they never count as the reader scrolling away.
+  if (top < this.lastTop - 1 && performance.now() - this.scrollIntent < 900) this.follow = false;
+  else if (distance <= FOLLOW_DISTANCE) this.follow = true;
   this.lastTop = top;
   this.syncBottom();
   this.loadOlder();
+ }
+
+ // The reader is scrolling up: stop following now and freeze the follow spring where it is.
+ leaveBottom() {
+  if (!this.follow) return;
+  this.follow = false;
+  this.stopFollow();
+  this.syncBottom();
  }
 
  syncBottom() {
