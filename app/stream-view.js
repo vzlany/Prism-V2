@@ -123,6 +123,14 @@ class StreamView {
  resume() {
   if (!this.paused) return;
   this.paused = false;
+  // A stream parked for a while is far behind: typing out the backlog would re-parse the
+  // whole markdown every frame for seconds (that read as lag when opening a working
+  // parallel run). Snap to the end — the reader wants the current state — and let the
+  // deltas that arrive from now on get the normal typing effect.
+  if (this.source.length - this.shown > 2000) {
+   this.shown = this.source.length;
+   this.painted = -1;
+  }
   this.wake();
  }
 
