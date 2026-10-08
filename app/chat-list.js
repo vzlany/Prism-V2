@@ -303,9 +303,15 @@ class ChatList {
  sorterFor(path) {
   const list = this.library.chats.filter(chat => key(chat.folder) === key(path));
   const manual = list.some(chat => Number.isFinite(chat.order));
-  return manual
-   ? (a, b) => ((a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER)) || ((a.created || 0) - (b.created || 0))
-   : (a, b) => (b.created || b.updated || 0) - (a.created || a.updated || 0);
+  if (!manual) return (a, b) => (b.created || b.updated || 0) - (a.created || a.updated || 0);
+  // A folder sorted by hand keeps that order — but a chat made after the last drag has no
+  // place in it yet and belongs on top, newest first, not buried under the dragged ones.
+  return (a, b) => {
+   const ao = Number.isFinite(a.order), bo = Number.isFinite(b.order);
+   if (ao !== bo) return ao ? 1 : -1;
+   if (ao) return a.order - b.order;
+   return (b.created || 0) - (a.created || 0);
+  };
  }
 
  clearDrop() {

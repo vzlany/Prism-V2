@@ -451,7 +451,10 @@ class Chat {
 
  // Deploy a subagent on one focused task; resolves with its final report.
  async deploySubagent(promptText, label = '', toolId = '') {
-  const parent = this.active;
+  // The parent is the run that asked for it, looked up by tool-call id, not whichever chat
+  // happens to be on screen: a subagent a parallel run deploys belongs under that run.
+  const caller = toolId && this.toolConvs?.get(toolId);
+  const parent = (caller && this.conversations.get(caller)) || this.active;
   if (!parent?.record) return null;
   const path = parent.record.folder;
   const folder = this.library.folders.find(item => samePath(item.path, path)) || { path, name: path.split(/[\\/]/).pop() || path };
@@ -1402,6 +1405,9 @@ class Chat {
   if (conv === this.active) this.followBottom();
   this.publishLive(conv, turn);
   const id = turn.tool = `${conv.id}-${++this.tools}`;
+  // Which conversation started this tool call: the subagent tool reads this back, so a run
+  // in the background parents its own subagents instead of the chat on screen.
+  (this.toolConvs ||= new Map()).set(id, conv.id);
   // A subagent card carries a way into the conversation the subagent works in, and a live
   // clock beside it so the main chat shows how long it has been working.
   if (card && name === 'subagent') {
@@ -1458,6 +1464,7 @@ class Chat {
    return `Error: ${error.message}`;
   } finally {
    turn.tool = '';
+   this.toolConvs?.delete(id);
   }
  }
 
