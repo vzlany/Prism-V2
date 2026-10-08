@@ -129,6 +129,8 @@ const STRINGS = {
   'approve.more': '{count} more lines',
   'artifact.preview': 'Preview',
   'artifact.download': 'Download',
+  'artifact.downloading': 'Downloading…',
+  'artifact.downloaded': 'Downloaded',
   'artifact.binary': 'This is a binary file — use Download to keep it.',
   'compact.running': 'Compacting the conversation',
   'compact.done': 'Conversation compacted',

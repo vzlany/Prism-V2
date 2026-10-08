@@ -52,6 +52,33 @@ function previewModal(name, text) {
  document.body.append(overlay);
 }
 
+// The button answers at once: a spinner while the save dialog is open and the bytes are
+// written, then a short green "Downloaded" flourish. A cancelled save just restores the label.
+async function runDownload(button, run) {
+ if (!button || button.classList.contains('is-downloading')) return null;
+ const label = button.dataset.label || button.textContent || I18n.t('artifact.download');
+ button.dataset.label = label;
+ button.classList.remove('is-downloaded');
+ button.classList.add('is-downloading');
+ button.setAttribute('aria-busy', 'true');
+ button.textContent = I18n.t('artifact.downloading');
+ const saved = await Promise.resolve(run()).catch(() => null);
+ button.classList.remove('is-downloading');
+ button.removeAttribute('aria-busy');
+ if (!saved) {
+  button.textContent = label;
+  return null;
+ }
+ button.classList.add('is-downloaded');
+ button.textContent = I18n.t('artifact.downloaded');
+ clearTimeout(button.downloadTimer);
+ button.downloadTimer = setTimeout(() => {
+  button.classList.remove('is-downloaded');
+  if (button.isConnected) button.textContent = label;
+ }, 1800);
+ return saved;
+}
+
 window.Artifacts = {
  // Preview and Download live inside the write/edit card itself, so a file the agent touched
  // is one box, not a card plus a second file chip saying the same name.
@@ -62,7 +89,8 @@ window.Artifacts = {
    const text = await read(real, cwd);
    previewModal(name, text == null ? I18n.t('artifact.binary') : text);
   });
-  card.addAction(I18n.t('artifact.download'), () => download(real, name));
+  let action = null;
+  action = card.addAction(I18n.t('artifact.download'), () => runDownload(action, () => download(real, name)));
  },
 
  // A finished file the agent attached with attach_file: a small chip under the card with the
@@ -77,13 +105,8 @@ window.Artifacts = {
    const text = await read(real, cwd);
    previewModal(label, text == null ? I18n.t('artifact.binary') : text);
   });
-  chip.querySelector('[data-act="download"]').addEventListener('click', async () => {
-   const button = chip.querySelector('[data-act="download"]');
-   const saved = await download(real, label);
-   if (!saved) return;
-   button.classList.add('is-copied');
-   setTimeout(() => button.classList.remove('is-copied'), 1600);
-  });
+  const downloadButton = chip.querySelector('[data-act="download"]');
+  downloadButton.addEventListener('click', () => runDownload(downloadButton, () => download(real, label)));
   container.append(chip);
  },
 };

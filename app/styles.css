@@ -8590,6 +8590,15 @@ a.settings-button {
 .artifact-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:rgba(var(--fg-rgb),.8);font-family:var(--mono-font)}
 .artifact-btn{flex:none;border:1px solid rgba(var(--fg-rgb),.12);border-radius:8px;background:transparent;color:rgba(var(--fg-rgb),.7);font:inherit;font-size:11.5px;padding:4px 9px;cursor:pointer}
 .artifact-btn:hover{background:rgba(var(--fg-rgb),.06);color:rgba(var(--fg-rgb),.9)}
+/* A new attachment rises in; Download answers with a spinner, then a green pop. */
+.artifact{animation:artifact-in .35s var(--motion-easing) both}
+@keyframes artifact-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.is-downloading{pointer-events:none;opacity:.85}
+.is-downloading::before{content:"";display:inline-block;width:8px;height:8px;margin-right:6px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;vertical-align:-1px;animation:artifact-spin .7s linear infinite}
+@keyframes artifact-spin{to{transform:rotate(360deg)}}
+.is-downloaded{color:rgb(var(--success-rgb));border-color:rgba(var(--success-rgb),.45);animation:artifact-pop .4s var(--motion-easing)}
+.is-downloaded::before{content:"✓";margin-right:5px;font-weight:700}
+@keyframes artifact-pop{0%{transform:scale(.92)}60%{transform:scale(1.06)}100%{transform:scale(1)}}
 .artifact-overlay{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(5,7,10,.6);backdrop-filter:blur(3px)}
 .artifact-modal{width:min(780px,90vw);max-height:82vh;display:flex;flex-direction:column;border-radius:16px;background:var(--composer-bg);box-shadow:inset 0 0 0 1px var(--composer-border),0 24px 70px rgba(0,0,0,.55)}
 .artifact-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid rgba(var(--fg-rgb),.07)}
