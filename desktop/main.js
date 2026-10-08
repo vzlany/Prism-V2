@@ -441,10 +441,11 @@ function createWindow() {
    sandbox: true,
    spellcheck: true,
    webviewTag: true,
-   // Prism's own chimes must play even when the window is not focused, and a background
-   // window must keep its timers and animation frames (a long reply used to stall there).
+   // Prism's own chimes must play even when the window is not focused. A hidden window
+   // throttles rAF/timers (tray stays cool); while a turn is running chat.js flips that off
+   // through app:set-background-throttle, so a reply in the tray still streams at full rate.
    autoplayPolicy: 'no-user-gesture-required',
-   backgroundThrottling: false,
+   backgroundThrottling: true,
   },
  });
  win.once('ready-to-show', () => { if (!HIDDEN) win.show(); });
@@ -573,6 +574,12 @@ ipcMain.on('notify', (event, payload) => {
 const fromApp = event => event.sender.getType() === 'window' && event.senderFrame?.url.startsWith('file:');
 ipcMain.handle('tool:run', (event, id, name, args, cwd) => fromApp(event) ? Tools.runTool(id, name, args, cwd, event.sender) : { error: 'Not allowed' });
 ipcMain.handle('app:version', event => fromApp(event) ? app.getVersion() : null);
+// A running turn turns throttling off; the last one to finish turns it back on.
+ipcMain.handle('app:set-background-throttle', (event, on) => {
+ if (!fromApp(event)) return false;
+ for (const win of BrowserWindow.getAllWindows()) win.webContents.setBackgroundThrottling(Boolean(on));
+ return true;
+});
 ipcMain.handle('update:check', async event => {
  if (!fromApp(event)) return null;
  try {

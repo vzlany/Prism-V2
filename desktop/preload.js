@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld('openghost', {
  },
  app: {
   version: () => ipcRenderer.invoke('app:version'),
+  // A turn is running: the hidden window must keep its rAF and timers until the last one ends.
+  setActiveTurn: active => ipcRenderer.invoke('app:set-background-throttle', !active),
  },
  update: {
   check: () => ipcRenderer.invoke('update:check'),

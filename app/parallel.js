@@ -137,10 +137,21 @@ class RunsView {
   this.el.append(this.list);
   this.off = window.ParallelRuns.on(() => this.render());
   this.render();
-  // Running rows show how long they have been at it, so they repaint while any is alive.
-  this.timer = setInterval(() => {
-   if (window.ParallelRuns.runs.some(run => run.status === 'running')) this.render();
-  }, 1000);
+  // Rows are rebuilt only when a run is added or changes state. The per-second tick touches
+  // just the running-time text on existing rows — the panel used to reflow (innerHTML) every
+  // second, which read as a 1 Hz flicker while any run was active.
+  this.timer = setInterval(() => this.tickClocks(), 1000);
+ }
+
+ tickClocks() {
+  const runs = window.ParallelRuns.runs;
+  if (!runs.some(run => run.status === 'running')) return;
+  for (const row of this.list.querySelectorAll('.run-item')) {
+   const run = runs.find(item => item.id === row.dataset.id);
+   if (run?.status !== 'running') continue;
+   const status = row.querySelector('.run-status');
+   if (status) status.textContent = `${I18n.t('runs.running')} · ${clock(run.started)}`;
+  }
  }
 
  render() {
@@ -182,11 +193,11 @@ const clock = started => {
 class ParallelMeter {
  constructor({ button }) {
   this.button = button;
-  this.timer = 0;
   this.refresh();
+  // Event-driven: the runs and presence emitters cover every change the meter shows. The old
+  // 1 s poll only existed for the running-time label, which the meter does not show.
   window.ParallelRuns.on(() => this.refresh());
   window.Presence?.on?.(() => this.refresh());
-  this.timer = setInterval(() => this.refresh(), 1000);
   button.addEventListener('click', () => window.browserPanel?.showRuns?.());
  }
 

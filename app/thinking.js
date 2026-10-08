@@ -48,13 +48,14 @@ class ThinkingView {
   this.live = false;
   this.begun = 0;
   this.ticker = 0;
+  this.paused = false;
   // While the model is still writing, the box follows the newest words — but only while the
   // reader stays at the bottom. Scroll up and it holds still until they come back down.
   this.stick = true;
   this.inner.addEventListener('scroll', () => {
    const gap = this.inner.scrollHeight - this.inner.scrollTop - this.inner.clientHeight;
    this.stick = gap < 24;
-  });
+  }, { passive: true });
   this.head.addEventListener('click', () => {
    this.touched = true;
    this.setOpen(!this.open);
@@ -76,6 +77,11 @@ class ThinkingView {
   this.begun = performance.now();
   this.stick = true;
   this.time.hidden = false;
+  if (this.paused) return;
+  this.startTicker();
+ }
+
+ startTicker() {
   const tick = () => {
    if (!this.begun) return;
    // A box that left the page must not keep a timer alive for the rest of the session.
@@ -85,6 +91,21 @@ class ThinkingView {
   tick();
   clearInterval(this.ticker);
   this.ticker = setInterval(tick, 100);
+ }
+
+ // A parked conversation's thoughts stop ticking and stop painting; the text keeps arriving.
+ pause() {
+  if (this.paused) return;
+  this.paused = true;
+  clearInterval(this.ticker);
+  this.ticker = 0;
+ }
+
+ resume() {
+  if (!this.paused) return;
+  this.paused = false;
+  if (this.begun) this.startTicker();
+  if (!this.el.hidden) this.paint();
  }
 
  stop() {
@@ -147,7 +168,7 @@ class ThinkingView {
  // block-by-block: unchanged blocks (a finished code block, a list above) keep their DOM,
  // so nothing flashes just because the words kept coming.
  paint() {
-  if (this.painted === this.text || this.pending) return;
+  if (this.paused || this.painted === this.text || this.pending) return;
   this.pending = setTimeout(() => { this.pending = 0; this.flush(); }, 90);
  }
 

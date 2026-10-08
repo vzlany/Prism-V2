@@ -36,6 +36,29 @@ svg{display:block;width:100%;height:100%;overflow:visible}
 const random = ([min, max]) => min + Math.random() * (max - min);
 const fixed = n => n.toFixed(2);
 
+// One rAF for every ghost on screen. A long conversation can hold 20+ of them (sidebar rows,
+// message statuses, tool cards); before this, each ran its own 30 fps loop. The shared tick
+// also pauses as a whole while the page is hidden.
+const live = new Set();
+let sharedRaf = 0;
+function sharedTick(now) {
+ sharedRaf = 0;
+ if (document.hidden) return;
+ for (const ghost of [...live]) ghost.frame(now);
+ if (live.size) sharedRaf = requestAnimationFrame(sharedTick);
+}
+function subscribe(ghost) {
+ live.add(ghost);
+ if (!sharedRaf && !document.hidden) sharedRaf = requestAnimationFrame(sharedTick);
+}
+function unsubscribe(ghost) {
+ live.delete(ghost);
+ if (!live.size && sharedRaf) { cancelAnimationFrame(sharedRaf); sharedRaf = 0; }
+}
+document.addEventListener('visibilitychange', () => {
+ if (!document.hidden && live.size && !sharedRaf) sharedRaf = requestAnimationFrame(sharedTick);
+});
+
 function bodyPath(s) {
  const left = (5 + s) / 2, right = (5 - s) / 2;
  return `M0 29A29 29 0 0 1 58 29L58 57A${fixed(right)} ${fixed(right)} 0 0 1 ${fixed(53 + s)} 57`
@@ -53,11 +76,9 @@ class GhostThinking extends HTMLElement {
   this.body = this.shadowRoot.querySelector('.body');
   this.shape = this.shadowRoot.querySelector('.shape');
   this.eyes = [...this.shadowRoot.querySelectorAll('.eye')];
-  this.raf = 0;
   this.rendered = 0;
   this.swayed = 0;
-  this.tick = this.tick.bind(this);
-  this.onVisibility = () => { if (!document.hidden) this.last = performance.now(); };
+  this.frame = this.frame.bind(this);
  }
 
  connectedCallback() {
@@ -72,14 +93,11 @@ class GhostThinking extends HTMLElement {
   this.nextBlink = now + random(BLINK_EVERY) * 0.5;
   this.blinkAt = -Infinity;
   this.eye = { x: [0, 0], y: [0, 0], sx: [1, 0], sy: [1, 0] };
-  document.addEventListener('visibilitychange', this.onVisibility);
-  this.raf = requestAnimationFrame(this.tick);
+  subscribe(this);
  }
 
  disconnectedCallback() {
-  cancelAnimationFrame(this.raf);
-  this.raf = 0;
-  document.removeEventListener('visibilitychange', this.onVisibility);
+  unsubscribe(this);
  }
 
  look(x, y, hold = GAZE_HOLD) {
@@ -94,13 +112,15 @@ class GhostThinking extends HTMLElement {
   return pose;
  }
 
- tick(now) {
-  // A hidden window (backgroundThrottling is off for the app) and a ghost the eye cannot
-  // follow are not worth a paint: skip the work and keep the loop warm at a low rate.
-  if (document.hidden) { this.raf = requestAnimationFrame(this.tick); return; }
+ // Called by the shared scheduler once per frame, for every live ghost at once.
+ frame(now) {
+  // A ghost the eye cannot follow (a parked conversation, a hidden panel) is not worth a
+  // paint; the shared loop pays almost nothing for it.
+  const visible = this.checkVisibility ? this.checkVisibility() : this.offsetParent !== null;
+  if (!visible) { this.last = now; return; }
   // The ghost reads fine at ~30fps and the springs below sub-step their own math, so half the
   // frames only save work, they do not change the motion.
-  if (now - this.rendered < 30) { this.raf = requestAnimationFrame(this.tick); return; }
+  if (now - this.rendered < 30) return;
   this.rendered = now;
   const dt = Math.min((now - this.last) / 1000, 0.032);
   this.last = now;
@@ -137,7 +157,6 @@ class GhostThinking extends HTMLElement {
   for (let i = 0; i < 2; i++) {
    this.eyes[i].style.transform = `translate(${fixed(EYE_X[i] + x[0])}px, ${fixed(EYE_Y + y[0])}px) scale(${sx[0].toFixed(3)}, ${Math.max(0.05, sy[0] * blink).toFixed(3)})`;
   }
-  this.raf = requestAnimationFrame(this.tick);
  }
 }
 

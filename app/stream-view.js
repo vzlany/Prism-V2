@@ -106,8 +106,24 @@ class StreamView {
   this.raf = 0;
   this.last = 0;
   this.lastPaint = 0;
+  // A parked conversation (parallel runs run in the background) keeps its state but stops
+  // scheduling frames: its text still arrives, the DOM is only repainted when it is shown.
+  this.paused = false;
   this.tick = this.tick.bind(this);
   this.finished = new Promise(resolve => { this.resolve = resolve; });
+ }
+
+ pause() {
+  if (this.paused) return;
+  this.paused = true;
+  cancelAnimationFrame(this.raf);
+  this.raf = 0;
+ }
+
+ resume() {
+  if (!this.paused) return;
+  this.paused = false;
+  this.wake();
  }
 
  push(source) {
@@ -123,6 +139,9 @@ class StreamView {
 
  wake() {
   if (this.raf) return;
+  // Parked while still streaming: no frame at all until resume(). A finished stream (done)
+  // always gets its last frame, so finish() and the turn end are never blocked by parking.
+  if (this.paused && !this.done) return;
   this.last = performance.now();
   this.raf = requestAnimationFrame(this.tick);
  }
@@ -130,6 +149,7 @@ class StreamView {
  tick(now) {
   this.raf = 0;
   if (!this.root.isConnected) { this.resolve(); return; }
+  if (this.paused && !this.done) return;
   const dt = Math.min(Math.max((now - this.last) / 1000, 0), 0.05);
   this.last = now;
   this.advance(dt);

@@ -291,6 +291,7 @@ class Chat {
   // When the user last scrolled by hand (wheel, finger, keyboard, scrollbar): only then may
   // following switch off. Content-driven scroll events must not count as leaving the bottom.
   this.scrollIntent = 0;
+  this.scrollFrame = 0;
   this.followFrame = 0;
   this.followLast = 0;
   this.followPos = 0;
@@ -316,7 +317,12 @@ class Chat {
    this.pin();
    this.syncBottom();
   });
-  thread.addEventListener('scroll', () => this.onScroll());
+  // Passive, and coalesced to one frame: a fast scroll fires far more often than the list
+  // needs, and onScroll reads heights and can insert older messages.
+  thread.addEventListener('scroll', () => {
+   if (this.scrollFrame) return;
+   this.scrollFrame = requestAnimationFrame(() => { this.scrollFrame = 0; this.onScroll(); });
+  }, { passive: true });
   // Real scrolling turns following off; a Thought folding or a tool card closing above the
   // viewport fires a scroll event too, and those must not be mistaken for the reader leaving
   // the bottom (that made the page "teleport up" when a tool started or a thought ended).
@@ -633,8 +639,18 @@ class Chat {
  attach(conv) {
   if (conv.list.isConnected) return;
   conv.list.classList.add('is-parked');
+  this.loops(conv, true);
   this.thread.append(conv.list);
   this.onList?.(conv.list);
+ }
+
+ // Pause or resume the frames and tickers of a conversation's running turn. Parked chats
+ // (parallel runs, subagents) keep streaming text into their models, but repaint nothing.
+ loops(conv, parked) {
+  for (const part of conv.turn?.parts || []) {
+   part.view.stream?.[parked ? 'pause' : 'resume']?.();
+   part.view.thinking?.[parked ? 'pause' : 'resume']?.();
+  }
  }
 
  activate(conv) {
@@ -645,6 +661,7 @@ class Chat {
    prev.follow = this.follow;
    prev.scrollTop = this.thread.scrollTop;
    prev.list.classList.add('is-parked');
+   this.loops(prev, true);
    this.resize.unobserve(prev.list);
    // A protected chat locks again as soon as it is left.
    if (prev.record && !prev.locked && this.library.isProtected(prev.id)) this.seal(prev);
@@ -653,6 +670,7 @@ class Chat {
   this.active = conv;
   conv.unread = false;
   conv.list.classList.remove('is-parked');
+  this.loops(conv, false);
   this.resize.observe(conv.list);
   const empty = !conv.list.childElementCount;
   this.main.classList.toggle('is-empty', empty && !conv.locked);
@@ -983,7 +1001,17 @@ class Chat {
   // A slow beat keeps the mirror fresh while the turn lives, so a reader can tell a live run
   // from one left behind by a closed app.
   turn.liveBeat = setInterval(() => this.publishLive(conv, turn), 4000);
+  // The first running turn keeps the hidden window un-throttled; the last one to end gives
+  // the throttle back (see end()).
+  if (this.activeTurns() === 1) window.openghost?.setActiveTurn?.(true);
   return turn;
+ }
+
+ // How many conversations are running a turn right now (parallel runs and subagents included).
+ activeTurns() {
+  let count = 0;
+  for (const conv of this.conversations.values()) if (conv.turn) count++;
+  return count;
  }
 
  // What the running turn looks like right now, small enough to mirror to the web: its last
@@ -1426,6 +1454,8 @@ class Chat {
   view.el.__entry = entry;
   turn.part = { view, entry };
   turn.parts.push(turn.part);
+  // A turn that starts while its conversation is parked stays parked: no frames until shown.
+  if (conv !== this.active) this.loops(conv, true);
   this.publishLive(conv, turn);
  }
 
@@ -1456,6 +1486,8 @@ class Chat {
   if (turn.started) entry.duration = Math.max(1, Math.round((Date.now() - turn.started) / 1000));
   for (const pending of turn.approvals) pending.card.settle('deny');
   conv.turn = null;
+  // No turn is left: the window may throttle again while it sits hidden in the tray.
+  if (this.activeTurns() === 0) window.openghost?.setActiveTurn?.(false);
   // The mirror's heartbeat stops at once, but "the turn is over" is only told after the chat
   // has been written: a device watching would otherwise reload the conversation before the
   // last thoughts and tool cards were saved, and they would never appear.
