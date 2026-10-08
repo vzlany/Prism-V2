@@ -108,6 +108,7 @@ export function createEngineHost({ profile = "" } = {}) {
   typeof payload?.outcome === "string" ? payload.outcome : "completed",
   typeof payload?.summary === "string" ? payload.summary : "",
   Array.isArray(payload?.files) ? payload.files : [],
+  typeof payload?.chatId === "string" ? payload.chatId : "",
  ));
  MCP.init().catch(() => {});
 

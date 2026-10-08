@@ -24,10 +24,63 @@ class ContextCircle {
   this.percent = button.querySelector('.context-percent');
   this.price = button.querySelector('.context-price');
   this.fill.style.strokeDasharray = `${CIRCUMFERENCE}`;
+  // What the parallel runs started from this chat have spent, looked up by chat id: the ring
+  // keeps the chat's own context, but its price is the whole tree's price.
+  this.childSpend = new Map();
+  this.childTried = new Map();
   this.button.addEventListener('click', () => this.toggle());
   window.addEventListener('prices-changed', () => this.update());
   this.update();
   setInterval(() => this.update(), 1500);
+ }
+
+ // Every chat descending from the active one (runs, their runs, subagents of both).
+ descendants() {
+  const active = this.chat.active?.id;
+  if (!active) return [];
+  const byParent = new Map();
+  for (const chat of this.chat.library?.chats || []) {
+   if (!chat.parent || chat.parent === chat.id) continue;
+   const kids = byParent.get(chat.parent) || [];
+   kids.push(chat);
+   byParent.set(chat.parent, kids);
+  }
+  const out = [], seen = new Set([active]);
+  const walk = id => {
+   for (const kid of byParent.get(id) || []) {
+    if (seen.has(kid.id)) continue;
+    seen.add(kid.id);
+    out.push(kid);
+    walk(kid.id);
+   }
+  };
+  walk(active);
+  return out;
+ }
+
+ // The runs' price, added to the chat's own. A run this session never opened is read from
+ // its file once, quietly, so an app restart does not lose the number.
+  parallelCost() {
+  let cost = 0, runs = 0;
+  const now = performance.now();
+  for (const record of this.descendants()) {
+   const conv = this.chat.conversations.get(record.id);
+   const spend = conv?.spend || this.childSpend.get(record.id) || null;
+   if (!spend) {
+    if ((this.childTried.get(record.id) || 0) > now - 15000) continue;
+    this.childTried.set(record.id, now);
+    this.chat.library.conversation(record.id).then(({ spend: loaded }) => {
+     if (!loaded) return;
+     this.childSpend.set(record.id, loaded);
+     this.update();
+    }).catch(() => {});
+    continue;
+   }
+   const model = conv ? this.chat.modelOf(conv) : record.model;
+   const value = window.Prices?.cost(model, spend);
+   if (value) { cost += value; runs++; }
+  }
+  return { cost, runs };
  }
 
  current() {
@@ -67,6 +120,7 @@ class ContextCircle {
   const show = state.tokens > 0 || state.context.messages.length > 0;
   this.button.hidden = !show;
   if (!show) return;
+  const parallel = this.parallelCost();
   const lapped = state.laps >= 1;
   this.button.classList.toggle('is-lapped', lapped);
   this.button.style.setProperty('--context-tone', this.tone(state));
@@ -80,20 +134,25 @@ class ContextCircle {
    this.fill.style.strokeDashoffset = `${(CIRCUMFERENCE * (1 - state.live)).toFixed(2)}`;
   }
   this.percent.textContent = lapped ? `${state.laps}×` : `${Math.round(state.live * 100)}%`;
-  // The price of this conversation, spelled under the ring: ~$3.05, or nothing when the
-  // model has no prices to go by.
-  const spent = state.cost != null && state.cost > 0 ? `~${window.Prices.format(state.cost)}` : '';
+  // The price under the ring is the whole tree's: this chat plus every parallel run it
+  // started (and their runs), so the number matches what the work really cost.
+  const total = (state.cost || 0) + parallel.cost;
+  const spent = total > 0 ? `~${window.Prices.format(total)}` : '';
   this.price.textContent = spent;
   this.price.hidden = !spent;
+  this.parallel = parallel;
   this.button.setAttribute('aria-label', I18n.t('context.title'));
   this.button.title = lapped
    ? I18n.t('context.hintLaps', { laps: state.laps, used: size(state.peak), window: size(state.windowSize) })
    : I18n.t('context.hint', { used: size(state.tokens), window: size(state.windowSize), percent: Math.round(state.live * 100) });
+  this.button.classList.toggle('has-parallel', parallel.runs > 0);
   if (this.panel.matches(':popover-open')) this.paint();
  }
 
  paint() {
   const { context, tokens, peak, windowSize, laps, live, cost } = this.current();
+  const parallel = this.parallel || this.parallelCost();
+  const total = (cost || 0) + parallel.cost;
   const spend = context.spend || {};
   const cached = Number(spend.cached) || 0, written = Number(spend.written) || 0;
   const reasoning = Number(spend.reasoning) || 0;
@@ -111,7 +170,8 @@ class ContextCircle {
    row('context.input', `${escapeHtml(size(fresh))} fresh${cached ? ` · ${escapeHtml(size(cached))} cached` : ''}`),
    row('context.output', `${escapeHtml(size(Math.max(0, out - reasoning)))}${reasoning ? ` · ${escapeHtml(size(reasoning))} reasoning` : ''}`),
    cache,
-   row('context.cost', cost != null ? `~${escapeHtml(window.Prices.format(cost))}` : escapeHtml(I18n.t('context.noPrice'))),
+   parallel.cost > 0 ? row('context.parallel', `~${escapeHtml(window.Prices.format(parallel.cost))} · ${parallel.runs}`) : '',
+   row('context.cost', total > 0 ? `~${escapeHtml(window.Prices.format(total))}` : escapeHtml(I18n.t('context.noPrice'))),
   ].join('');
  }
 }

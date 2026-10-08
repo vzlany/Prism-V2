@@ -48,6 +48,27 @@ function chunks(text) {
 
 const MAX_FILE = 9 * 1024 * 1024;
 
+// Which app conversation each posted finish message belongs to: replying to that message in
+// Discord continues the same chat. The bridge reads this file.
+const MAP_MAX = 400;
+const mapFile = () => path.join(app.getPath('userData'), 'discord-map.json');
+function loadMap() {
+ try { return JSON.parse(fs.readFileSync(mapFile(), 'utf8'))?.messages || {}; } catch { return {}; }
+}
+function remember(ids, chatId) {
+ try {
+  const map = loadMap();
+  const now = Date.now();
+  for (const id of ids) map[id] = { chat: chatId, at: now };
+  const kept = Object.entries(map)
+   .filter(([, entry]) => now - (Number(entry?.at) || 0) < 30 * 24 * 60 * 60 * 1000)
+   .sort((a, b) => (Number(b[1]?.at) || 0) - (Number(a[1]?.at) || 0))
+   .slice(0, MAP_MAX);
+  fs.mkdirSync(path.dirname(mapFile()), { recursive: true });
+  fs.writeFileSync(mapFile(), JSON.stringify({ version: 1, messages: Object.fromEntries(kept) }));
+ } catch {}
+}
+
 // Files the run produced (attach_file) ride along as real Discord attachments. Anything that
 // is missing or bigger than the safe upload size is skipped rather than failing the send.
 async function upload(token, channel, files) {
@@ -72,7 +93,7 @@ async function upload(token, channel, files) {
  return attached;
 }
 
-async function send(title, outcome, summary, files = []) {
+async function send(title, outcome, summary, files = [], chatId = '') {
  const p = load();
  if (!p.enabled || !p.token || !p.userId) return { ok: false, error: 'not configured' };
  try {
@@ -84,18 +105,30 @@ async function send(title, outcome, summary, files = []) {
   });
   if (!dm.ok) return { ok: false, error: `dm channel ${dm.status}` };
   const channel = (await dm.json()).id;
+  // Each posted message answers with its id: remembered so a reply to it can continue the
+  // app conversation it came from.
   const post = content => fetch(`https://discord.com/api/v10/channels/${channel}/messages`, {
    method: 'POST',
    headers,
    body: JSON.stringify({ content }),
-  }).then(res => res.ok, () => false);
+  }).then(async res => {
+   if (!res.ok) return '';
+   try { return (await res.json())?.id || ''; } catch { return ''; }
+  }, () => '');
   // The header and the first piece of the reply share a message when they fit together.
   const header = `**${String(title).slice(0, 120)}** — ${String(outcome || 'completed')}`;
   const parts = chunks(summary);
   let first = header;
   if (parts.length && first.length + 2 + parts[0].length <= 2000) first += `\n${parts.shift()}`;
-  let ok = await post(first);
-  for (const part of parts) ok = (await post(part)) && ok;
+  const ids = [];
+  const firstId = await post(first);
+  if (firstId) ids.push(firstId);
+  for (const part of parts) {
+   const id = await post(part);
+   if (id) ids.push(id);
+  }
+  const ok = ids.length > 0;
+  if (chatId && ids.length) remember(ids, chatId);
   const attached = await upload(p.token, channel, files);
   return { ok, ...(attached.length ? { attached } : {}) };
  } catch (error) {

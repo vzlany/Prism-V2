@@ -1595,6 +1595,8 @@ class Chat {
      outcome,
      summary: String(entry.content || '').trim().slice(0, 8000),
      files: (turn.files || []).map(file => file.path).filter(Boolean),
+     // Replying to that DM continues this exact conversation.
+     chatId: conv.record?.id || conv.id,
     });
    }
    window.ParallelRuns?.update(conv.id, { status: outcome, snippet: summary.slice(0, 140) });

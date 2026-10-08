@@ -681,8 +681,19 @@ async function handle(channel, message) {
   return void await post(channel, `🧠 model: \`${state.model}\``);
  }
 
+ // A reply to a finish DM continues the exact app conversation that notification came from.
+ const target = replyTarget(message?.message_reference?.message_id || message?.referenced_message?.id);
+ if (target) return void await replyInChat(channel, text, target);
+
  // The conversation this turn belongs to (a fresh one is made if none is chosen).
  const conversation = activeChat();
+ await runTurn(channel, text, conversation, saveConversation);
+}
+
+// One turn's Discord face: a "working…" placeholder that follows the status, thoughts and
+// actions (Full Display), then the answer edited into it. `save` decides where the turn is
+// written: the active Discord conversation, or an app chat a notification reply pointed at.
+async function runTurn(channel, text, conversation, save) {
  state.stopped = false;
  const placeholder = await api(`/channels/${channel}/messages`, { method: "POST", body: JSON.stringify({ content: "⏳ working…" }) });
  const placeholderId = (await placeholder.json().catch(() => ({})))?.id;
@@ -725,18 +736,76 @@ async function handle(channel, message) {
  try {
   const answer = await turn(text, display);
   setPresence(IDLE);
-  saveConversation(conversation, text, answer);
+  save(conversation, text, answer);
   if (placeholderId) await replyTo(channel, placeholderId, answer);
   else await post(channel, answer);
   log("replied:", answer.replace(/\s+/g, " ").slice(0, 100));
  } catch (error) {
   setPresence(IDLE);
-  saveConversation(conversation, text, "");
+  save(conversation, text, "");
   const note = `⚠️ ${error.message}`;
   if (placeholderId) await replyTo(channel, placeholderId, note);
   else await post(channel, note);
   log("failed:", error.message);
  }
+}
+
+// Finish notifications record the app chat behind every message they post; a reply to one of
+// them continues that conversation instead of the active Discord one.
+const replyMapFile = join(USER_DATA, "discord-map.json");
+function replyTarget(messageId) {
+ if (!messageId) return "";
+ try {
+  const map = JSON.parse(readFileSync(replyMapFile, "utf8"))?.messages || {};
+  return String(map[String(messageId)]?.chat || "");
+ } catch {
+  return "";
+ }
+}
+
+// If the app is running a turn in that chat, the bridge must not start a second one.
+function busyInApp(chatId) {
+ const runs = readJson(join(USER_DATA, "presence.json"), {})?.runs;
+ return Array.isArray(runs) && runs.some(run => run?.id === chatId && Date.now() - (Number(run.at) || 0) < 30000);
+}
+
+// The user replied to a finish DM: write the message into the app conversation (tagged as
+// coming from Discord, so the app and the web show it) and run the turn with that chat's
+// context. The answer comes back here, and the Discord conversation keeps its own state.
+async function replyInChat(channel, text, chatId) {
+ const record = readIndex().chats.find(chat => chat.id === chatId) || null;
+ if (!record) return void await post(channel, "That conversation is gone — start a new one with `!new`.");
+ if (busyInApp(chatId)) return void await post(channel, "Still working on that one — I'll answer here when it's done.");
+ const saved = { messages: state.messages, chatId: state.chatId, folder: state.folder };
+ state.messages = contextOf(readJson(chatFile(record.id), {}));
+ state.chatId = record.id;
+ state.folder = record.folder || saved.folder;
+ try {
+  await runTurn(channel, text, record, appendToChat);
+ } finally {
+  state.messages = saved.messages;
+  state.chatId = saved.chatId;
+  state.folder = saved.folder;
+  // turn() saves the state it ran with; put the Discord conversation back on disk.
+  savedState();
+ }
+}
+
+// The reply turn, written the way the app writes a chat: renderable messages with the
+// Discord origin on the user's line. No botContext here — the app's own history is the truth.
+function appendToChat(record, userText, answer) {
+ const body = readJson(chatFile(record.id), { version: 1 });
+ const messages = Array.isArray(body.messages) ? body.messages : [];
+ if (userText) messages.push({ role: "user", text: userText, content: userText, origin: "discord" });
+ if (answer) messages.push({ role: "assistant", content: answer });
+ const index = readIndex();
+ const chat = index.chats.find(item => item.id === record.id);
+ if (chat) {
+  chat.updated = Date.now();
+  writeIndex(index);
+ }
+ const { botContext, ...rest } = body;
+ writeJson(chatFile(record.id), { ...rest, version: 1, messages, tokens: Number(body.tokens) || 0 });
 }
 
 // --------------------------------------------------------------- run

@@ -444,6 +444,7 @@ const STRINGS = {
   'context.output': 'Tokens out',
   'context.cache': 'Cache',
   'context.cost': 'Price so far',
+  'context.parallel': 'Parallel runs',
   'context.noPrice': 'no price for this model',
   'model.confirm.title': 'Switch this chat to {name}?',
   'model.confirm.text': '{from} will compact the conversation first, so {to} can pick it up. Some details may get lost.',
