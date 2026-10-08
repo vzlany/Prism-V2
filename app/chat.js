@@ -303,6 +303,9 @@ class Chat {
   // When the last follow frame was scheduled: a frame that never ran (a hidden window, a
   // phone locked mid-reply) must not block every later one.
   this.followAt = 0;
+  // The spinner that covers the thread while a conversation is read from disk.
+  this.loadingEl = main.querySelector('.thread-loading');
+  this.loadingTimer = 0;
   this.resize = new ResizeObserver(() => {
    if (this.follow) {
     if (this.busy || performance.now() >= this.pinUntil) this.followBottom();
@@ -516,7 +519,7 @@ class Chat {
  open(id) {
   if (this.active?.id === id) return Promise.resolve();
   const token = ++this.opening;
-  let conv = this.conversations.get(id);
+  let conv = this.conversations.get(id), waiting = false;
   if (!conv) {
    const record = this.library.chat(id);
    if (!record) return Promise.resolve();
@@ -524,14 +527,38 @@ class Chat {
    this.conversations.set(id, conv);
    // A locked chat opens onto its lock screen; its messages are read only once the password is in.
    if (this.library.isLocked(id)) conv.locked = true;
-   else conv.ready = this.load(conv);
+   else {
+    conv.ready = this.load(conv);
+    waiting = true;
+   }
   }
+  if (waiting) this.loading(true);
   return Promise.resolve(conv.ready).then(() => {
    if (token !== this.opening) return;
+   this.loading(false);
    this.activate(conv);
    localStorage.setItem(LAST_CHAT, id);
    this.onChange();
+  }).catch(error => {
+   if (token === this.opening) this.loading(false);
+   throw error;
   });
+ }
+
+ // A conversation read from disk can take a moment. The spinner waits a beat before covering
+ // the thread, so switching between small chats never flashes it.
+ loading(show) {
+  clearTimeout(this.loadingTimer);
+  this.loadingTimer = 0;
+  if (!this.loadingEl) return;
+  if (!show) {
+   this.loadingEl.classList.remove('is-shown');
+   return;
+  }
+  this.loadingTimer = setTimeout(() => {
+   this.loadingTimer = 0;
+   this.loadingEl.classList.add('is-shown');
+  }, 180);
  }
 
  load(conv) {

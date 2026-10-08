@@ -1175,6 +1175,44 @@ body.is-resizing-sidebar .main {
   display: none;
 }
 
+/* Reading a conversation from disk can take a beat: a spinner covers the thread until its
+   messages are there, instead of an empty view that looks broken. */
+.thread-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  background: var(--chat-bg);
+  color: var(--fg-secondary);
+  font-size: 13px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .18s ease, visibility 0s linear .18s;
+  pointer-events: none;
+}
+
+.thread-loading.is-shown {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity .18s ease;
+}
+
+.thread-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(var(--fg-rgb), .16);
+  border-top-color: rgba(var(--fg-rgb), .8);
+  animation: thread-spin .8s linear infinite;
+}
+
+@keyframes thread-spin {
+  to { transform: rotate(360deg); }
+}
+
 .thread-list {
   display: flex;
   flex-direction: column;

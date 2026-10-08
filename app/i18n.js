@@ -9,6 +9,7 @@ const STRINGS = {
   'search.label': 'Search chats',
   'search.clear': 'Clear search',
   'chat.new': 'New chat',
+  'chat.loading': 'Loading conversation…',
   'chats.label': 'Chats',
   'chats.pinned': 'Pinned',
   'chats.folders': 'Folders',
