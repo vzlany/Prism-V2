@@ -147,7 +147,7 @@ class ThinkingView {
   this.place();
   this.el.classList.toggle('is-open', extended || this.open);
   this.head.setAttribute('aria-expanded', String(this.open));
-  this.name.textContent = I18n.t(this.live ? 'thinking.live' : 'thinking.done');
+  this.name.textContent = I18n.t(window.Effects?.simple ? 'thinking.simple' : (this.live ? 'thinking.live' : 'thinking.done'));
  }
 
  write(text, live) {

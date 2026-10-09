@@ -155,6 +155,22 @@ const ABSOLUTE_PATH = /^([a-zA-Z]:[\\/]|\\\\|\/)/;
 const withFolder = (file, folder) => (ABSOLUTE_PATH.test(String(file || '')) || !folder
  ? String(file || '')
  : `${String(folder).replace(/[\\/]+$/, '')}\\${String(file).replace(/^[\\/]+/, '')}`);
+
+// Simple visuals merges the tool calls of a part into one timeline line ("Explored 2 files,
+// Ran 13 commands") that expands to the single steps. Each tool falls in a bucket; the
+// bucket speaks in the progressive form while it works and the past form once it is done.
+const SIMPLE_BUCKET = {
+ read_file: 'explore', list_files: 'explore', video_frames: 'explore',
+ write_file: 'write', edit_file: 'write', patch: 'write',
+ run_powershell: 'run', git: 'run', http_request: 'run',
+ web_search: 'search',
+ screenshot: 'shot',
+};
+const SIMPLE_LABEL = {
+ running: { explore: 'Exploring {n} files', write: 'Writing {n} files', run: 'Running {n} commands', search: 'Searching the web', shot: 'Taking {n} screenshots' },
+ done: { explore: 'Explored {n} files', write: 'Wrote {n} files', run: 'Ran {n} commands', search: 'Searched the web', shot: 'Took {n} screenshots' },
+};
+const SIMPLE_ORDER = ['explore', 'write', 'run', 'search', 'shot'];
 function splitQuotes(text) {
  const quotes = [];
  let rest = text || '', m;
@@ -509,6 +525,107 @@ class Chat {
    new Promise(resolve => setTimeout(() => resolve('(the subagent is still working; its chat holds the progress)'), 20 * 60 * 1000)),
   ]);
   return String(report || '').slice(0, 6000);
+ }
+
+ // ---- Other agents: the 'agents' tool ----------------------------------------------------
+ // Lets any agent (main, subagent, or a subagent's subagent) see the other runs on this
+ // computer, read what one has answered — including runs that finished while nobody was
+ // looking — and send one a message, optionally waiting for the answer.
+ agentTarget(id, selfId) {
+  const wanted = String(id || '').trim();
+  const self = this.conversations.get(selfId);
+  const parentId = self?.record?.parent || '';
+  if (!wanted || wanted === 'main') {
+   if (parentId) return this.library.chat(parentId);
+   return self?.record || null;
+  }
+  return this.library.chat(wanted) || (selfId === wanted ? self?.record : null);
+ }
+
+ // Opens (or loads) a conversation without bringing it on screen.
+ async ensureConversation(id) {
+  let conv = this.conversations.get(id);
+  if (conv) return conv.locked ? null : conv;
+  const record = this.library.chat(id);
+  if (!record || this.library.isLocked(id)) return null;
+  conv = new Conversation(record);
+  this.conversations.set(id, conv);
+  conv.ready = this.load(conv);
+  await conv.ready.catch(() => {});
+  return conv.locked ? null : conv;
+ }
+
+ async agents(args = {}, toolId = '') {
+  const action = String(args.action || 'list').toLowerCase();
+  const selfId = this.toolConvs?.get(toolId) || this.active?.id || '';
+  if (action === 'read') {
+   const record = this.agentTarget(args.id, selfId);
+   if (!record) return 'No such agent — call agents list first.';
+   const conv = this.conversations.get(record.id);
+   let messages = conv?.messages;
+   if (!messages) messages = (await this.library.conversation(record.id).catch(() => ({ messages: [] }))).messages || [];
+   const written = messages.filter(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
+   if (!written.length) return `${record.title || record.id} has not written an answer yet.`;
+   const tail = written.slice(-2).map(message => String(message.content).trim()).join('\n\n— — —\n\n');
+   return `Newest from ${record.title || record.id}:\n${tail.slice(0, 6000)}`;
+  }
+  if (action === 'ask') {
+   const text = String(args.text || '').trim();
+   if (!text) return 'Put the message in text.';
+   const record = this.agentTarget(args.id, selfId);
+   if (!record) return 'No such agent — call agents list first.';
+   const conv = await this.ensureConversation(record.id);
+   if (!conv) return 'That conversation cannot be opened (it may be locked).';
+   const title = record.title || record.id;
+   const prompt = { text, attachments: [], origin: 'agent' };
+   if (conv.turn) this.interject(conv, prompt);
+   else {
+    const bubble = this.userMessage(prompt);
+    conv.list.append(bubble);
+    this.run(conv, prompt, this.config(conv), bubble);
+   }
+   if (args.wait === false) return `Message sent to ${title}.`;
+   const before = conv.messages.length, started = Date.now();
+   while (Date.now() - started < 120000) {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    const fresh = conv.messages.slice(before).filter(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
+    const last = fresh[fresh.length - 1];
+    if (last) return `Answer from ${title}:\n${String(last.content).trim().slice(0, 6000)}`;
+    if (!conv.turn && !conv.waiting) break;
+   }
+   const latest = [...conv.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
+   return `${title} is still working — your message is delivered.${latest ? ` Newest words so far:\n${String(latest.content).trim().slice(0, 2000)}` : ''}`;
+  }
+  // list
+  const self = this.conversations.get(selfId);
+  const parentId = self?.record?.parent || '';
+  const entries = new Map();
+  const add = record => {
+   if (!record || entries.has(record.id) || record.id === selfId) return;
+   const conv = this.conversations.get(record.id);
+   entries.set(record.id, {
+    id: record.id,
+    title: String(this.library.titleOf?.(record) || record.title || record.id).slice(0, 60),
+    model: conv ? this.modelOf(conv) : String(record.model || ''),
+    running: Boolean(conv?.turn) || Boolean(window.Presence?.isBusy?.(record.id)),
+    awaited: Boolean(conv?.awaitDone),
+    parent: record.parent || '',
+    updated: Number(record.updated) || 0,
+   });
+  };
+  if (parentId) add(this.library.chat(parentId));
+  for (const record of this.library.chats) if (record.parent || record.subagent) add(record);
+  const list = [...entries.values()].sort((a, b) => (Number(b.running) - Number(a.running)) || (b.updated - a.updated)).slice(0, 30);
+  if (!list.length) return 'No other agents exist in this workspace yet.';
+  const ago = ms => { const s = Math.max(1, Math.round(ms / 1000)); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`; };
+  const lines = list.map(entry => {
+   const flags = [];
+   if (entry.id === parentId) flags.push('the conversation that started you (main)');
+   if (entry.awaited) flags.push('someone is waiting for it to finish');
+   if (entry.parent && entry.id !== parentId) flags.push(`child of ${this.library.chat(entry.parent)?.title || entry.parent}`);
+   return `- ${entry.running ? 'RUNNING' : 'finished'} · ${entry.title} · ${entry.model || '—'} · ${ago(Date.now() - entry.updated)}${flags.length ? ` · ${flags.join('; ')}` : ''} · id ${entry.id}`;
+  });
+  return [`Agents in this workspace (${list.length}):`, ...lines, '', 'agents read <id> shows what one has written; agents ask <id> "…" sends it a message and waits for the answer (wait: false returns at once); "main" is the conversation that started you.'].join('\n');
  }
 
  // Sends the same prompt to several models at once: one chat per model, all running together.
@@ -1109,6 +1226,66 @@ class Chat {
 
  // The Runs tab follows a working run, not only its ending: the newest words of the reply go
  // into the run's snippet, throttled so the panel is not rebuilt for every token.
+ // ---- Simple visuals: one timeline line per stretch of tool calls ------------------------
+ // Every ordinary call joins the line drawn right above it, so consecutive steps read as one
+ // summarized row ("Ran 4 commands") that expands to the individual cards. A subagent box or
+ // anything else in between breaks the line, and a fresh one starts after it.
+ simpleGroup(view, name) {
+  if (!window.Effects?.simple || name === 'subagent') return null;
+  const kids = view.el.children;
+  let group = kids[kids.length - 1];
+  if (!group || !group.classList?.contains('tool-group')) {
+   group = document.createElement('div');
+   group.className = 'tool-group is-working';
+   group.innerHTML = '<button type="button" class="tool-group-head"><span class="tool-group-label"></span><span class="tool-chevron"></span></button><div class="tool-group-body"></div>';
+   group.__items = [];
+   const head = group.querySelector('.tool-group-head');
+   head.addEventListener('click', () => {
+    group.classList.toggle('is-open');
+    head.setAttribute('aria-expanded', String(group.classList.contains('is-open')));
+   });
+   view.el.append(group);
+  }
+  group.__items ||= [];
+  const item = { name, state: 'running', started: performance.now(), bucket: SIMPLE_BUCKET[name] || 'run' };
+  group.__items.push(item);
+  this.simpleLabel(group);
+  return { group, item };
+ }
+
+ simpleLabel(group) {
+  const items = group.__items || [];
+  const counts = new Map();
+  for (const item of items) counts.set(item.bucket, (counts.get(item.bucket) || 0) + 1);
+  const working = items.some(item => item.state === 'running');
+  const form = working ? SIMPLE_LABEL.running : SIMPLE_LABEL.done;
+  const parts = [];
+  for (const bucket of SIMPLE_ORDER) {
+   const n = counts.get(bucket);
+   const template = n && form[bucket];
+   if (template) parts.push(template.replace('{n}', String(n)));
+  }
+  group.querySelector('.tool-group-label').textContent = parts.join(', ') || (working ? 'Working…' : 'Done');
+  group.classList.toggle('is-working', working);
+  const chevron = group.querySelector('.tool-chevron');
+  if (chevron) chevron.hidden = !group.querySelector('.tool-group-body')?.childElementCount;
+ }
+
+ simpleDone(handle, ms, failed = false) {
+  const { group, item } = handle;
+  item.state = failed ? 'error' : 'done';
+  item.card?.setDuration(Math.max(1, Math.round(ms)));
+  if (failed) group.classList.add('has-error');
+  const body = group.querySelector('.tool-group-body');
+  if (body && !body.querySelector('.tool-group-done')) {
+   const done = document.createElement('div');
+   done.className = 'tool-group-done';
+   done.textContent = failed ? '↳ ⚠️ Stopped with an error' : '↳ ✔️ Done';
+   body.append(done);
+  }
+  this.simpleLabel(group);
+ }
+
  runSnippet(conv, text) {
   const run = window.ParallelRuns?.runs?.find(item => item.id === conv.id);
   if (!run || run.status !== 'running') return;
@@ -1338,8 +1515,11 @@ class Chat {
     if (entry.resume) out.push({ role: 'user', content: COMPACT.resume });
    } else if (entry.role === 'user') {
     const text = entry.content ?? entry.text ?? '';
-    // A message the user sent from Discord is marked, so the model knows where they are.
-    out.push({ role: 'user', content: entry.origin === 'discord' ? `[sent from Discord] ${text}` : text });
+    // A message from Discord or from another agent is marked, so the model knows who speaks.
+    const tagged = entry.origin === 'discord' ? `[sent from Discord] ${text}`
+     : entry.origin === 'agent' ? `[from another agent] ${text}`
+     : text;
+    out.push({ role: 'user', content: tagged });
    } else if (entry.role === 'assistant') {
     if (entry.steps) out.push(...entry.steps);
     else if (entry.content) out.push({ role: 'assistant', content: entry.content });
@@ -1494,11 +1674,15 @@ class Chat {
   }
   const described = name === 'ask_user' ? null : AgentTools.describe(name, args, cwd);
   const card = described ? new ToolCard({ ...described, tool: name }) : null;
+  // Simple visuals: ordinary calls join the timeline line above them; subagent boxes stay
+  // whole and a fresh line starts after them.
+  const simple = card ? this.simpleGroup(view, name) : null;
   if (card) {
-   view.el.append(card.el);
+   (simple ? simple.group.querySelector('.tool-group-body') : view.el).append(card.el);
    // The live mirror reads these back, so a card on another device wears the same icon.
    card.el.dataset.toolKind = described.kind || 'command';
    card.el.dataset.toolName = name;
+   if (simple) simple.item.card = card;
   }
   if (conv === this.active) this.followBottom();
   this.publishLive(conv, turn);
@@ -1524,14 +1708,17 @@ class Chat {
    };
    step();
   }
+  const began = performance.now();
   try {
    if (handed) {
     const now = await AgentTools.run('browser_snapshot', {}, { id, cwd });
     card?.setResult(now);
+    if (simple) this.simpleDone(simple, performance.now() - began);
     return `${TOOL_NOTES.handedBack}\n\n${now}`;
    }
    const output = await AgentTools.run(name, args, { id, cwd });
    card?.setResult(typeof output === 'string' ? output : output?.text);
+   if (simple) this.simpleDone(simple, performance.now() - began);
    this.publishLive(conv, turn);
    // Pictures a tool brought back belong in the chat too, not only in the model's context:
    // a screenshot or a look at a file should simply appear, with no link to copy.
@@ -1541,7 +1728,14 @@ class Chat {
      name: picture.label || `Picture ${n + 1}`,
      note: '',
     }));
-    view.el.append(new MediaSlider(pictures).el);
+    const slider = new MediaSlider(pictures);
+    if (simple && card) {
+     // The picture belongs to the step: opening its line shows the image itself.
+     card.inner.append(slider.el);
+     if (!card.touched) { card.open = true; card.sync(); }
+    } else {
+     view.el.append(slider.el);
+    }
     if (conv === this.active) this.followBottom();
    }
    // A finished file the agent attached (attach_file) is kept for the end of the turn: the
@@ -1558,6 +1752,7 @@ class Chat {
    return output;
   } catch (error) {
    card?.setResult(error.message, true);
+   if (simple) this.simpleDone(simple, performance.now() - began, true);
    this.publishLive(conv, turn);
    return `Error: ${error.message}`;
   } finally {

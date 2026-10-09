@@ -84,6 +84,8 @@ instructionsPill = new InstructionsPill({ button: document.querySelector('.compo
 planButton?.addEventListener('click', () => chat.setAgentMode(chat.agentMode === 'plan' ? 'build' : 'plan'));
 window.PrismPlan = { approve: () => chat.setAgentMode('build') };
 window.__prismSubagent = (label, prompt, toolId) => chat.deploySubagent(prompt, label, toolId);
+// The 'agents' tool: list the other agents, read one, or send one a message.
+window.__prismAgents = (args, toolId) => chat.agents(args, toolId);
 window.__prismChat = chat;
 new ParallelPanel({
  button: document.querySelector('.composer-parallel'),

@@ -8876,24 +8876,41 @@ body.has-lightbox{overflow:hidden}
 .tool-action{margin-left:6px;padding:2px 9px;border-radius:999px;background:rgba(var(--fg-rgb),.07);color:rgba(var(--fg-rgb),.72);font-size:11px;line-height:1.6;cursor:pointer;white-space:nowrap;transition:background-color .15s ease,color .15s ease}
 .tool-action:hover,.tool-action:focus-visible{background:rgba(var(--fg-rgb),.13);color:rgba(var(--fg-rgb),.95)}
 
-/* Simple visuals (Settings -> Interface): every tool call is one quiet line — icon, the
-   reason for the step, and an arrow that opens the details. No boxes while browsing. */
+/* Simple visuals (Settings -> Interface): tool calls are timeline lines — a group header
+   that summarizes the stretch ("Explored 2 files, Ran 13 commands"), the single steps when
+   it is opened, and no frames anywhere. Subagent boxes keep their full card. */
 .tool-reason{display:none}
-html.is-simple .tool{background:transparent;box-shadow:none;border-radius:0;margin:1px 0;animation:none}
-html.is-simple .tool .tool-snake{display:none}
-html.is-simple .tool .tool-head{height:26px;padding:0 4px;gap:8px}
-html.is-simple .tool .tool-head:hover{background:rgba(var(--fg-rgb),.05);border-radius:8px}
-html.is-simple .tool .tool-title,
-html.is-simple .tool .tool-summary,
-html.is-simple .tool .tool-stat,
-html.is-simple .tool .tool-status{display:none}
-html.is-simple .tool .tool-reason{display:block;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--fg-secondary)}
-html.is-simple .tool .tool-chevron{opacity:.75}
-html.is-simple .tool.is-error .tool-reason{color:rgb(var(--danger-rgb))}
-html.is-simple .tool .tool-body .tool-code,
-html.is-simple .tool .tool-body .tool-diff,
-html.is-simple .tool .tool-body .tool-output{border-radius:10px}
-html.is-simple .tool .tool-body{margin-top:2px}
+.tool-group{margin:2px 0}
+.tool-group-body{display:none}
+.tool-group.is-open .tool-group-body{display:block}
+.tool-group-head{display:flex;align-items:center;gap:8px;width:100%;height:24px;padding:0 4px;border:0;border-radius:7px;background:transparent;color:inherit;font:inherit;font-size:12.5px;cursor:pointer}
+.tool-group-head:hover{background:rgba(var(--fg-rgb),.05)}
+.tool-group-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;color:var(--fg-secondary)}
+/* While the stretch works, its label is a gradient moving left to right, like OpenCode's;
+   the moment it is done the words turn past tense and the gradient stops. */
+.tool-group.is-working .tool-group-label{background:linear-gradient(90deg, rgba(var(--fg-rgb),.45), rgba(var(--fg-rgb),1), rgba(var(--fg-rgb),.45));background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:simple-shimmer 1.6s linear infinite}
+@keyframes simple-shimmer{from{background-position:120% 0}to{background-position:-120% 0}}
+.tool-group .tool-chevron{transition:transform .18s ease}
+.tool-group.is-open .tool-chevron{transform:rotate(90deg)}
+.tool-group-done{padding:2px 0 3px 18px;font-size:12px;color:var(--fg-tertiary)}
+/* The rail: consecutive thoughts and tool lines hang from one vertical line. */
+html.is-simple .tool-group{border-left:2px solid rgba(var(--fg-rgb),.14);margin-left:3px;padding-left:10px}
+html.is-simple .message-thinking{border-left:2px solid rgba(var(--fg-rgb),.14);margin:2px 0 2px 3px;padding-left:10px;background:transparent;box-shadow:none}
+html.is-simple .message-thinking-head{height:24px;padding:0 2px}
+/* The steps inside a line: no frame, the reason and the time, each expandable. */
+html.is-simple .tool-group .tool:not(.is-parallel){background:transparent;box-shadow:none;border-radius:0;margin:1px 0;animation:none}
+html.is-simple .tool-group .tool:not(.is-parallel) .tool-snake{display:none}
+html.is-simple .tool-group .tool:not(.is-parallel) .tool-head{height:24px;padding:0 2px;gap:7px;border-radius:7px}
+html.is-simple .tool-group .tool:not(.is-parallel) .tool-head:hover{background:rgba(var(--fg-rgb),.05)}
+html.is-simple .tool-group .tool:not(.is-parallel) .tool-title,
+html.is-simple .tool-group .tool:not(.is-parallel) .tool-summary,
+html.is-simple .tool-group .tool:not(.is-parallel) .tool-stat,
+html.is-simple .tool-group .tool:not(.is-parallel) .tool-status{display:none}
+html.is-simple .tool-group .tool:not(.is-parallel) .tool-reason{display:inline;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--fg-secondary)}
+html.is-simple .tool-group .tool:not(.is-parallel) .tool-reason::before{content:"•";margin-right:6px;color:var(--fg-tertiary)}
+html.is-simple .tool-group .tool:not(.is-parallel) .tool-time{display:inline;font-size:11px;color:var(--fg-tertiary);white-space:nowrap}
+html.is-simple .tool-group .tool:not(.is-parallel) .tool-chevron{opacity:.6}
+html.is-simple .tool-group .tool.is-error:not(.is-parallel) .tool-reason{color:rgb(var(--danger-rgb))}
 .tool.is-running .tool-open{background:rgba(138,180,255,.16);color:#cfe0ff}
 /* The live clock beside Open on a subagent card: how long it has been working. */
 .tool-timer{margin-left:2px;font-family:var(--mono-font);font-size:11px;color:var(--fg-tertiary);font-variant-numeric:tabular-nums;white-space:nowrap}

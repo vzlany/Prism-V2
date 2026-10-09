@@ -30,11 +30,13 @@ function lines(text, sign, className) {
 class ToolCard {
  constructor(info) {
   this.info = info || {};
-  // Simple visuals shows one collapsed line per call; the settings' "stay open" does not
-  // apply there.
-  this.open = window.Effects?.simple ? false : window.Effects?.toolsMode !== 'closed';
+  this.parallel = info?.tool === 'subagent';
+  // Simple visuals shows one collapsed line per call (subagent boxes keep their big form);
+  // the settings' "stay open" does not apply to the simple lines.
+  this.plain = Boolean(window.Effects?.simple) && !this.parallel;
+  this.open = this.plain ? false : window.Effects?.toolsMode !== 'closed';
   this.touched = false;
-  const el = this.el = element('div', `tool is-running${this.open ? ' is-open' : ''}`);
+  const el = this.el = element('div', `tool is-running${this.parallel ? ' is-parallel' : ''}${this.open ? ' is-open' : ''}`);
   el.setAttribute('role', 'group');
   el.insertAdjacentHTML('afterbegin', SNAKE);
   this.head = element('button', 'tool-head');
@@ -54,15 +56,17 @@ class ToolCard {
   if (this.added) this.stat.append(element('span', 'tool-stat-num is-add', `+${this.added}`));
   this.stat.hidden = !this.added && !this.removed;
   this.status = element('span', 'tool-status');
+  // Simple visuals shows how long the step took beside its line ("(5.2s)").
+  this.timeEl = element('span', 'tool-time');
+  this.timeEl.hidden = true;
   this.chevron = element('span', 'tool-chevron');
   // A parallel (subagent) card shows a spinning blue circle before its icon while it works;
   // ordinary tools already have the snake around the card, so no space is wasted on them.
-  const parallel = info?.tool === 'subagent';
-  this.spinner = parallel ? element('span', 'tool-spinner') : null;
+  this.spinner = this.parallel ? element('span', 'tool-spinner') : null;
   const head = this.spinner ? [this.spinner, icon] : [icon];
   // The simple line: the reason the model gave for the step, falling back to the plain title.
   this.reasonEl = element('span', 'tool-reason', String(this.info.reason || this.titleOf() || '').slice(0, 90));
-  this.head.append(...head, element('span', 'tool-title', this.titleOf()), this.reasonEl, this.summary, this.stat, this.status, this.chevron);
+  this.head.append(...head, element('span', 'tool-title', this.titleOf()), this.reasonEl, this.summary, this.stat, this.status, this.timeEl, this.chevron);
   this.body = element('div', 'tool-body');
   this.inner = element('div', 'tool-body-inner');
   this.body.append(this.inner);
@@ -110,8 +114,15 @@ class ToolCard {
   const text = String(output ?? '');
   const shown = text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n… (${text.length - OUTPUT_CHARS} more characters)` : text;
   if (shown.trim()) this.inner.append(element('pre', `tool-output${error ? ' is-error' : ''}`, shown));
-  if (!this.touched) this.open = Boolean(error) || (!window.Effects?.simple && window.Effects?.toolsMode === 'open');
+  if (!this.touched) this.open = Boolean(error) || (!this.plain && window.Effects?.toolsMode === 'open');
   this.sync();
+ }
+
+ // How long the step took, shown beside a Simple visuals line.
+ setDuration(ms) {
+  if (!this.timeEl || !Number.isFinite(ms)) return;
+  this.timeEl.textContent = ms >= 1000 ? `(${(ms / 1000).toFixed(1)}s)` : `(${Math.max(1, Math.round(ms))}ms)`;
+  this.timeEl.hidden = false;
  }
 
  sync() {

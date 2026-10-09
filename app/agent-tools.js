@@ -112,6 +112,12 @@ const SCHEMAS = [
   description: { type: 'string', description: 'Short label for the task, shown to the user' },
   prompt: { type: 'string', description: 'The complete instructions for the subagent' },
  }, ['description', 'prompt']),
+ fn('agents', 'Work with the other agents on this computer: list the parallel runs and subagents (running or finished) and what they are doing, read what one has answered, or send one a message. The conversation that started you is "main". Use it to check what children are doing, to see what a run finished while you were away, or — as a subagent — to ask the main agent a question and wait for the answer. Kids: keep messages short and specific; do not ask the same thing twice.', {
+  action: { type: 'string', enum: ['list', 'read', 'ask'], description: 'list: who exists and their state; read: what one agent has written; ask: send it a message (waits for the answer unless wait is false)' },
+  id: { type: 'string', description: 'The agent to read or ask: an id from agents list, or "main" for the conversation that started you' },
+  text: { type: 'string', description: 'The message to send (ask), one short paragraph' },
+  wait: { type: 'boolean', description: 'Wait for the answer, up to two minutes (ask, default true)' },
+ }, ['action']),
  fn('ask_user', 'Ask the user to choose before you continue. Shows a card with lettered options (a, b, c, …) and a field for their own answer, and waits for the choice. Use it for decisions that are genuinely up to the user — which approach, which name, plan approval — never for things you can look up yourself. Give two to four short options, mark the one you recommend with recommended: true (it is picked automatically after three minutes if the user stays away), and for a "go ahead" choice, set its value to exactly "build".', {
   question: { type: 'string', description: 'The question, one short line' },
   options: {
@@ -349,7 +355,7 @@ function describeTool(name, args, cwd) {
   case 'video_frames': return args.save_to
    ? { kind: 'file', title: I18n.t('approve.frames'), path, text: I18n.t('approve.framesTo', { folder: relative(cwd, args.save_to) }) }
    : { kind: 'file', title: I18n.t('approve.video'), path };
-  case 'subagent': return { kind: 'command', title: I18n.t('subagent.title'), code: String(args.description || '') };
+  case 'subagent': return { kind: 'command', title: I18n.t('subagent.parallel'), code: String(args.description || '') };
   case 'ask_user': return { kind: 'command', title: I18n.t('ask.title'), code: String(args.question || '') };
   case 'screenshot': return { kind: 'command', title: I18n.t(args.window ? 'approve.screenshotWindow' : 'approve.screenshot'), code: String(args.window ? args.window : '') };
   case 'clipboard': return { kind: 'command', title: I18n.t(String(args.action || '').toLowerCase() === 'write' ? 'approve.clipboardWrite' : 'approve.clipboardRead'), code: String(args.text || '').slice(0, 200) };
@@ -377,7 +383,9 @@ function describeTool(name, args, cwd) {
 // shows the reason as the whole line; the normal card ignores it.
 function describe(name, args, cwd) {
  const info = describeTool(name, args, cwd) || {};
- const reason = String(args?.reason || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+ let reason = String(args?.reason || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+ // Some steps describe themselves: a screenshot names what it captured.
+ if (!reason && name === 'screenshot') reason = args.window ? `Took screenshot of ${args.window}` : 'Took screenshot of the screen';
  if (reason) info.reason = reason;
  return info;
 }
@@ -574,6 +582,10 @@ window.AgentTools = {
    const report = await window.__prismSubagent?.(String(args.description ?? ''), String(args.prompt ?? ''), id);
    if (!report) return 'The subagent could not be started.';
    return `Subagent "${String(args.description ?? 'task')}" finished. Its report:\n${report}`;
+  }
+  if (name === 'agents') {
+   const reply = await window.__prismAgents?.(args, id);
+   return reply || 'The agent list is only available inside the app.';
   }
   if (name === 'ask_user') {
    if (!window.QuestionCard) return 'The question card is not available in this build.';
