@@ -317,15 +317,23 @@ class Library {
  async conversation(id) {
   const data = await this.store.read(`chats/${id}`).catch(() => null);
   const body = data?.sealed ? await ChatLock.open(this.keys.get(id), data.sealed) : data;
-  return { messages: Array.isArray(body?.messages) ? body.messages : [], tokens: Number(body?.tokens) || 0, spend: body?.spend || null };
+  return { messages: Array.isArray(body?.messages) ? body.messages : [], tokens: Number(body?.tokens) || 0, spend: body?.spend || null, todos: Array.isArray(body?.todos) ? body.todos : [] };
  }
 
  // A protected chat is sealed with the key it has when the save is asked for, so locking right after a reply loses nothing.
- saveMessages(id, messages, tokens = 0, spend = null) {
+ // The todo list rides along; a call that does not pass one keeps whatever the file has.
+ saveMessages(id, messages, tokens = 0, spend = null, todos = null) {
   const chat = this.chat(id), key = chat?.lock ? this.keys.get(id) : null;
   if (!chat || (chat.lock && !key)) return Promise.resolve();
-  const body = { messages, tokens, ...(spend ? { spend } : {}) };
-  return this.queue(id, async () => this.store.write(`chats/${id}`, key ? { version: 1, sealed: await ChatLock.seal(key, body) } : { version: 1, ...body }));
+  return this.queue(id, async () => {
+   let kept = null;
+   if (todos === null && !key) {
+    const previous = await this.store.read(`chats/${id}`).catch(() => null);
+    kept = Array.isArray(previous?.todos) ? previous.todos : null;
+   }
+   const body = { messages, tokens, ...(spend ? { spend } : {}), ...(todos ? { todos } : kept ? { todos: kept } : {}) };
+   return this.store.write(`chats/${id}`, key ? { version: 1, sealed: await ChatLock.seal(key, body) } : { version: 1, ...body });
+  });
  }
 
  // Writes of one chat's messages go out one after another, in the order they were asked for.

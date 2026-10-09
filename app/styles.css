@@ -8911,6 +8911,28 @@ html.is-simple .tool-group .tool:not(.is-parallel) .tool-reason::before{content:
 html.is-simple .tool-group .tool:not(.is-parallel) .tool-time{display:inline;font-size:11px;color:var(--fg-tertiary);white-space:nowrap}
 html.is-simple .tool-group .tool:not(.is-parallel) .tool-chevron{opacity:.6}
 html.is-simple .tool-group .tool.is-error:not(.is-parallel) .tool-reason{color:rgb(var(--danger-rgb))}
+html.is-simple .tool-group.has-error .tool-group-label{background:none;background-clip:border-box;-webkit-background-clip:border-box;color:rgb(var(--danger-rgb));animation:none}
+html.is-simple .tool-group-done.is-error{color:rgb(var(--danger-rgb))}
+
+/* The todo box: one rounded card that stays with the conversation. Gray ring = not started,
+   spinning white ring = working on it, green check = done, red cross = failed. */
+.todo-card{margin:8px 0;padding:12px 14px 10px;border-radius:14px;background:rgba(var(--fg-rgb),.045);box-shadow:inset 0 0 0 1px rgba(var(--fg-rgb),.08)}
+.todo-head{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.todo-icon{display:grid;place-items:center;width:17px;height:17px;color:rgba(var(--fg-rgb),.8)}
+.todo-icon svg{display:block;width:100%;height:100%}
+.todo-title{font-size:13.5px;font-weight:650;color:rgba(var(--fg-rgb),.92)}
+.todo-count{font-size:11px;padding:1px 7px;border-radius:999px;background:rgba(var(--fg-rgb),.08);color:var(--fg-secondary)}
+.todo-body{display:flex;flex-direction:column;gap:7px}
+.todo-row{display:flex;align-items:flex-start;gap:10px;font-size:12.8px;line-height:1.45;color:rgba(var(--fg-rgb),.8)}
+.todo-mark{flex:none;box-sizing:border-box;width:16px;height:16px;margin-top:1px;border-radius:50%;box-shadow:inset 0 0 0 1.6px rgba(var(--fg-rgb),.3);display:grid;place-items:center;color:#0b0d12}
+.todo-mark svg{width:9px;height:9px;display:block}
+.todo-row.is-done{color:rgba(var(--fg-rgb),.42);text-decoration:line-through}
+.todo-row.is-done .todo-mark{background:rgb(46,184,92);box-shadow:none}
+.todo-row.is-failed{color:rgb(var(--danger-rgb))}
+.todo-row.is-failed .todo-mark{background:rgb(226,62,62);box-shadow:none;color:#fff}
+.todo-row.is-doing{color:rgba(var(--fg-rgb),.96)}
+.todo-row.is-doing .todo-mark{box-shadow:none;border:1.6px solid rgba(var(--fg-rgb),.85);border-top-color:transparent;animation:todo-spin .8s linear infinite}
+@keyframes todo-spin{to{transform:rotate(360deg)}}
 .tool.is-running .tool-open{background:rgba(138,180,255,.16);color:#cfe0ff}
 /* The live clock beside Open on a subagent card: how long it has been working. */
 .tool-timer{margin-left:2px;font-family:var(--mono-font);font-size:11px;color:var(--fg-tertiary);font-variant-numeric:tabular-nums;white-space:nowrap}

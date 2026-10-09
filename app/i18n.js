@@ -229,6 +229,7 @@ const STRINGS = {
   'plan.hintOff': 'Building: the agent may change files. Click for Plan.',
   'subagent.title': 'Subagent',
   'subagent.parallel': 'Using Parallel',
+  'todo.title': 'Todos',
   'thinking.simple': 'Thought Process',
   'subagent.open': 'Open',
   'subagent.running': 'How long this subagent has been working',

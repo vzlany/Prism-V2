@@ -154,5 +154,33 @@ class ToolCard {
  }
 }
 
+// The live todo list: one box that stays with the conversation. A step is a gray circle
+// (not started), a spinning white circle (working on it), a green check (done) or a red
+// cross (failed).
+const TODO_GLYPH = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h7.5A2.5 2.5 0 0 1 13 5v7.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V2.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.4 6.4h5.2M5.4 9h5.2M5.4 11.6h3.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+const TODO_CHECK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.6 6.3 5 8.7l4.4-5.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const TODO_CROSS = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3.2 3.2l5.6 5.6M8.8 3.2 3.2 8.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>';
+
+class TodoCard {
+ constructor(items) {
+  const el = this.el = element('div', 'todo-card');
+  const head = element('div', 'todo-head');
+  const icon = element('span', 'todo-icon');
+  icon.innerHTML = TODO_GLYPH;
+  head.append(icon, element('span', 'todo-title', I18n.t('todo.title')), element('span', 'todo-count', String(items.length)));
+  const body = element('div', 'todo-body');
+  for (const item of items) {
+   const row = element('div', `todo-row is-${item.state || 'idle'}`);
+   const mark = element('span', 'todo-mark');
+   if (item.state === 'done') mark.innerHTML = TODO_CHECK;
+   else if (item.state === 'failed') mark.innerHTML = TODO_CROSS;
+   row.append(mark, element('span', 'todo-text', item.text));
+   body.append(row);
+  }
+  el.append(head, body);
+ }
+}
+
 window.ToolCard = ToolCard;
+window.TodoCard = TodoCard;
 })();

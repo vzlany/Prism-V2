@@ -112,6 +112,15 @@ const SCHEMAS = [
   description: { type: 'string', description: 'Short label for the task, shown to the user' },
   prompt: { type: 'string', description: 'The complete instructions for the subagent' },
  }, ['description', 'prompt']),
+ fn('todo', 'Keep the to-do list of a non-trivial task on screen so you (and the user) never lose the thread. Create it once with the steps in order when the work has more than a couple of moves; mark the step you are on with doing, the ones that finished with done and the ones that failed with failed; add or reword steps with edit as you learn more, and view reads it back. The box stays with the conversation and moves to the newest position every time you change it. Small jobs do not need it.', {
+  action: { type: 'string', enum: ['create', 'view', 'edit', 'done'], description: 'create: set the whole list; edit: add, reword or drop steps; done: mark steps doing/done/failed; view: read it back' },
+  items: { type: 'array', items: { type: 'string' }, description: 'create: the steps in order; edit: steps to add' },
+  update: { type: 'array', items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] }, description: 'edit: reword a step' },
+  remove: { type: 'array', items: { type: 'string' }, description: 'edit: drop steps' },
+  doing: { type: 'array', items: { type: 'string' }, description: 'done: the step(s) you are working on right now' },
+  done: { type: 'array', items: { type: 'string' }, description: 'done: the step(s) that finished' },
+  failed: { type: 'array', items: { type: 'string' }, description: 'done: the step(s) that failed' },
+ }, ['action']),
  fn('agents', 'Work with the other agents on this computer: list the parallel runs and subagents (running or finished) and what they are doing, read what one has answered, or send one a message. The conversation that started you is "main". Use it to check what children are doing, to see what a run finished while you were away, or — as a subagent — to ask the main agent a question and wait for the answer. Kids: keep messages short and specific; do not ask the same thing twice.', {
   action: { type: 'string', enum: ['list', 'read', 'ask'], description: 'list: who exists and their state; read: what one agent has written; ask: send it a message (waits for the answer unless wait is false)' },
   id: { type: 'string', description: 'The agent to read or ask: an id from agents list, or "main" for the conversation that started you' },
@@ -586,6 +595,10 @@ window.AgentTools = {
   if (name === 'agents') {
    const reply = await window.__prismAgents?.(args, id);
    return reply || 'The agent list is only available inside the app.';
+  }
+  if (name === 'todo') {
+   const reply = await window.__prismTodo?.(args, id);
+   return reply || 'The todo list is only available inside the app.';
   }
   if (name === 'ask_user') {
    if (!window.QuestionCard) return 'The question card is not available in this build.';

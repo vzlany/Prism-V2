@@ -142,6 +142,8 @@ const join = (base, text) => [base.trimEnd(), text.trim()].filter(Boolean).join(
 // `@file: C:\path\shot.png` lines inside it become attachments, the rest is the message.
 const DISCORD_BLOCK = /<send_discord_message>([\s\S]*?)<\/send_discord_message>/gi;
 const DISCORD_FILE = /^@(?:file|image|attach)\s*:\s*(.+)$/i;
+// The agent can write to another agent from its text: <write-message_ID>…</write-message_ID>.
+const AGENT_BLOCK = /<write-message[_-]([a-z0-9-]+)>([\s\S]*?)<\/write-message[_-]\1>/gi;
 function parseDiscordBlock(inner) {
  const files = [], kept = [];
  for (const line of String(inner || '').replace(/\r/g, '').split('\n')) {
@@ -507,7 +509,7 @@ class Chat {
   const record = this.library.create({ folder, text: label || promptText, attachments: [] });
   // The card that started it can open it: the tool run's id leads back to this conversation.
   if (toolId) (this.subagents ||= new Map()).set(toolId, record.id);
-  this.library.update(record.id, { model: this.modelOf(parent), subagent: true, named: true, title: String(label || 'Subagent task').slice(0, 80), parent: parent.record.id });
+  this.library.update(record.id, { model: this.modelOf(parent), subagent: true, named: true, title: String(label || 'Subagent task').slice(0, 80), parent: parent.record.id, task: String(promptText || '').replace(/\s+/g, ' ').trim().slice(0, 300) });
   const conv = new Conversation(record);
   conv.subagent = true;
   conv.folder = { path: folder.path, name: folder.name };
@@ -542,6 +544,34 @@ class Chat {
   return this.library.chat(wanted) || (selfId === wanted ? self?.record : null);
  }
 
+ // One agent writing to another: the message lands in the target chat (tagged Agent, with
+ // the sender remembered), queued when the target is mid-work, otherwise it starts a turn.
+ async sendAgentMessage(targetId, text, selfId, { wait = true } = {}) {
+  const record = this.library.chat(targetId);
+  if (!record) return 'No such agent — call agents list first.';
+  const conv = await this.ensureConversation(targetId);
+  if (!conv) return 'That conversation cannot be opened (it may be locked).';
+  const title = record.title || record.id;
+  const prompt = { text, attachments: [], origin: 'agent', from: selfId || '' };
+  if (conv.turn) this.interject(conv, prompt);
+  else {
+   const bubble = this.userMessage(prompt);
+   conv.list.append(bubble);
+   this.run(conv, prompt, this.config(conv), bubble);
+  }
+  if (!wait) return `Message sent to ${title}.`;
+  const before = conv.messages.length, started = Date.now();
+  while (Date.now() - started < 120000) {
+   await new Promise(resolve => setTimeout(resolve, 1500));
+   const fresh = conv.messages.slice(before).filter(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
+   const last = fresh[fresh.length - 1];
+   if (last) return `Answer from ${title}:\n${String(last.content).trim().slice(0, 6000)}`;
+   if (!conv.turn && !conv.waiting) break;
+  }
+  const latest = [...conv.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
+  return `${title} is still working — your message is delivered.${latest ? ` Newest words so far:\n${String(latest.content).trim().slice(0, 2000)}` : ''}`;
+ }
+
  // Opens (or loads) a conversation without bringing it on screen.
  async ensureConversation(id) {
   let conv = this.conversations.get(id);
@@ -574,27 +604,7 @@ class Chat {
    if (!text) return 'Put the message in text.';
    const record = this.agentTarget(args.id, selfId);
    if (!record) return 'No such agent — call agents list first.';
-   const conv = await this.ensureConversation(record.id);
-   if (!conv) return 'That conversation cannot be opened (it may be locked).';
-   const title = record.title || record.id;
-   const prompt = { text, attachments: [], origin: 'agent' };
-   if (conv.turn) this.interject(conv, prompt);
-   else {
-    const bubble = this.userMessage(prompt);
-    conv.list.append(bubble);
-    this.run(conv, prompt, this.config(conv), bubble);
-   }
-   if (args.wait === false) return `Message sent to ${title}.`;
-   const before = conv.messages.length, started = Date.now();
-   while (Date.now() - started < 120000) {
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    const fresh = conv.messages.slice(before).filter(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
-    const last = fresh[fresh.length - 1];
-    if (last) return `Answer from ${title}:\n${String(last.content).trim().slice(0, 6000)}`;
-    if (!conv.turn && !conv.waiting) break;
-   }
-   const latest = [...conv.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
-   return `${title} is still working — your message is delivered.${latest ? ` Newest words so far:\n${String(latest.content).trim().slice(0, 2000)}` : ''}`;
+   return this.sendAgentMessage(record.id, text, selfId, { wait: args.wait !== false });
   }
   // list
   const self = this.conversations.get(selfId);
@@ -626,6 +636,59 @@ class Chat {
    return `- ${entry.running ? 'RUNNING' : 'finished'} · ${entry.title} · ${entry.model || '—'} · ${ago(Date.now() - entry.updated)}${flags.length ? ` · ${flags.join('; ')}` : ''} · id ${entry.id}`;
   });
   return [`Agents in this workspace (${list.length}):`, ...lines, '', 'agents read <id> shows what one has written; agents ask <id> "…" sends it a message and waits for the answer (wait: false returns at once); "main" is the conversation that started you.'].join('\n');
+ }
+
+ // ---- The todo tool ----------------------------------------------------------------------
+ // One live list per conversation, drawn as a single box that moves to the newest position
+ // every time it changes. A step is idle (gray circle), doing (spinning white circle),
+ // done (green check) or failed (red cross).
+ async todo(args = {}, toolId = '') {
+  const selfId = this.toolConvs?.get(toolId) || this.active?.id || '';
+  const conv = this.conversations.get(selfId) || this.active;
+  if (!conv) return 'There is no conversation to keep a todo list in.';
+  const action = String(args.action || 'view').toLowerCase();
+  const items = () => (conv.todos ||= []);
+  const locate = text => {
+   const wanted = String(text || '').trim().toLowerCase();
+   if (!wanted) return -1;
+   const exact = items().findIndex(item => item.text.trim().toLowerCase() === wanted);
+   if (exact >= 0) return exact;
+   const part = items().findIndex(item => item.text.trim().toLowerCase().includes(wanted));
+   if (part >= 0) return part;
+   return items().findIndex(item => wanted.includes(item.text.trim().toLowerCase()));
+  };
+  if (action === 'create') {
+   conv.todos = (Array.isArray(args.items) ? args.items : []).map(text => ({ text: String(text).trim(), state: 'idle' })).filter(item => item.text);
+  } else if (action === 'edit') {
+   for (const text of Array.isArray(args.remove) ? args.remove : []) { const at = locate(text); if (at >= 0) items().splice(at, 1); }
+   for (const pair of Array.isArray(args.update) ? args.update : []) { const at = locate(pair?.from); if (at >= 0 && String(pair?.to || '').trim()) items()[at].text = String(pair.to).trim(); }
+   for (const text of Array.isArray(args.items) ? args.items : []) { const value = String(text).trim(); if (value && locate(value) < 0) items().push({ text: value, state: 'idle' }); }
+  } else if (action === 'done') {
+   const mark = (list, state) => { for (const text of Array.isArray(list) ? list : []) { const at = locate(text); if (at >= 0) items()[at].state = state; } };
+   if (Array.isArray(args.doing)) for (const item of items()) if (item.state === 'doing') item.state = 'idle';
+   mark(args.doing, 'doing');
+   mark(args.done, 'done');
+   mark(args.failed, 'failed');
+  }
+  this.renderTodos(conv);
+  if (conv.record) this.save(conv);
+  const list = items();
+  if (!list.length) return 'The todo list is empty.';
+  const sign = { idle: '[ ]', doing: '[~]', done: '[x]', failed: '[!]' };
+  const done = list.filter(item => item.state === 'done').length;
+  return `Todo (${done}/${list.length} done):\n${list.map(item => `${sign[item.state] || '[ ]'} ${item.text}`).join('\n')}`;
+ }
+
+ // The one todo box: removed and put back at the end of the conversation on every change, so
+ // it always sits at the newest position.
+ renderTodos(conv) {
+  if (!conv) return;
+  conv.todoCard?.remove();
+  conv.todoCard = null;
+  if (!conv.todos?.length) return;
+  conv.todoCard = new TodoCard(conv.todos);
+  conv.list.append(conv.todoCard.el);
+  if (conv === this.active) this.followBottom();
  }
 
  // Sends the same prompt to several models at once: one chat per model, all running together.
@@ -712,11 +775,13 @@ class Chat {
  }
 
  load(conv) {
-  return this.library.conversation(conv.id).then(({ messages, tokens, spend }) => {
+  return this.library.conversation(conv.id).then(({ messages, tokens, spend, todos }) => {
    conv.messages = messages;
    conv.tokens = tokens;
    conv.spend = spend || null;
+   conv.todos = Array.isArray(todos) ? todos : [];
    this.restore(conv);
+   this.renderTodos(conv);
   });
  }
 
@@ -1224,6 +1289,24 @@ class Chat {
   part.entry.content = content.replace(DISCORD_BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
  }
 
+ // A finished <write-message_ID> block: delivered to that agent as its own chat message and
+ // removed from the reply. The sender does not wait here — use the agents tool when you want
+ // the answer back.
+ flushAgentMessages(conv, part) {
+  const content = String(part.entry.content || '');
+  if (!/<write-message[_-]/i.test(content)) return;
+  const pending = [];
+  let match;
+  AGENT_BLOCK.lastIndex = 0;
+  while ((match = AGENT_BLOCK.exec(content))) pending.push({ id: match[1], text: String(match[2] || '').trim() });
+  if (!pending.length) return;
+  for (const message of pending) {
+   if (!message.text || !this.library.chat(message.id)) continue;
+   this.sendAgentMessage(message.id, message.text, conv.record?.id || conv.id, { wait: false }).catch(() => {});
+  }
+  part.entry.content = content.replace(AGENT_BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
+ }
+
  // The Runs tab follows a working run, not only its ending: the newest words of the reply go
  // into the run's snippet, throttled so the panel is not rebuilt for every token.
  // ---- Simple visuals: one timeline line per stretch of tool calls ------------------------
@@ -1239,8 +1322,13 @@ class Chat {
    group.className = 'tool-group is-working';
    group.innerHTML = '<button type="button" class="tool-group-head"><span class="tool-group-label"></span><span class="tool-chevron"></span></button><div class="tool-group-body"></div>';
    group.__items = [];
+   // A newer line takes the stage: every older one folds away, unless the user opened it.
+   for (const other of view.el.querySelectorAll('.tool-group.is-open')) {
+    if (!other.__touched) other.classList.remove('is-open');
+   }
    const head = group.querySelector('.tool-group-head');
    head.addEventListener('click', () => {
+    group.__touched = true;
     group.classList.toggle('is-open');
     head.setAttribute('aria-expanded', String(group.classList.contains('is-open')));
    });
@@ -1265,24 +1353,32 @@ class Chat {
    const template = n && form[bucket];
    if (template) parts.push(template.replace('{n}', String(n)));
   }
-  group.querySelector('.tool-group-label').textContent = parts.join(', ') || (working ? 'Working…' : 'Done');
+  const failed = items.filter(item => item.state === 'error').length;
+  const text = parts.join(', ') || (working ? 'Working…' : 'Done');
+  group.querySelector('.tool-group-label').textContent = failed ? `${text} · ${failed} failed` : text;
   group.classList.toggle('is-working', working);
+  group.classList.toggle('has-error', failed > 0);
+  // The line that is working stays open; once it is done — or a newer line starts — it folds,
+  // unless the user opened it by hand.
+  if (!group.__touched) group.classList.toggle('is-open', working);
+  const body = group.querySelector('.tool-group-body');
+  if (body) {
+   body.querySelector('.tool-group-done')?.remove();
+   if (!working && items.length) {
+    const done = document.createElement('div');
+    done.className = `tool-group-done${failed ? ' is-error' : ''}`;
+    done.textContent = failed ? '↳ ⚠️ Stopped with an error' : '↳ ✔️ Done';
+    body.append(done);
+   }
+  }
   const chevron = group.querySelector('.tool-chevron');
-  if (chevron) chevron.hidden = !group.querySelector('.tool-group-body')?.childElementCount;
+  if (chevron) chevron.hidden = !body?.childElementCount;
  }
 
  simpleDone(handle, ms, failed = false) {
   const { group, item } = handle;
   item.state = failed ? 'error' : 'done';
   item.card?.setDuration(Math.max(1, Math.round(ms)));
-  if (failed) group.classList.add('has-error');
-  const body = group.querySelector('.tool-group-body');
-  if (body && !body.querySelector('.tool-group-done')) {
-   const done = document.createElement('div');
-   done.className = 'tool-group-done';
-   done.textContent = failed ? '↳ ⚠️ Stopped with an error' : '↳ ✔️ Done';
-   body.append(done);
-  }
   this.simpleLabel(group);
  }
 
@@ -1358,7 +1454,7 @@ class Chat {
   const turn = this.begin(conv, config);
   window.Presence?.publish(conv.id, { state: 'running', title: String(prompt.text || '').slice(0, 80), model: this.modelOf(conv), started: Date.now() });
   this.publishLive(conv, turn);
-  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM };
+  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM, ...(prompt.from ? { from: prompt.from } : {}) };
   conv.messages.push(entry);
   if (bubble) this.nodes.set(entry, bubble);
   this.openPart(conv, turn);
@@ -1505,6 +1601,23 @@ class Chat {
   return { messages: conv ? snapshot(conv.messages) : [], tokens: conv?.tokens || 0, cache: conv?.cache || null, spend: conv?.spend || null, folder, model: this.modelOf(conv) };
  }
 
+ // How a user message is addressed to the model when another surface wrote it: a Discord
+ // message, a subagent asking its main agent (with the task it was launched for), the main
+ // answering one of its own runs, or an unrelated agent.
+ addressOf(conv, entry) {
+  const text = entry.content ?? entry.text ?? '';
+  if (entry.origin === 'discord') return `[sent from Discord] ${text}`;
+  if (entry.origin !== 'agent') return text;
+  const source = entry.from ? this.library.chat(entry.from) : null;
+  const name = source ? String(source.title || source.id) : 'another agent';
+  if (source && source.parent === conv.id) {
+   const task = source.task ? `, its task was: ${source.task}` : '';
+   return `[from your launched sub-agent "${name}"${task}] ${text}`;
+  }
+  if (source && conv.record?.parent === source.id) return `[from main agent] ${text}`;
+  return `[from agent "${name}"] ${text}`;
+ }
+
  history(conv) {
   const out = [], messages = conv.messages;
   let start = 0;
@@ -1514,12 +1627,7 @@ class Chat {
     out.push({ role: 'system', content: `${COMPACT.head}\n\n${entry.summary}` });
     if (entry.resume) out.push({ role: 'user', content: COMPACT.resume });
    } else if (entry.role === 'user') {
-    const text = entry.content ?? entry.text ?? '';
-    // A message from Discord or from another agent is marked, so the model knows who speaks.
-    const tagged = entry.origin === 'discord' ? `[sent from Discord] ${text}`
-     : entry.origin === 'agent' ? `[from another agent] ${text}`
-     : text;
-    out.push({ role: 'user', content: tagged });
+    out.push({ role: 'user', content: this.addressOf(conv, entry) });
    } else if (entry.role === 'assistant') {
     if (entry.steps) out.push(...entry.steps);
     else if (entry.content) out.push({ role: 'assistant', content: entry.content });
@@ -1580,6 +1688,8 @@ class Chat {
        // A completed <send_discord_message> block goes to the user's Discord right away and
        // leaves the reply; only its own DMs carry it, never the chat text.
        this.flushDiscord(conv, part);
+       // The same for a <write-message_ID> block addressed to another agent.
+       this.flushAgentMessages(conv, part);
        view.stream.push(part.entry.content);
        this.runSnippet(conv, part.entry.content);
        this.publishLive(conv, turn);
@@ -1779,7 +1889,7 @@ class Chat {
   const queued = turn.queue.splice(0);
   this.closePart(conv, turn.part);
   for (const { prompt, bubble } of queued) {
-   const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: await userContent(prompt), origin: prompt.origin || PLATFORM };
+   const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: await userContent(prompt), origin: prompt.origin || PLATFORM, ...(prompt.from ? { from: prompt.from } : {}) };
    conv.messages.push(entry);
    this.nodes.set(entry, bubble);
    conv.tokens += estimate([entry]);
@@ -2012,7 +2122,7 @@ class Chat {
  save(conv) {
   if (!this.library.chat(conv.id)) return Promise.resolve();
   conv.savedAt = Date.now();
-  const write = this.library.saveMessages(conv.id, conv.messages, conv.tokens, conv.spend || null);
+  const write = this.library.saveMessages(conv.id, conv.messages, conv.tokens, conv.spend || null, conv.todos?.length ? conv.todos : null);
   this.library.update(conv.id, { updated: Date.now() });
   return write;
  }
