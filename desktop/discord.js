@@ -71,7 +71,8 @@ function remember(ids, chatId) {
 
 // Files the run produced (attach_file) ride along as real Discord attachments. Anything that
 // is missing or bigger than the safe upload size is skipped rather than failing the send.
-async function upload(token, channel, files) {
+// `caption` rides on the first file's message, so text and picture arrive together.
+async function upload(token, channel, files, caption = '') {
  const attached = [];
  for (const file of (Array.isArray(files) ? files : []).slice(0, 10)) {
   const target = typeof file === 'string' ? file : file?.path;
@@ -80,7 +81,7 @@ async function upload(token, channel, files) {
    const stat = fs.statSync(target);
    if (!stat.isFile() || stat.size > MAX_FILE) continue;
    const form = new FormData();
-   form.append('payload_json', JSON.stringify({}));
+   form.append('payload_json', JSON.stringify(!attached.length && caption ? { content: caption.slice(0, 1900) } : {}));
    form.append('files[0]', new Blob([fs.readFileSync(target)]), path.basename(target));
    const res = await fetch(`https://discord.com/api/v10/channels/${channel}/messages`, {
     method: 'POST',
@@ -91,6 +92,42 @@ async function upload(token, channel, files) {
   } catch {}
  }
  return attached;
+}
+
+// A message the agent sends on its own (the <send_discord_message> block in its reply): plain
+// text with any files or pictures attached, no "finished" header, straight into the DM.
+async function note(text, files = []) {
+ const p = load();
+ if (!p.enabled || !p.token || !p.userId) return { ok: false, error: 'not configured' };
+ const body = String(text || '').trim();
+ const list = (Array.isArray(files) ? files : []).map(file => String(file || '').trim()).filter(Boolean);
+ if (!body && !list.length) return { ok: false, error: 'nothing to send' };
+ try {
+  const headers = { authorization: `Bot ${p.token}`, 'content-type': 'application/json' };
+  const dm = await fetch('https://discord.com/api/v10/users/@me/channels', {
+   method: 'POST',
+   headers,
+   body: JSON.stringify({ recipient_id: String(p.userId) }),
+  });
+  if (!dm.ok) return { ok: false, error: `dm channel ${dm.status}` };
+  const channel = (await dm.json()).id;
+  const attached = await upload(p.token, channel, list, body);
+  let ok = true;
+  // The caption only fits 1900 chars: a longer note goes as its own messages first.
+  if (body && (!attached.length || body.length > 1900)) {
+   for (const part of chunks(body)) {
+    const res = await fetch(`https://discord.com/api/v10/channels/${channel}/messages`, {
+     method: 'POST',
+     headers,
+     body: JSON.stringify({ content: part }),
+    });
+    ok = res.ok && ok;
+   }
+  }
+  return { ok, ...(attached.length ? { attached } : {}) };
+ } catch (error) {
+  return { ok: false, error: String(error?.message || error).slice(0, 200) };
+ }
 }
 
 async function send(title, outcome, summary, files = [], chatId = '') {
@@ -151,4 +188,4 @@ function register(fromApp) {
  ipcMain.handle('discord:test', event => (fromApp(event) ? send('Prism V2', 'test', 'Discord notifications are wired up.') : { ok: false }));
 }
 
-module.exports = { register, send, state };
+module.exports = { register, send, note, state };

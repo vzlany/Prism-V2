@@ -138,6 +138,23 @@ async function userContent({ text, attachments }) {
 
 const slim = ({ name, size, image, width, height, note }) => ({ name, size, image: !!image, width, height, note });
 const join = (base, text) => [base.trimEnd(), text.trim()].filter(Boolean).join('\n\n');
+// A <send_discord_message> block: the agent talking to the user on Discord on its own.
+// `@file: C:\path\shot.png` lines inside it become attachments, the rest is the message.
+const DISCORD_BLOCK = /<send_discord_message>([\s\S]*?)<\/send_discord_message>/gi;
+const DISCORD_FILE = /^@(?:file|image|attach)\s*:\s*(.+)$/i;
+function parseDiscordBlock(inner) {
+ const files = [], kept = [];
+ for (const line of String(inner || '').replace(/\r/g, '').split('\n')) {
+  const file = line.trim().match(DISCORD_FILE);
+  if (file) { files.push(file[1].trim()); continue; }
+  if (line.trim()) kept.push(line.trim());
+ }
+ return { text: kept.join('\n').trim(), files };
+}
+const ABSOLUTE_PATH = /^([a-zA-Z]:[\\/]|\\\\|\/)/;
+const withFolder = (file, folder) => (ABSOLUTE_PATH.test(String(file || '')) || !folder
+ ? String(file || '')
+ : `${String(folder).replace(/[\\/]+$/, '')}\\${String(file).replace(/^[\\/]+/, '')}`);
 function splitQuotes(text) {
  const quotes = [];
  let rest = text || '', m;
@@ -1068,6 +1085,28 @@ class Chat {
   return count;
  }
 
+ // A finished <send_discord_message> block: sent to the user's Discord DM (with any files and
+ // pictures) and removed from the reply, so the chat shows only the real answer. A block that
+ // is still being written stays in the text until its closing tag arrives.
+ flushDiscord(conv, part) {
+  const content = String(part.entry.content || '');
+  if (!content.includes('<send_discord_message>')) return;
+  const pending = [];
+  let match;
+  DISCORD_BLOCK.lastIndex = 0;
+  while ((match = DISCORD_BLOCK.exec(content))) pending.push(parseDiscordBlock(match[1]));
+  if (!pending.length) return;
+  const folder = conv.record?.folder || '';
+  for (const block of pending) {
+   window.openghost?.discord?.message?.({
+    text: block.text,
+    files: block.files.map(file => withFolder(file, folder)),
+    chatId: conv.record?.id || conv.id,
+   });
+  }
+  part.entry.content = content.replace(DISCORD_BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
+ }
+
  // The Runs tab follows a working run, not only its ending: the newest words of the reply go
  // into the run's snippet, throttled so the panel is not rebuilt for every token.
  runSnippet(conv, text) {
@@ -1298,7 +1337,9 @@ class Chat {
     out.push({ role: 'system', content: `${COMPACT.head}\n\n${entry.summary}` });
     if (entry.resume) out.push({ role: 'user', content: COMPACT.resume });
    } else if (entry.role === 'user') {
-    out.push({ role: 'user', content: entry.content ?? entry.text ?? '' });
+    const text = entry.content ?? entry.text ?? '';
+    // A message the user sent from Discord is marked, so the model knows where they are.
+    out.push({ role: 'user', content: entry.origin === 'discord' ? `[sent from Discord] ${text}` : text });
    } else if (entry.role === 'assistant') {
     if (entry.steps) out.push(...entry.steps);
     else if (entry.content) out.push({ role: 'assistant', content: entry.content });
@@ -1340,6 +1381,9 @@ class Chat {
      turn.text = true;
      part.entry.content = join(base, stream.content);
      this.dismissGhost(view);
+     // A completed <send_discord_message> block goes to the user's Discord right away and
+     // leaves the reply; only its own DMs carry it, never the chat text.
+     this.flushDiscord(conv, part);
      view.stream.push(part.entry.content);
      this.runSnippet(conv, part.entry.content);
      this.publishLive(conv, turn);

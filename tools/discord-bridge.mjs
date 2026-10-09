@@ -97,11 +97,44 @@ function chatRecord(id) {
 }
 // The renderable messages (what the app draws) and the full model context (tools included)
 // live in the same Prism chat file: botContext is the bridge's own history.
+// The model context of a chat file. Empty parts (a step that only called tools) are dropped:
+// they used to sit in the history as empty assistant messages and some models answered the
+// whole turn with nothing. Only the newest stretch is replayed, so a long app chat stays sane.
 function contextOf(body) {
- if (Array.isArray(body?.botContext) && body.botContext.length) return body.botContext;
- return (body?.messages || [])
-  .filter(entry => (entry.role === "user" || entry.role === "assistant") && typeof entry.content === "string")
-  .map(entry => ({ role: entry.role, content: entry.content }));
+ if (Array.isArray(body?.botContext) && body.botContext.length) return body.botContext.slice(-60);
+ const out = [];
+ for (const entry of body?.messages || []) {
+  if (entry.role !== "user" && entry.role !== "assistant") continue;
+  const text = typeof entry.content === "string" ? entry.content : entry.text;
+  if (typeof text !== "string" || !text.trim()) continue;
+  out.push({ role: entry.role, content: text });
+ }
+ return out.slice(-60);
+}
+
+// The agent can talk to the user on its own with a <send_discord_message> block. Inside it,
+// a line like `@file: C:\path\shot.png` attaches that file or picture; everything else is text.
+const DISCORD_BLOCK = /<send_discord_message>([\s\S]*?)<\/send_discord_message>/gi;
+function blockParts(inner) {
+ const files = [], kept = [];
+ for (const line of String(inner || "").replace(/\r/g, "").split("\n")) {
+  const file = line.trim().match(/^@(?:file|image|attach)\s*:\s*(.+)$/i);
+  if (file) { files.push(file[1].trim()); continue; }
+  if (line.trim()) kept.push(line.trim());
+ }
+ return { text: kept.join("\n").trim(), files };
+}
+function parseDiscordBlocks(text) {
+ const blocks = [];
+ const clean = String(text || "").replace(DISCORD_BLOCK, (match, inner) => {
+  const block = blockParts(inner);
+  if (block.text || block.files.length) blocks.push(block);
+  return "";
+ }).replace(/\n{3,}/g, "\n\n").trim();
+ return { clean, blocks };
+}
+function inlineDiscordTags(text) {
+ return String(text || "").replace(DISCORD_BLOCK, (match, inner) => blockParts(inner).text).replace(/\n{3,}/g, "\n\n").trim();
 }
 function loadContext(record) {
  const body = readJson(chatFile(record.id), {});
@@ -264,7 +297,7 @@ async function systemPrompt() {
  if (prompts && prompts.enabled !== false && typeof prompts.global === "string" && prompts.global.trim()) custom += `\n\n# User instructions (global)\n${prompts.global.trim()}`;
  const own = prompts?.models?.[state.model];
  if (typeof own === "string" && own.trim()) custom += `\n\n# User instructions (this model)\n${own.trim()}`;
- return `${AgentPrompt.build({ folder: state.folder, mode: "full", env, browser: "", mcp, memory, plan: "", instructions, skills, now: new Date() })}${custom}\n\n# Remote control\nYou are answering over Discord, from the user's phone. Keep replies short and plain; Discord markdown works, but **never write markdown tables** — Discord does not render them and they arrive as a wall of pipes. Use short lists with bold labels instead, one line per item (for example \`- **Title:** what changed\`).${state.tools ? " Tools run without asking." : " Tools are unavailable in this session: never attempt a tool call, answer in plain text."}`;
+ return `${AgentPrompt.build({ folder: state.folder, mode: "full", env, browser: "", mcp, memory, plan: "", instructions, skills, now: new Date() })}${custom}\n\n# Remote control\nYou are answering over Discord, from the user's phone. Keep replies short and plain; Discord markdown works, but **never write markdown tables** — Discord does not render them and they arrive as a wall of pipes. Use short lists with bold labels instead, one line per item (for example \`- **Title:** what changed\`).\n\nWhile you work you can also message the user here on your own: write a block like \`<send_discord_message>Sure, let me decompile that client and check it for malware.</send_discord_message>\` and it is posted as its own DM as soon as that step ends (before the tools of the step run). A line inside the block like \`@file: C:\\\\path\\\\shot.png\` attaches that file or picture. Use it only when you actually want to say something before the final summary, which is sent automatically — never wrap your whole answer in it and never use it to repeat something you are about to say.${state.tools ? " Tools run without asking." : " Tools are unavailable in this session: never attempt a tool call, answer in plain text."}`;
 }
 
 async function turn(prompt, display = {}) {
@@ -280,6 +313,7 @@ async function turn(prompt, display = {}) {
  // A hard question can take many calls: 12 used to cut real work off mid-task. The loop still
  // ends on its own when the model answers without asking for another tool.
  const MAX_STEPS = 50;
+ let retried = false;
  for (let step = 0; step < MAX_STEPS; step++) {
   if (state.stopped) return "⏹ stopped";
   let reasoning = "";
@@ -293,12 +327,33 @@ async function turn(prompt, display = {}) {
   const thought = String(result.reasoning || reasoning || "").trim();
   if (thought) await display.thought?.(thought);
   const calls = (result.toolCalls || []).filter(call => call?.function?.name);
-  if (!calls.length) {
-   state.messages.push({ role: "assistant", content: result.content || "" });
-   savedState();
-   return result.content?.trim() || "(the model sent an empty reply)";
+  // A <send_discord_message> block is the agent talking to the user on its own. While work
+  // continues it goes out right away and leaves the reply; on the final step a plain one
+  // stays as the normal answer, so nothing is ever said twice.
+  let content = result.content || "";
+  let posted = false;
+  if (content.includes("<send_discord_message>")) {
+   const parsed = parseDiscordBlocks(content);
+   if (parsed.blocks.length) {
+    if (calls.length || parsed.blocks.some(block => block.files.length)) {
+     for (const block of parsed.blocks) await display.message?.(block.text, block.files);
+     content = parsed.clean;
+     posted = true;
+    } else {
+     content = inlineDiscordTags(content);
+    }
+   }
   }
-  state.messages.push({ role: "assistant", content: result.content || "", tool_calls: calls });
+  if (!calls.length) {
+   const answer = content.trim();
+   // One silent retry when a model returns nothing at all: a hiccup, not a real answer.
+   if (!answer && !posted && !retried) { retried = true; continue; }
+   state.messages.push({ role: "assistant", content });
+   savedState();
+   if (!answer) return posted ? "" : "(the model sent an empty reply)";
+   return answer;
+  }
+  state.messages.push({ role: "assistant", content, tool_calls: calls });
   const pictures = [];
   for (const call of calls) {
    if (state.stopped) return "⏹ stopped";
@@ -437,25 +492,32 @@ async function replyTo(channel, messageId, text) {
 // Attachments: a file the agent produced (attach_file) is uploaded as a real Discord file.
 // Anything missing or over the safe size is skipped, so the reply never fails over an upload.
 const MAX_FILE = 9 * 1024 * 1024;
-async function postFiles(channel, files) {
+const absolutePath = value => /^([a-zA-Z]:[\\/]|\\\\|\/)/.test(String(value || ""));
+async function postFiles(channel, files, caption = "") {
  const list = (Array.isArray(files) ? files : [])
   .map(file => (typeof file === "string" ? { path: file } : file))
   .filter(file => file?.path)
   .slice(0, 10);
+ let sent = 0;
  for (const file of list) {
   try {
-   const stat = statSync(file.path);
+   // A block can name a file relative to the folder the tools work in.
+   const target = absolutePath(file.path) ? String(file.path) : join(state.folder || ".", String(file.path));
+   const stat = statSync(target);
    if (!stat.isFile() || stat.size > MAX_FILE) continue;
    const form = new FormData();
-   form.append("payload_json", JSON.stringify({}));
-   form.append("files[0]", new Blob([readFileSync(file.path)]), basename(file.path));
-   await fetch(`${DISCORD}/channels/${channel}/messages`, {
+   // The first file's message carries the caption, so words and picture arrive together.
+   form.append("payload_json", JSON.stringify(!sent && caption ? { content: String(caption).slice(0, 1900) } : {}));
+   form.append("files[0]", new Blob([readFileSync(target)]), basename(target));
+   const res = await fetch(`${DISCORD}/channels/${channel}/messages`, {
     method: "POST",
     headers: { authorization: `Bot ${config.token || ""}` },
     body: form,
-   }).catch(() => {});
+   }).catch(() => null);
+   if (res?.ok) sent++;
   } catch {}
  }
+ return sent;
 }
 
 // --------------------------------------------------------------- gateway (online status + DMs)
@@ -731,11 +793,24 @@ async function runTurn(channel, text, conversation, save) {
   },
   // Files made during the turn arrive here right after the tool that made them.
   files: async list => { await postFiles(channel, list).catch(() => {}); },
+  // The agent talking to the user on its own: its own DM with any files, not the summary.
+  message: async (text, files) => {
+   const list = Array.isArray(files) ? files : [];
+   const sent = list.length ? await postFiles(channel, list, text) : 0;
+   if (String(text || "").trim() && !sent) await post(channel, text);
+  },
  };
  setPresence("🤔 thinking…", "dnd");
  try {
   const answer = await turn(text, display);
   setPresence(IDLE);
+  if (!answer.trim()) {
+   // Everything was said through the turn's own Discord messages: nothing to edit into.
+   save(conversation, text, "");
+   if (placeholderId) await api(`/channels/${channel}/messages/${placeholderId}`, { method: "DELETE" }).catch(() => {});
+   log("answered with self-sent messages only");
+   return;
+  }
   save(conversation, text, answer);
   if (placeholderId) await replyTo(channel, placeholderId, answer);
   else await post(channel, answer);

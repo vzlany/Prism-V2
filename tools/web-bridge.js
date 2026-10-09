@@ -168,6 +168,7 @@ window.openghost = {
   set: async () => ({ enabled: false, userId: '', hasToken: false }),
   test: async () => ({ ok: false, error: 'works only in the desktop app' }),
   dm: payload => invoke('discord:dm', payload),
+  message: payload => invoke('discord:message', payload),
  },
  instructions: {
   list: directory => invoke('instructions:list', directory),

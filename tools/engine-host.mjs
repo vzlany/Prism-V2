@@ -103,6 +103,10 @@ export function createEngineHost({ profile = "" } = {}) {
  Skills.register(allow);
  Discord.register(allow);
  // The mode menu's "DM me on Discord when done" switch on a headless web run.
+ handlers.set("discord:message", (event, payload) => Discord.note(
+  typeof payload?.text === "string" ? payload.text : "",
+  Array.isArray(payload?.files) ? payload.files : [],
+ ));
  handlers.set("discord:dm", (event, payload) => Discord.send(
   typeof payload?.title === "string" && payload.title.trim() ? payload.title.trim() : "Prism V2",
   typeof payload?.outcome === "string" ? payload.outcome : "completed",

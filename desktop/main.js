@@ -660,6 +660,14 @@ ipcMain.handle('discord:dm', (event, payload) => {
   typeof payload?.chatId === 'string' ? payload.chatId : '',
  );
 });
+// The agent talking to the user on Discord on its own (a <send_discord_message> block).
+ipcMain.handle('discord:message', (event, payload) => {
+ if (!fromApp(event)) return { ok: false };
+ return Discord.note(
+  typeof payload?.text === 'string' ? payload.text : '',
+  Array.isArray(payload?.files) ? payload.files : [],
+ );
+});
 ipcMain.handle('profile:info', event => {
  if (!fromApp(event)) return { name: PROFILE || 'default', profiles: [] };
  let profiles = [];
