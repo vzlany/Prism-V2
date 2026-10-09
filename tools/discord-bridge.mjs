@@ -313,15 +313,31 @@ async function turn(prompt, display = {}) {
  // A hard question can take many calls: 12 used to cut real work off mid-task. The loop still
  // ends on its own when the model answers without asking for another tool.
  const MAX_STEPS = 50;
+ // DeepSeek's thinking mode insists its reasoning comes back with every assistant message
+ // that made tool calls; without it the next step fails with invalid_request_error.
+ const keepReasoning = /deepseek/i.test(String(state.model || ""));
  let retried = false;
  for (let step = 0; step < MAX_STEPS; step++) {
   if (state.stopped) return "⏹ stopped";
-  let reasoning = "";
-  const result = await stream([{ role: "system", content: system }, ...state.messages], {
-   tools,
-   onDelta: () => status("✍️ writing…"),
-   onThought: delta => { reasoning += delta; status("🤔 thinking…"); },
-  });
+  let reasoning = "", result = null;
+  // A failure gets three more tries, five seconds apart, with the attempt shown in the DM.
+  for (let attempt = 1; ; attempt++) {
+   try {
+    result = await stream([{ role: "system", content: system }, ...state.messages], {
+     tools,
+     onDelta: () => status("✍️ writing…"),
+     onThought: delta => { reasoning += delta; status("🤔 thinking…"); },
+    });
+    break;
+   } catch (error) {
+    if (state.stopped || error?.name === "AbortError" || attempt > 3) throw error;
+    status(`⏳ retrying (${attempt}/3)…`);
+    log(`model error, trying again ${attempt}/3:`, String(error?.message || error).slice(0, 160));
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    if (state.stopped) throw error;
+    reasoning = "";
+   }
+  }
   // The thinking is finished when the step's stream ends, so the whole thought goes out at
   // once — never a half sentence in the middle of it.
   const thought = String(result.reasoning || reasoning || "").trim();
@@ -348,12 +364,16 @@ async function turn(prompt, display = {}) {
    const answer = content.trim();
    // One silent retry when a model returns nothing at all: a hiccup, not a real answer.
    if (!answer && !posted && !retried) { retried = true; continue; }
-   state.messages.push({ role: "assistant", content });
+   const assistant = { role: "assistant", content };
+   if (keepReasoning && thought) assistant.reasoning_content = thought;
+   state.messages.push(assistant);
    savedState();
    if (!answer) return posted ? "" : "(the model sent an empty reply)";
    return answer;
   }
-  state.messages.push({ role: "assistant", content, tool_calls: calls });
+  const assistant = { role: "assistant", content, tool_calls: calls };
+  if (keepReasoning && thought) assistant.reasoning_content = thought;
+  state.messages.push(assistant);
   const pictures = [];
   for (const call of calls) {
    if (state.stopped) return "⏹ stopped";
@@ -527,21 +547,36 @@ let gateway = null, heartbeat = 0, seq = null, gatewayReady = false, shuttingDow
 
 // A custom status (type 4) shows the text itself, so the profile says what Prism is doing.
 // While a reply is being produced the status is dnd, otherwise online.
+let lastPresence = "";
 function setPresence(name, status = "online") {
  if (!gatewayReady || !gateway || gateway.readyState !== WebSocket.OPEN) return;
+ lastPresence = `${status}|${name}`;
  try {
   gateway.send(JSON.stringify({ op: 3, d: { since: 0, status, afk: false, activities: [{ name: "Prism V2", type: 4, state: String(name).slice(0, 128) }] } }));
  } catch {}
 }
 
-// The status is put back to idle every half minute unless a turn is really running, so a
+// The app keeps its running turns in presence.json: while anything works there (or a web
+// turn delegated to it) the bot wears DND too; when nothing is working it goes back to ready.
+function appBusy() {
+ const runs = readJson(join(USER_DATA, "presence.json"), {})?.runs;
+ return Array.isArray(runs) && runs.some(run => Date.now() - (Number(run.at) || 0) < 30000);
+}
+
+// The status is put back in line every few seconds unless a turn is really running, so a
 // missed reset (a dropped gateway, a killed turn) can never leave "writing…" behind.
 function startPresenceLoop() {
  clearInterval(presenceLoop);
  presenceLoop = setInterval(() => {
-  if (!gatewayReady || busy || currentRun) return;
-  setPresence(IDLE, "online");
- }, 30000);
+  if (!gatewayReady) return;
+  // A bridge turn (this bot replying here) sets its own status while it works.
+  if (busy || currentRun) return;
+  const working = appBusy();
+  const line = working ? "🤔 working in the app…" : IDLE;
+  const status = working ? "dnd" : "online";
+  if (`${status}|${line}` === lastPresence) return;
+  setPresence(line, status);
+ }, 5000);
 }
 
 function connectGateway() {

@@ -1348,6 +1348,17 @@ class Chat {
   return out;
  }
 
+ // A pause between retries that an abort cuts short at once.
+ nap(ms, turn) {
+  return new Promise((resolve, reject) => {
+   const signal = turn.controller.signal;
+   const abort = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); };
+   const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, ms);
+   if (signal.aborted) abort();
+   else signal.addEventListener('abort', abort, { once: true });
+  });
+ }
+
  async request(conv, turn) {
   const part = turn.part, view = part.view, base = part.entry.content;
   // The ghost may already be on screen from the previous step: it starts its doze timer the
@@ -1359,46 +1370,60 @@ class Chat {
    turn.reconnect?.remove();
    turn.reconnect = null;
   };
-  const showReconnect = ({ attempt, total, wait, error }) => {
+  const showReconnect = ({ attempt, total, wait, error, key = 'chat.reconnecting' }) => {
    clearReconnect();
    const note = document.createElement('div');
    note.className = 'message-note is-reconnect';
-   note.textContent = I18n.t('chat.reconnecting', { error: error.message, attempt, total, seconds: Math.round(wait / 1000) });
+   note.textContent = I18n.t(key, { error: error.message, attempt, total, seconds: Math.round(wait / 1000) });
    view.el.append(note);
    turn.reconnect = note;
    if (conv === this.active) this.followBottom();
   };
   try {
-   result = await Providers.resilient(turn.config, {
-    messages,
-    tools: this.agent(conv) ? AgentTools.schemas : null,
-    signal: turn.controller.signal,
-    session: conv.id,
-    onRetry: showReconnect,
-    onContent: (delta, stream) => {
+   // Any failure gets three more tries, five seconds apart, with the attempt spelled out in
+   // the chat. The model call itself is unchanged between tries.
+   const tries = 3, pause = 5000;
+   for (let attempt = 1; ; attempt++) {
+    try {
+     result = await Providers.resilient(turn.config, {
+      messages,
+      tools: this.agent(conv) ? AgentTools.schemas : null,
+      signal: turn.controller.signal,
+      session: conv.id,
+      onRetry: showReconnect,
+      onContent: (delta, stream) => {
+       clearReconnect();
+       if (!stream.content.trim()) return;
+       turn.text = true;
+       part.entry.content = join(base, stream.content);
+       this.dismissGhost(view);
+       // A completed <send_discord_message> block goes to the user's Discord right away and
+       // leaves the reply; only its own DMs carry it, never the chat text.
+       this.flushDiscord(conv, part);
+       view.stream.push(part.entry.content);
+       this.runSnippet(conv, part.entry.content);
+       this.publishLive(conv, turn);
+      },
+      onReasoning: delta => {
+       if (!delta) return;
+       clearReconnect();
+       part.entry.thinking = (part.entry.thinking || '') + delta;
+       view.thinking?.write(part.entry.thinking, true);
+       // Thinking is work: the ghost stays awake while words are arriving.
+       this.pokeGhost(view);
+       if (conv === this.active) this.followBottom();
+       this.publishLive(conv, turn);
+      },
+     });
+     break;
+    } catch (error) {
+     const aborted = error?.name === 'AbortError' || turn.controller.signal.aborted;
+     if (aborted || attempt > tries) throw error;
+     showReconnect({ attempt, total: tries, wait: pause, error, key: 'chat.retrying' });
+     await this.nap(pause, turn);
      clearReconnect();
-     if (!stream.content.trim()) return;
-     turn.text = true;
-     part.entry.content = join(base, stream.content);
-     this.dismissGhost(view);
-     // A completed <send_discord_message> block goes to the user's Discord right away and
-     // leaves the reply; only its own DMs carry it, never the chat text.
-     this.flushDiscord(conv, part);
-     view.stream.push(part.entry.content);
-     this.runSnippet(conv, part.entry.content);
-     this.publishLive(conv, turn);
-    },
-    onReasoning: delta => {
-     if (!delta) return;
-     clearReconnect();
-     part.entry.thinking = (part.entry.thinking || '') + delta;
-     view.thinking?.write(part.entry.thinking, true);
-     // Thinking is work: the ghost stays awake while words are arriving.
-     this.pokeGhost(view);
-     if (conv === this.active) this.followBottom();
-     this.publishLive(conv, turn);
-    },
-   });
+    }
+   }
   } catch (error) {
    clearReconnect();
    if (error.partial?.content) part.entry.steps.push(assistantStep({ ...error.partial, toolCalls: [] }));
@@ -1656,8 +1681,12 @@ class Chat {
    // A notification with the chat's name when the app is in the background: completed, failed or error.
    const title = this.library.chat(conv.id)?.title || conv.record.title || I18n.t('chat.new');
    const outcome = aborted ? 'failed' : error ? 'error' : 'completed';
-   const summary = String(entry.content || '').replace(/\s+/g, ' ').trim().slice(0, 300);
-   window.openghost?.notify?.(title, outcome, summary);
+   // When something went wrong the reason is what the user needs: it rides in the toast and,
+   // if the voice is on, in the Discord DM, instead of an empty summary.
+   const reason = error && !aborted ? String(error.message || error).replace(/\s+/g, ' ').trim().slice(0, 600) : '';
+   const summary = reason || String(entry.content || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+   // Subagents stay silent: no Windows toast, no taskbar badge. Only real conversations ring.
+   if (!conv.subagent && !turn.quiet) window.openghost?.notify?.(title, outcome, summary);
    // The Discord switch at the end of the mode menu: a DM with the fuller summary, sent
    // whether or not the toast was shown.
    if (window.DiscordNotify?.on && !conv.subagent && !turn.quiet) {
@@ -1666,7 +1695,7 @@ class Chat {
     window.openghost?.discord?.dm?.({
      title,
      outcome,
-     summary: String(entry.content || '').trim().slice(0, 8000),
+     summary: reason ? `⚠️ ${reason}` : String(entry.content || '').trim().slice(0, 8000),
      files: (turn.files || []).map(file => file.path).filter(Boolean),
      // Replying to that DM continues this exact conversation.
      chatId: conv.record?.id || conv.id,

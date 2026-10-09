@@ -470,6 +470,7 @@ const STRINGS = {
   'chat.retry': 'Retry',
   'chat.open-settings': 'Open settings',
   'chat.reconnecting': '{error} — reconnecting in {seconds}s (attempt {attempt} of {total})',
+  'chat.retrying': '{error} — trying again in {seconds}s (attempt {attempt} of {total})',
   'chat.remoteBusy': 'This conversation is still answering on another device. Its reply will appear here when it finishes.',
   'chat.delegateTimeout': 'The Prism app did not pick this up. Make sure it is running, then send the message again.',
   'code.copy': 'Copy code',

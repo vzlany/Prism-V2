@@ -429,9 +429,10 @@ function external(url) {
 }
 
 // A chat finished while the app was not in front: the taskbar button flashes natively and a
-// red badge blinks on it (the native flash respects Windows' own "flash taskbar" setting,
-// the badge always shows). Focusing the window clears both.
-const ATTENTION = { every: 600, icon: null, timer: 0 };
+// badge blinks on it — green when the work completed, red when it failed or errored (the
+// native flash respects Windows' own "flash taskbar" setting, the badge always shows).
+// Focusing the window clears both. Subagents never get here: chat.js keeps them silent.
+const ATTENTION = { every: 600, icon: null, ok: null, timer: 0 };
 function stopAttention(win) {
  clearInterval(ATTENTION.timer);
  ATTENTION.timer = 0;
@@ -439,14 +440,16 @@ function stopAttention(win) {
  try { win.setOverlayIcon(null, ''); } catch {}
  try { win.flashFrame(false); } catch {}
 }
-function startAttention(win) {
+function startAttention(win, bad = true) {
  if (!win || win.isDestroyed() || process.platform !== 'win32') return;
  ATTENTION.icon ||= nativeImage.createFromPath(path.join(__dirname, 'attention.png'));
+ ATTENTION.ok ||= nativeImage.createFromPath(path.join(__dirname, 'attention-ok.png'));
+ const badge = bad ? ATTENTION.icon : ATTENTION.ok;
  clearInterval(ATTENTION.timer);
  let on = false;
  const tick = () => {
   on = !on;
-  try { win.setOverlayIcon(on ? ATTENTION.icon : null, on ? 'Conversation finished' : ''); } catch {}
+  try { win.setOverlayIcon(on ? badge : null, on ? (bad ? 'Conversation failed' : 'Conversation finished') : ''); } catch {}
  };
  tick();
  ATTENTION.timer = setInterval(tick, ATTENTION.every);
@@ -609,8 +612,9 @@ ipcMain.on('notify', (event, payload) => {
  try {
   new Notification({ title, body, icon: ICON, silent: false }).show();
  } catch {}
- // The app is in the background: blink the taskbar button until the window is focused.
- startAttention(win);
+ // The app is in the background: blink the taskbar button until the window is focused —
+ // green for a clean finish, red for a failure or error.
+ startAttention(win, body !== 'completed');
  // The Discord DM is a separate switch ("DM me on Discord" in the mode menu) and is sent by
  // the discord:dm handler below; this toast must not also DM, or every finish arrives twice.
 });
