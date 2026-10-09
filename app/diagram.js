@@ -2,6 +2,16 @@
 'use strict';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+// One pointer run per frame: a diagram surface must not lay out on every mouse move.
+const diagramCoalesce = fn => {
+ let scheduled = false, last = null;
+ return event => {
+  last = event;
+  if (scheduled) return;
+  scheduled = true;
+  requestAnimationFrame(() => { scheduled = false; fn(last); });
+ };
+};
 const TEXT = { size: 13, line: 18, weight: 650 };
 const NODE = { padX: 16, padY: 10, maxWidth: 176, minWidth: 54, radius: 10 };
 const FLOW_GAP = { rank: 54, rankSide: 64, node: 26, label: 14 };
@@ -3944,6 +3954,7 @@ class DiagramView {
   this.width = 0;
   this.stageLeft = 0;
   this.stageTop = 0;
+  this.rect = null;
   this.view = null;
   this.timer = 0;
   this.hotKeys = [];
@@ -3954,8 +3965,11 @@ class DiagramView {
   this.stage.addEventListener('dblclick', event => this.rename(event));
   this.stage.addEventListener('pointerover', event => this.focusPie(event));
   this.stage.addEventListener('pointerleave', () => this.focusPie(null));
-  this.frame.addEventListener('pointermove', event => this.pointer(event));
-  this.frame.addEventListener('pointerleave', () => this.pointer(null));
+  // The stage rect is read once per hover, not per move; the work is capped to one run a
+  // frame so sweeping the mouse over a diagram cannot fire a layout on every event.
+  this.frame.addEventListener('pointerenter', () => { this.rect = this.stage.getBoundingClientRect(); });
+  this.frame.addEventListener('pointermove', diagramCoalesce(event => this.pointer(event)));
+  this.frame.addEventListener('pointerleave', () => { this.rect = null; this.pointer(null); });
  }
 
  available() {
@@ -4022,6 +4036,7 @@ class DiagramView {
  resize(width) {
   this.stageLeft = this.stage.offsetLeft;
   this.stageTop = this.stage.offsetTop;
+  this.rect = null;
   this.measured = Math.round(width);
   const room = this.available();
   if (Math.abs(room - this.width) < 2) { if (this.view) this.applyView(this.view); return; }
@@ -4033,7 +4048,7 @@ class DiagramView {
   const v = this.view;
   let inside = false, cx = null, cy = null;
   if (event && v && this.result && !this.live) {
-   const box = this.stage.getBoundingClientRect(), x = event.clientX - box.left, y = event.clientY - box.top;
+   const box = this.rect || (this.rect = this.stage.getBoundingClientRect()), x = event.clientX - box.left, y = event.clientY - box.top;
    const left = Math.min(v.ox, v.tx) - TOOLS.reach, right = Math.max(v.ox + v.cw, v.tx + TOOLS.width) + TOOLS.reach;
    inside = x >= left && x <= right && y >= 0 && y <= v.h + 4;
    if (inside) { cx = (x - v.ox) / v.s; cy = (y - v.top) / v.s; }

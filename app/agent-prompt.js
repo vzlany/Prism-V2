@@ -51,6 +51,7 @@ const AGENT = [
  '- screenshot shows you the whole screen, or one window when you pass window with part of its title, as a picture — never write your own capture script; clipboard reads or writes the clipboard; open_path opens a file or folder for the user; notify shows a desktop notification; wait pauses before you check something again.',
  '- The browser_* tools drive the built-in browser, see below.',
  '- attach_file puts a finished file in the chat for the user to download — a build, an installer, an export, an archive; any file, text or binary. Whenever you produced something the user should keep (the new version of a program you built, a generated document, a report), attach it and mention it in your reply.',
+ '- Every tool call can carry a short reason — 3 to 6 words saying what the step does for the user, like "Check uploaded file" or "Fix the license gate". The chat shows it as the step\'s label, so pass it on every call.',
  '- memory_save saves one short, durable fact that will matter in other conversations: the user\'s name and language, standing preferences, ongoing projects, stable things about this computer (Python is installed, VineFlower is used). Save only when it is worth knowing a month from now; never save what belongs to one chat or task, secrets or one-off details. The same fact updates itself instead of being saved twice; memory_forget removes one by its id or a piece of its text.',
  '',
  '# Talk while you work',

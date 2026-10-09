@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, nativeTheme, screen, shell, Notification } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, screen, shell, Notification } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
@@ -330,7 +330,7 @@ function startBot(auto = readAuto()) {
 ipcMain.handle('auto:get', event => {
  if (!fromApp(event)) return null;
  const auto = readAuto();
- return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
+ return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, awake: auto.awake !== false, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
 });
 // The web server lists its live connections in web-clients.json (it may also be running
 // from a terminal, not started by this app): the Auto page shows the port and the devices.
@@ -351,6 +351,7 @@ ipcMain.handle('auto:set', (event, patch) => {
   ...(typeof patch?.hidden === 'boolean' ? { hidden: patch.hidden } : {}),
   ...(typeof patch?.web === 'boolean' ? { web: patch.web } : {}),
   ...(typeof patch?.bot === 'boolean' ? { bot: patch.bot } : {}),
+  ...(typeof patch?.awake === 'boolean' ? { awake: patch.awake } : {}),
   ...(patch?.port !== undefined ? { port: webPort({ port: patch.port }) } : {}),
  });
  applyAuto(auto);
@@ -358,7 +359,10 @@ ipcMain.handle('auto:set', (event, patch) => {
  else stopWeb();
  if (auto.bot) { stopBot(); startBot(auto); }
  else stopBot();
- return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
+ // A turn is running right now and the setting just changed: apply it at once.
+ if (turnsActive && auto.awake === false) keepAwake(false);
+ else if (turnsActive) keepAwake(true);
+ return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, awake: auto.awake !== false, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
 });
 
 let tray = null;
@@ -622,10 +626,20 @@ ipcMain.on('notify', (event, payload) => {
 const fromApp = event => event.sender.getType() === 'window' && event.senderFrame?.url.startsWith('file:');
 ipcMain.handle('tool:run', (event, id, name, args, cwd) => fromApp(event) ? Tools.runTool(id, name, args, cwd, event.sender) : { error: 'Not allowed' });
 ipcMain.handle('app:version', event => fromApp(event) ? app.getVersion() : null);
-// A running turn turns throttling off; the last one to finish turns it back on.
+// A running turn turns throttling off; the last one to finish turns it back on. While any
+// turn runs the display is also kept awake (Settings -> Auto can turn that off), so a long
+// task is not interrupted by the screen locking.
+let turnsActive = false;
+let sleepBlocker = 0;
+function keepAwake(on) {
+ if (on && !sleepBlocker) { try { sleepBlocker = powerSaveBlocker.start('prevent-display-sleep'); } catch {} }
+ else if (!on && sleepBlocker) { try { powerSaveBlocker.stop(sleepBlocker); } catch {} sleepBlocker = 0; }
+}
 ipcMain.handle('app:set-background-throttle', (event, on) => {
  if (!fromApp(event)) return false;
  for (const win of BrowserWindow.getAllWindows()) win.webContents.setBackgroundThrottling(Boolean(on));
+ turnsActive = !on;
+ keepAwake(turnsActive && readAuto().awake !== false);
  return true;
 });
 ipcMain.handle('update:check', async event => {

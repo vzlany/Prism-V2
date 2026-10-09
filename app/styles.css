@@ -406,6 +406,9 @@ body {
   gap: 10px;
   width: 100%;
   height: 32px;
+  /* The hover reveal animates min-width; containment keeps that layout inside the row so a
+     mouse sweep does not reflow the whole list. */
+  contain: layout style;
   margin-bottom: 2px;
   padding: 0 8px 0 10px;
   border-radius: 9px;
@@ -8872,6 +8875,25 @@ body.has-lightbox{overflow:hidden}
 /* Prism V2: the Open action on a subagent card */
 .tool-action{margin-left:6px;padding:2px 9px;border-radius:999px;background:rgba(var(--fg-rgb),.07);color:rgba(var(--fg-rgb),.72);font-size:11px;line-height:1.6;cursor:pointer;white-space:nowrap;transition:background-color .15s ease,color .15s ease}
 .tool-action:hover,.tool-action:focus-visible{background:rgba(var(--fg-rgb),.13);color:rgba(var(--fg-rgb),.95)}
+
+/* Simple visuals (Settings -> Interface): every tool call is one quiet line — icon, the
+   reason for the step, and an arrow that opens the details. No boxes while browsing. */
+.tool-reason{display:none}
+html.is-simple .tool{background:transparent;box-shadow:none;border-radius:0;margin:1px 0;animation:none}
+html.is-simple .tool .tool-snake{display:none}
+html.is-simple .tool .tool-head{height:26px;padding:0 4px;gap:8px}
+html.is-simple .tool .tool-head:hover{background:rgba(var(--fg-rgb),.05);border-radius:8px}
+html.is-simple .tool .tool-title,
+html.is-simple .tool .tool-summary,
+html.is-simple .tool .tool-stat,
+html.is-simple .tool .tool-status{display:none}
+html.is-simple .tool .tool-reason{display:block;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--fg-secondary)}
+html.is-simple .tool .tool-chevron{opacity:.75}
+html.is-simple .tool.is-error .tool-reason{color:rgb(var(--danger-rgb))}
+html.is-simple .tool .tool-body .tool-code,
+html.is-simple .tool .tool-body .tool-diff,
+html.is-simple .tool .tool-body .tool-output{border-radius:10px}
+html.is-simple .tool .tool-body{margin-top:2px}
 .tool.is-running .tool-open{background:rgba(138,180,255,.16);color:#cfe0ff}
 /* The live clock beside Open on a subagent card: how long it has been working. */
 .tool-timer{margin-left:2px;font-family:var(--mono-font);font-size:11px;color:var(--fg-tertiary);font-variant-numeric:tabular-nums;white-space:nowrap}

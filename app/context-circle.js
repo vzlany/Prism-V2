@@ -29,9 +29,21 @@ class ContextCircle {
   this.childSpend = new Map();
   this.childTried = new Map();
   this.button.addEventListener('click', () => this.toggle());
-  window.addEventListener('prices-changed', () => this.update());
-  this.update();
-  setInterval(() => this.update(), 1500);
+  window.addEventListener('prices-changed', () => this.update(true));
+  this.update(true);
+  // The circle used to walk every message and every step 40 times a minute. It now reads
+  // state only when a cheap signature changed, with a slow fallback beat.
+  setInterval(() => this.update(), 5000);
+ }
+
+ // A cheap fingerprint of what the ring draws: changing it means the context or the price
+ // moved, and only then is the walk over the chat's messages done.
+ signature() {
+  const conv = this.chat.active;
+  if (!conv) return '';
+  const last = conv.messages[conv.messages.length - 1];
+  const size = typeof last?.content === 'string' ? last.content.length : Array.isArray(last?.content) ? last.content.length : 0;
+  return `${conv.id}|${conv.messages.length}|${conv.tokens || 0}|${size}|${conv.spend ? `${conv.spend.input}|${conv.spend.output}|${conv.spend.cached}|${conv.spend.context}` : ''}`;
  }
 
  // Every chat descending from the active one (runs, their runs, subagents of both).
@@ -72,7 +84,7 @@ class ContextCircle {
     this.chat.library.conversation(record.id).then(({ spend: loaded }) => {
      if (!loaded) return;
      this.childSpend.set(record.id, loaded);
-     this.update();
+     this.update(true);
     }).catch(() => {});
     continue;
    }
@@ -115,7 +127,11 @@ class ContextCircle {
   return 'rgba(var(--fg-rgb),.85)';
  }
 
- update() {
+ update(force = false) {
+  const signature = this.signature();
+  const open = this.panel.matches(':popover-open');
+  if (!force && !open && signature === this.signatureAt) return;
+  this.signatureAt = signature;
   const state = this.current();
   const show = state.tokens > 0 || state.context.messages.length > 0;
   this.button.hidden = !show;

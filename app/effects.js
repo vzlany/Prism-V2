@@ -11,6 +11,7 @@ const VIEW_MODES = ['auto', 'open', 'closed'];
 const THINKING_MODES = ['auto', 'extended'];
 const THINKING = 'openghost.thinking';
 const TOOLS = 'openghost.tools';
+const SIMPLE = 'openghost.simpleVisuals';
 
 let mode = localStorage.getItem(KEY);
 if (mode === 'typing') mode = 'both'; // the earlier four-mode values migrate
@@ -25,6 +26,10 @@ const readThinking = () => {
 };
 let thinkingMode = readThinking();
 let toolsMode = readView(TOOLS);
+// Simple visuals: tool calls shrink to one quiet line (icon, reason, arrow to expand).
+let simple = localStorage.getItem(SIMPLE) === '1';
+const applySimple = () => document.documentElement.classList.toggle('is-simple', simple);
+applySimple();
 
 window.Effects = {
  get mode() {
@@ -59,6 +64,15 @@ window.Effects = {
   toolsMode = value;
   localStorage.setItem(TOOLS, value);
   window.dispatchEvent(new CustomEvent('effects-changed', { detail: { group: 'tools' } }));
+ },
+ get simple() {
+  return simple;
+ },
+ setSimple(value) {
+  simple = value === true;
+  localStorage.setItem(SIMPLE, simple ? '1' : '0');
+  applySimple();
+  window.dispatchEvent(new CustomEvent('effects-changed', { detail: { group: 'simple' } }));
  },
  modes: TYPING_MODES.slice(),
  viewModes: VIEW_MODES.slice(),

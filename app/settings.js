@@ -587,6 +587,7 @@ class Settings {
    row('settings.auto.hidden', 'settings.auto.hiddenHint', toggle('auto-hidden', auto.hidden, !auto.login)),
    row('settings.auto.web', 'settings.auto.webHint', `<div class="mcp-add-row">${toggle('auto-web', auto.web)}<input class="settings-key auto-port" type="number" min="1" max="65535" value="${auto.port}" ${auto.web ? '' : 'disabled'}><button type="button" class="settings-button" data-auto-open ${auto.webRunning || auto.web ? '' : 'disabled'}>${escapeHtml(I18n.t('settings.auto.open'))}</button></div>`),
    row('settings.auto.bot', 'settings.auto.botHint', `<div class="mcp-add-row">${toggle('auto-bot', auto.bot)}<span class="auto-bot-state ${auto.botRunning ? 'is-on' : ''}">${escapeHtml(I18n.t(auto.botRunning ? 'settings.auto.botRunning' : 'settings.auto.botStopped'))}</span></div>`),
+   row('settings.auto.awake', 'settings.auto.awakeHint', toggle('auto-awake', auto.awake !== false)),
    row('settings.auto.net', 'settings.auto.netHint', `<div data-auto-net></div>`),
    `<p class="settings-status" data-provider="auto" role="status"></p>`,
   ].join('');
@@ -623,6 +624,7 @@ class Settings {
   node.querySelector('.auto-hidden')?.addEventListener('change', event => save({ hidden: event.target.checked }));
   node.querySelector('.auto-web')?.addEventListener('change', event => save({ web: event.target.checked }));
   node.querySelector('.auto-bot')?.addEventListener('change', event => save({ bot: event.target.checked }));
+  node.querySelector('.auto-awake')?.addEventListener('change', event => save({ awake: event.target.checked }));
   node.querySelector('.auto-port')?.addEventListener('change', event => save({ port: Number(event.target.value) || 8787 }));
   node.querySelector('[data-auto-open]')?.addEventListener('click', () => window.open(`http://localhost:${auto.port}/`, '_blank'));
  }
@@ -980,6 +982,7 @@ class Settings {
   const viewLabels = { auto: I18n.t('settings.effects.auto'), open: I18n.t('settings.effects.open'), closed: I18n.t('settings.effects.closed') };
   const thinkingLabels = { auto: I18n.t('settings.effects.auto'), extended: I18n.t('settings.effects.extended') };
   const typingLabels = { both: I18n.t('settings.effects.both'), deleting: I18n.t('settings.effects.deleting') };
+  const simpleLabels = { on: I18n.t('settings.sounds.on'), off: I18n.t('settings.sounds.off') };
   const effects = window.Effects;
 let profile = { name: 'default', profiles: ['default'] };
   try { profile = (await window.openghost?.profile?.info?.()) || profile; } catch {}
@@ -1025,6 +1028,7 @@ let profile = { name: 'default', profiles: ['default'] };
    row('settings.effects.title', 'settings.effects.hint', choice('text', effects ? effects.mode : 'both', ['both', 'deleting'], typingLabels)),
    row('settings.effects.thinking', 'settings.effects.thinkingHint', choice('thinking', effects ? effects.thinkingMode : 'auto', ['auto', 'extended'], thinkingLabels)),
    row('settings.effects.tools', 'settings.effects.toolsHint', choice('tools', effects ? effects.toolsMode : 'auto', ['auto', 'open', 'closed'], viewLabels)),
+   row('settings.effects.simple', 'settings.effects.simpleHint', choice('simple', effects?.simple ? 'on' : 'off', ['on', 'off'], simpleLabels)),
    soundsBlock,
   ].join('');
   node.querySelector('[data-profile-switch]')?.addEventListener('click', () => {
@@ -1047,6 +1051,7 @@ for (const button of node.querySelectorAll('[data-effect-group]')) {
     if (effectGroup === 'text') window.Effects?.set(effectValue);
     else if (effectGroup === 'thinking') window.Effects?.setThinking(effectValue);
     else if (effectGroup === 'tools') window.Effects?.setTools(effectValue);
+    else if (effectGroup === 'simple') window.Effects?.setSimple(effectValue === 'on');
     this.paintEffects();
    });
   }

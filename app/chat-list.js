@@ -465,6 +465,9 @@ class ChatList {
  render() {
   this.depths.clear();
   this.childrenOf.clear();
+  // Rows may move: the next glide measure must read fresh rects.
+  this.glideRow = undefined;
+  this.glideTop = null;
   const lib = this.library, query = this.query.trim().toLowerCase(), seen = new Set();
   // A locked chat's title is sealed, so a search never finds it.
   const match = chat => !query || (this.library.titleOf(chat) || '').toLowerCase().includes(query);
@@ -763,8 +766,16 @@ class ChatList {
   const dt = Math.min(Math.max((now - this.last) / 1000, 0), 0.032), g = this.g;
   this.last = now;
   const target = this.hovered?.isConnected && !this.hovered.closest('[inert]') ? this.hovered : null;
-  if (target) {
-   const rect = target.getBoundingClientRect(), y = rect.top - this.list.getBoundingClientRect().top, h = rect.height;
+  // Measuring the hovered row (and the list) on every frame forced a layout per frame while
+  // the mouse swept the sidebar. The rects are read once per hovered row instead, and the
+  // list's offset again only after a scroll or a render moved things.
+  if (target !== this.glideRow) {
+   this.glideRow = target;
+   this.glideTop = this.list.getBoundingClientRect().top;
+   this.glideRect = target ? target.getBoundingClientRect() : null;
+  }
+  if (target && this.glideRect) {
+   const y = this.glideRect.top - this.glideTop, h = this.glideRect.height;
    if (g.o[0] < 0.02) { g.y = [y, 0]; g.h = [h, 0]; }
    g.y.goal = y;
    g.h.goal = h;
@@ -782,7 +793,12 @@ class ChatList {
   }
   const style = this.glide.style;
   style.transform = `translateY(${g.y[0].toFixed(2)}px)`;
-  style.height = `${Math.max(0, g.h[0]).toFixed(2)}px`;
+  // Writing the height every frame invalidated layout on every frame; rows are the same
+  // height almost always, so only a real change is written.
+  if (Math.abs((this.glideH || 0) - g.h[0]) > 0.4) {
+   this.glideH = g.h[0];
+   style.height = `${Math.max(0, g.h[0]).toFixed(2)}px`;
+  }
   style.opacity = Math.min(1, Math.max(0, g.o[0])).toFixed(3);
   if (moving || now < this.until) this.raf = requestAnimationFrame(this.tick);
  }

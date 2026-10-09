@@ -30,7 +30,9 @@ function lines(text, sign, className) {
 class ToolCard {
  constructor(info) {
   this.info = info || {};
-  this.open = window.Effects?.toolsMode !== 'closed';
+  // Simple visuals shows one collapsed line per call; the settings' "stay open" does not
+  // apply there.
+  this.open = window.Effects?.simple ? false : window.Effects?.toolsMode !== 'closed';
   this.touched = false;
   const el = this.el = element('div', `tool is-running${this.open ? ' is-open' : ''}`);
   el.setAttribute('role', 'group');
@@ -58,7 +60,9 @@ class ToolCard {
   const parallel = info?.tool === 'subagent';
   this.spinner = parallel ? element('span', 'tool-spinner') : null;
   const head = this.spinner ? [this.spinner, icon] : [icon];
-  this.head.append(...head, element('span', 'tool-title', this.titleOf()), this.summary, this.stat, this.status, this.chevron);
+  // The simple line: the reason the model gave for the step, falling back to the plain title.
+  this.reasonEl = element('span', 'tool-reason', String(this.info.reason || this.titleOf() || '').slice(0, 90));
+  this.head.append(...head, element('span', 'tool-title', this.titleOf()), this.reasonEl, this.summary, this.stat, this.status, this.chevron);
   this.body = element('div', 'tool-body');
   this.inner = element('div', 'tool-body-inner');
   this.body.append(this.inner);
@@ -106,7 +110,7 @@ class ToolCard {
   const text = String(output ?? '');
   const shown = text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n… (${text.length - OUTPUT_CHARS} more characters)` : text;
   if (shown.trim()) this.inner.append(element('pre', `tool-output${error ? ' is-error' : ''}`, shown));
-  if (!this.touched) this.open = Boolean(error) || window.Effects?.toolsMode === 'open';
+  if (!this.touched) this.open = Boolean(error) || (!window.Effects?.simple && window.Effects?.toolsMode === 'open');
   this.sync();
  }
 

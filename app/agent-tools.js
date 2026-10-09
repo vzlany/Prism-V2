@@ -52,9 +52,22 @@ function mcpSummary() {
  ].join('\n');
 }
 
+// Every tool takes the same optional `reason`: a few words for the user, shown as the step's
+// label when Simple visuals is on (and useful in the approval card either way).
 const fn = (name, description, properties, required = []) => ({
  type: 'function',
- function: { name, description, parameters: { type: 'object', properties, required } },
+ function: {
+  name,
+  description,
+  parameters: {
+   type: 'object',
+   properties: {
+    reason: { type: 'string', description: 'A few words for the user saying why this step runs, shown as its label (for example "Check uploaded file")' },
+    ...properties,
+   },
+   required,
+  },
+ },
 });
 
 const SCHEMAS = [
@@ -323,7 +336,7 @@ function relative(cwd, path) {
  return inside(cwd, raw) ? raw.slice(norm(cwd).length).replace(/^[\\/]+/, '') || '.' : raw;
 }
 
-function describe(name, args, cwd) {
+function describeTool(name, args, cwd) {
  const path = relative(cwd, args.path || '.');
  switch (name) {
   case 'run_powershell': return { kind: 'command', title: I18n.t('approve.command'), code: String(args.command || '') };
@@ -358,6 +371,15 @@ function describe(name, args, cwd) {
    return { kind: 'command', title: name, code: JSON.stringify(args) };
   }
  }
+}
+
+// The card description, plus the short reason the model gave for this step. Simple visuals
+// shows the reason as the whole line; the normal card ignores it.
+function describe(name, args, cwd) {
+ const info = describeTool(name, args, cwd) || {};
+ const reason = String(args?.reason || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+ if (reason) info.reason = reason;
+ return info;
 }
 
 const clean = text => text.replace(/[ \t\u00a0]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
