@@ -497,8 +497,10 @@ class Chat {
   });
  }
 
- // Deploy a subagent on one focused task; resolves with its final report.
- async deploySubagent(promptText, label = '', toolId = '') {
+ // Deploy a subagent on one focused task. By default it works in the background and the call
+ // returns at once — the caller keeps going and checks it with the agents tool; with wait it
+ // blocks until this one's report (only for when the caller has nothing else to do).
+ async deploySubagent(promptText, label = '', toolId = '', wait = false) {
   // The parent is the run that asked for it, looked up by tool-call id, not whichever chat
   // happens to be on screen: a subagent a parallel run deploys belongs under that run.
   const caller = toolId && this.toolConvs?.get(toolId);
@@ -519,9 +521,14 @@ class Chat {
   // Subagents are hidden from the chat list, so the Runs tab is where they are watched. The
   // prompt is shown there from the first moment, not only when the run ends.
   window.ParallelRuns?.add({ id: record.id, title: String(label || promptText).slice(0, 80), model: I18n.t('runs.subagent'), status: 'running', snippet: String(promptText).slice(0, 140) });
-  const done = new Promise(resolve => { conv.awaitDone = resolve; });
+  const done = wait ? new Promise(resolve => { conv.awaitDone = resolve; }) : null;
   this.run(conv, { text: promptText, attachments: [] }, this.config(parent), null);
   this.onChange();
+  // Background by default: the caller is told the id and keeps working, then checks with
+  // agents list/read. Only wait:true blocks here (this one's report, 20 minutes at most).
+  if (!wait) {
+   return `Subagent "${String(label || promptText).slice(0, 80)}" started in the background (id ${record.id}). Keep working yourself; check it with agents list and agents read ${record.id}, ask it something with agents ask ${record.id} "…", or run agents wait to block until any of your agents finishes.`;
+  }
   const report = await Promise.race([
    done,
    new Promise(resolve => setTimeout(() => resolve('(the subagent is still working; its chat holds the progress)'), 20 * 60 * 1000)),
@@ -563,6 +570,8 @@ class Chat {
   const before = conv.messages.length, started = Date.now();
   while (Date.now() - started < 120000) {
    await new Promise(resolve => setTimeout(resolve, 1500));
+   // The asker being stopped stops the wait too.
+   if (this.conversations.get(selfId)?.turn?.controller?.signal?.aborted) return 'Stopped while waiting for the answer.';
    const fresh = conv.messages.slice(before).filter(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
    const last = fresh[fresh.length - 1];
    if (last) return `Answer from ${title}:\n${String(last.content).trim().slice(0, 6000)}`;
@@ -570,6 +579,15 @@ class Chat {
   }
   const latest = [...conv.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
   return `${title} is still working — your message is delivered.${latest ? ` Newest words so far:\n${String(latest.content).trim().slice(0, 2000)}` : ''}`;
+ }
+
+ // The newest written answers of an agent, from memory when it is open, from disk otherwise.
+ async agentAnswer(record, max = 2) {
+  const conv = this.conversations.get(record.id);
+  let messages = conv?.messages;
+  if (!messages) messages = (await this.library.conversation(record.id).catch(() => ({ messages: [] }))).messages || [];
+  const written = messages.filter(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
+  return written.slice(-max).map(message => String(message.content).trim()).join('\n\n— — —\n\n').slice(0, 6000);
  }
 
  // Opens (or loads) a conversation without bringing it on screen.
@@ -591,13 +609,34 @@ class Chat {
   if (action === 'read') {
    const record = this.agentTarget(args.id, selfId);
    if (!record) return 'No such agent — call agents list first.';
-   const conv = this.conversations.get(record.id);
-   let messages = conv?.messages;
-   if (!messages) messages = (await this.library.conversation(record.id).catch(() => ({ messages: [] }))).messages || [];
-   const written = messages.filter(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
-   if (!written.length) return `${record.title || record.id} has not written an answer yet.`;
-   const tail = written.slice(-2).map(message => String(message.content).trim()).join('\n\n— — —\n\n');
-   return `Newest from ${record.title || record.id}:\n${tail.slice(0, 6000)}`;
+   const answer = await this.agentAnswer(record);
+   return answer ? `Newest from ${record.title || record.id}:\n${answer}` : `${record.title || record.id} has not written an answer yet.`;
+  }
+  if (action === 'wait') {
+   // Block until any agent launched from this conversation finishes — for when the caller
+   // truly has nothing else to do until a report lands.
+   const children = this.library.chats.filter(record => record.parent === selfId);
+   const isRunning = record => Boolean(this.conversations.get(record.id)?.turn) || Boolean(window.Presence?.isBusy?.(record.id));
+   const running = children.filter(isRunning);
+   if (!running.length) {
+    const newest = [...children].sort((a, b) => (Number(b.updated) || 0) - (Number(a.updated) || 0))[0];
+    return newest
+     ? `No agent of yours is running. Newest finished: ${newest.title || newest.id} (id ${newest.id}) — read it with agents read ${newest.id}.`
+     : 'You have no agents running or finished.';
+   }
+   const watched = new Set(running.map(record => record.id));
+   const started = Date.now();
+   while (Date.now() - started < 20 * 60 * 1000) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    // The caller being stopped stops the wait too.
+    if (this.conversations.get(selfId)?.turn?.controller?.signal?.aborted) return 'Stopped while waiting.';
+    const finishedId = [...watched].find(id => !isRunning(this.library.chat(id) || { id }));
+    if (!finishedId) continue;
+    const record = this.library.chat(finishedId) || { id: finishedId, title: finishedId };
+    const answer = await this.agentAnswer(record);
+    return `Agent finished: ${record.title || record.id} (id ${record.id}).${answer ? ` Its report:\n${answer}` : ' It wrote no report.'}`;
+   }
+   return `Still running after 20 minutes: ${[...watched].map(id => this.library.chat(id)?.title || id).join(', ')}.`;
   }
   if (action === 'ask') {
    const text = String(args.text || '').trim();

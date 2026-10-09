@@ -83,7 +83,7 @@ folderPill = new FolderPill({ button: document.querySelector('.composer-folder')
 instructionsPill = new InstructionsPill({ button: document.querySelector('.composer-instructions'), menu: document.querySelector('.instructions-menu'), chat, library });
 planButton?.addEventListener('click', () => chat.setAgentMode(chat.agentMode === 'plan' ? 'build' : 'plan'));
 window.PrismPlan = { approve: () => chat.setAgentMode('build') };
-window.__prismSubagent = (label, prompt, toolId) => chat.deploySubagent(prompt, label, toolId);
+window.__prismSubagent = (label, prompt, toolId, wait) => chat.deploySubagent(prompt, label, toolId, wait);
 // The 'agents' tool: list the other agents, read one, or send one a message.
 window.__prismAgents = (args, toolId) => chat.agents(args, toolId);
 // The 'todo' tool: one live to-do box per conversation.

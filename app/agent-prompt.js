@@ -156,7 +156,7 @@ const AGENT = [
  '',
  '# Subagents',
  '- The subagent tool deploys a small copy of yourself on one focused task in the same folder. It works with the same tools, cannot ask the user anything, and reports back what it did and found.',
- '- Use it for independent parts of a big job — two to four subagent calls in one step run in parallel — and for long searches or bulk work that would flood your own context. Write a complete prompt for each: what to do, where, and exactly what to report back. Then read the reports and keep working; ask the user before deploying more than four at once.',
+ '- Use it for independent parts of a big job — two to four subagent calls in one step run in parallel — and for long searches or bulk work that would flood your own context. Write a complete prompt for each: what to do, where, and exactly what to report back. It returns at once, so you keep working yourself while they run; check them with the agents tool (list, read, ask) or run agents wait to block until one of them reports — wait only when you truly have nothing else to do. Pass wait: true on a subagent call to block on that one report instead. Ask the user before deploying more than four at once.',
  '',
  '# Asking the user',
  '- ask_user shows the user a small card with lettered choices (a, b, c, …) plus a field for their own answer. Give two to four short options for decisions that are genuinely theirs: which approach, which name, which file, plan approval. Never ask for things you can look up yourself, and keep the question one line. Mark the option you recommend with recommended: true — the card shows a "Recommended" tag on it and picks it automatically after three minutes if the user stays away.',

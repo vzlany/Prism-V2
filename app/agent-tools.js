@@ -108,9 +108,10 @@ const SCHEMAS = [
  fn('git', 'Run git in the project folder with the given arguments, for example ["status"], ["init"], ["add", "-A"], ["commit", "-m", "Add CSV parser"], ["log", "--oneline", "-10"], ["diff"]. The repository is local.', {
   args: { type: 'array', items: { type: 'string' }, description: 'Arguments after the word git, one per item' },
  }, ['args']),
- fn('subagent', 'Deploy a subagent to work on one focused, self-contained task in the project folder. It runs its own agent with the same tools and reports back; it cannot ask the user anything and steps that would need approval are refused inside it. Use it for independent parts of a big job (two to four at once run in parallel), and for long searches that would flood your context. Give a complete prompt: what to do, where, and exactly what to report back.', {
+ fn('subagent', 'Deploy a subagent to work on one focused, self-contained task in the project folder. It runs its own agent with the same tools and reports back; it cannot ask the user anything and steps that would need approval are refused inside it. Use it for independent parts of a big job (two to four at once run in parallel), and for long searches that would flood your context. It returns at once by default — keep working yourself and check it with the agents tool when you need its report. Give a complete prompt: what to do, where, and exactly what to report back.', {
   description: { type: 'string', description: 'Short label for the task, shown to the user' },
   prompt: { type: 'string', description: 'The complete instructions for the subagent' },
+  wait: { type: 'boolean', description: 'Block here until this subagent reports back — only set it when you have nothing else to do meanwhile. Default false: it works in the background and agents list/read/wait bring its report.' },
  }, ['description', 'prompt']),
  fn('todo', 'Keep the to-do list of a non-trivial task on screen so you (and the user) never lose the thread. Create it once with the steps in order when the work has more than a couple of moves; mark the step you are on with doing, the ones that finished with done and the ones that failed with failed; add or reword steps with edit as you learn more, and view reads it back. The box stays with the conversation and moves to the newest position every time you change it. Small jobs do not need it.', {
   action: { type: 'string', enum: ['create', 'view', 'edit', 'done'], description: 'create: set the whole list; edit: add, reword or drop steps; done: mark steps doing/done/failed; view: read it back' },
@@ -122,7 +123,7 @@ const SCHEMAS = [
   failed: { type: 'array', items: { type: 'string' }, description: 'done: the step(s) that failed' },
  }, ['action']),
  fn('agents', 'Work with the other agents on this computer: list the parallel runs and subagents (running or finished) and what they are doing, read what one has answered, or send one a message. The conversation that started you is "main". Use it to check what children are doing, to see what a run finished while you were away, or — as a subagent — to ask the main agent a question and wait for the answer. Kids: keep messages short and specific; do not ask the same thing twice.', {
-  action: { type: 'string', enum: ['list', 'read', 'ask'], description: 'list: who exists and their state; read: what one agent has written; ask: send it a message (waits for the answer unless wait is false)' },
+  action: { type: 'string', enum: ['list', 'read', 'ask', 'wait'], description: 'list: who exists and their state; read: what one agent has written; ask: send it a message (waits for the answer unless wait is false); wait: block until any agent you launched finishes, then return its report' },
   id: { type: 'string', description: 'The agent to read or ask: an id from agents list, or "main" for the conversation that started you' },
   text: { type: 'string', description: 'The message to send (ask), one short paragraph' },
   wait: { type: 'boolean', description: 'Wait for the answer, up to two minutes (ask, default true)' },
@@ -588,7 +589,7 @@ window.AgentTools = {
   if (!bridge) return 'Error: tools are only available in the desktop app';
   if (name.startsWith('browser_')) return browser(name, args, id, cwd);
   if (name === 'subagent') {
-   const report = await window.__prismSubagent?.(String(args.description ?? ''), String(args.prompt ?? ''), id);
+   const report = await window.__prismSubagent?.(String(args.description ?? ''), String(args.prompt ?? ''), id, args.wait === true);
    if (!report) return 'The subagent could not be started.';
    return `Subagent "${String(args.description ?? 'task')}" finished. Its report:\n${report}`;
   }
