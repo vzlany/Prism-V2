@@ -184,8 +184,10 @@ class DeviceMenu {
  async refresh() {
   const data = await listOwn().catch(() => null);
   const remotes = data?.devices || [];
-  this.button.hidden = remotes.length === 0;
-  if (!remotes.length) return;
+  // The server itself never switches to another device: the pill belongs to clients (and to
+  // installs that are not servers).
+  this.button.hidden = remotes.length === 0 || data?.server === true;
+  if (this.button.hidden) return;
   const name = data?.name || data?.self?.name || '';
   this.button.title = I18n.t('devices.switch');
   this.button.setAttribute('aria-label', I18n.t('devices.switch'));

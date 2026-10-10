@@ -39,7 +39,10 @@ here is in this repository; nothing else was removed.
   there — providers, prompt, MCP, memories, skills, instructions and Discord (token, user id,
   DM switch, Test) are the *server's* own and are edited from the same window; the running
   bot picks up a changed token live. A device that does not answer no longer strands the app:
-  this PC's window comes back with the reason.
+  this PC's window comes back with the reason. On a server, a **System** row under the
+  Dashboard opens live machine statistics (CPU and per-core, memory, load, disks, network
+  rates, temperatures) plus the server's console stream — everything the server logs, updated
+  ten times a second, with page errors from any connected window mirrored in.
 - **Updates itself — or the agent does.** Settings → About checks GitHub at launch and every
   six hours, and with **Install automatically** on the new release is applied by itself while
   the app is idle — the check runs before and again after the download, so no update ever

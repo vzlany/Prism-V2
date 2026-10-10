@@ -17,6 +17,7 @@ const Updater = require('./updater');
 const CliCommand = require('./cli-command');
 const Server = require('./server');
 const { Beacon, deviceId } = require('./beacon');
+const Sysinfo = require('./sysinfo');
 
 const APP_ID = 'com.prismv2.app';
 // Set when the app is really quitting (tray -> Quit, update install, system shutdown): only
@@ -381,8 +382,8 @@ async function openRemoteWindow(device) {
    external(target);
    return { action: 'deny' };
   });
-  win.webContents.on('console-message', (event, level, message) => {
-   const text = message || event?.message || '';
+  win.webContents.on('console-message', event => {
+   const text = event?.message || '';
    if (text) console.log(`[remote] ${text}`);
   });
   win.on('closed', () => { if (remoteWin === win) remoteWin = null; });
@@ -394,8 +395,7 @@ async function openRemoteWindow(device) {
  win.loadURL(url).catch(error => console.log('[remote] load failed:', error.message));
  const result = await loading;
  if (!result.ok) {
-  console.log(`[remote] ${device.name} did not answer: ${result.error}`);
-  if (remoteWin === win) remoteWin = null;
+  console.log(`[remote] ${device.name} did not answer: ${result.error}`);  if (remoteWin === win) remoteWin = null;
   try { win.destroy(); } catch {}
   if (localWin && !localWin.isDestroyed()) showWindow(localWin);
   return { ok: false, error: result.error };
@@ -691,8 +691,8 @@ function createWindow() {
  // explicitly as well as through the Start Menu identity shortcut.
  try { win.setIcon(nativeImage.createFromPath(ICON)); } catch {}
  // Renderer warnings and errors land in the app's log, so a silent delegated run is visible.
- win.webContents.on('console-message', (event, level, message) => {
-  const text = message || event?.message || '';
+ win.webContents.on('console-message', event => {
+  const text = event?.message || '';
   const where = event?.sourceId ? ` (${event.sourceId}:${event.lineNumber})` : '';
   if (text) console.log(`[renderer] ${text}${where}`);
  });
@@ -744,6 +744,8 @@ ipcMain.handle('path:open', (event, target, cwd) => {
  shell.openPath(full).catch(() => {});
  return true;
 });
+// The System panel: live CPU, memory, disks, network and temperatures of this machine.
+ipcMain.handle('sys:stats', event => (fromApp(event) ? Sysinfo.stats() : null));
 
 // A workspace folder without picking one: the shared Chats folder (all "Chat workspace"
 // conversations live together under one heading instead of one timestamped folder each),

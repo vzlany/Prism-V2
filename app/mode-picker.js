@@ -101,30 +101,60 @@ class ModePicker {
   this.label.animate([{ opacity: 0, filter: 'blur(4px)', transform: 'translateY(3px)' }, { opacity: 1, filter: 'blur(0)', transform: 'none' }], LABEL);
  }
 
- // The Discord switch at the bottom of the menu: checked while the setting is on.
+ // The Discord switch at the bottom of the menu: checked while the setting is on. On a
+ // server it is also the only thing the composer button shows, so it repaints that too.
  syncDiscord(on) {
   if (!this.discord) return;
   this.discord.setAttribute('aria-checked', String(on));
   this.discord.classList.toggle('is-on', on);
   this.discord.title = I18n.t(on ? 'mode.discord.on' : 'mode.discord.off');
+  this.paintServerButton(on);
  }
 
  // On a server device the menu carries only the Discord switch: the permission mode belongs
- // to the machine's owner, not to whoever happens to be looking at it.
+ // to the machine's owner, not to whoever happens to be looking at it. The button toggles
+ // the switch directly and turns blue with a checkmark while it is on.
  setServerOnly(on) {
   this.serverOnly = Boolean(on);
   for (const option of this.options) option.hidden = this.serverOnly;
   this.separator.hidden = this.serverOnly;
-  this.button.dataset.serverOnly = this.serverOnly ? '1' : '';
   if (this.serverOnly) {
-   this.button.dataset.mode = 'discord';
-   this.label.textContent = I18n.t('mode.discord');
-   this.button.title = I18n.t('mode.discord.hint');
-   this.button.setAttribute('aria-label', I18n.t('mode.discord'));
+   this.button.dataset.serverOnly = '1';
+   this.button.removeAttribute('popovertarget');
+   this.button.setAttribute('aria-haspopup', 'false');
+   if (!this.discordToggle) {
+    this.discordToggle = event => { event.preventDefault(); this.toggleDiscord(); };
+    this.button.addEventListener('click', this.discordToggle);
+   }
+   this.paintServerButton();
   } else {
+   if (this.discordToggle) {
+    this.button.removeEventListener('click', this.discordToggle);
+    this.discordToggle = null;
+   }
+   this.button.dataset.serverOnly = '';
+   this.button.setAttribute('popovertarget', 'mode-menu');
+   this.button.setAttribute('aria-haspopup', 'menu');
+   this.button.classList.remove('is-discord-on');
    this.shown = null;
    this.sync();
   }
+ }
+
+ toggleDiscord() {
+  const on = window.DiscordNotify?.toggle?.() === true;
+  this.syncDiscord(on);
+  if (window.Sounds?.toggle) window.Sounds.toggle(on);
+ }
+
+ // The server-only look: "DM me on Discord" with a checkmark and a blue tint while it is on.
+ paintServerButton(on = window.DiscordNotify?.on === true) {
+  if (!this.serverOnly) return;
+  this.label.innerHTML = `<span class="composer-mode-check">${Glyphs.check}</span>${I18n.t('mode.discord')}`;
+  this.button.classList.toggle('is-discord-on', on);
+  this.button.title = I18n.t(on ? 'mode.discord.on' : 'mode.discord.off');
+  this.button.setAttribute('aria-pressed', String(on));
+  this.button.setAttribute('aria-label', I18n.t('mode.discord'));
  }
 
  hover(option) {

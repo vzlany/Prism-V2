@@ -10,6 +10,7 @@
 </head>
 <body>
   <div class="titlebar" aria-hidden="true"><div class="titlebar-name"></div></div>
+  <button type="button" class="titlebar-update" hidden></button>
   <div class="app">
     <aside class="sidebar">
       <div class="sidebar-header">
@@ -94,6 +95,8 @@
   <div class="context-panel" popover="auto" role="dialog" aria-label="Conversation statistics"></div>
 
   <div class="dashboard-panel" popover="auto" role="dialog" aria-label="Dashboard"></div>
+
+  <div class="system-panel dashboard-panel" popover="auto" role="dialog" aria-label="System" data-i18n-attr="aria-label:system.title"></div>
 
   <div class="effort-panel" popover="manual" role="dialog" aria-label="Effort" data-i18n-attr="aria-label:effort">
     <div class="effort-name" aria-hidden="true"></div>
@@ -331,6 +334,8 @@
   <script src="chat-list.js"></script>
   <script src="live-view.js"></script>
   <script src="devices.js"></script>
+  <script src="path-prompt.js"></script>
+  <script src="system-panel.js"></script>
   <script src="sidebar-resizer.js"></script>
   <script src="recent-folders.js"></script>
   <script src="folder-pill.js"></script>

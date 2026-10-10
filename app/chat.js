@@ -1046,7 +1046,9 @@ class Chat {
    this.library.update(conv.id, { updated: Date.now() });
   }
   for (const actions of conv.list.querySelectorAll('.message-actions')) actions.remove();
-  const prompt = { text, attachments, origin: PLATFORM, ...(FROM_DEVICE ? { device: FROM_DEVICE } : {}) };
+  // A send that carries ?from= comes from another device's app window: it wears the App
+  // badge (with the device's name), not the Website one, and the model is told the device.
+  const prompt = { text, attachments, origin: FROM_DEVICE ? 'app' : PLATFORM, ...(FROM_DEVICE ? { device: FROM_DEVICE } : {}) };
   this.follow = true;
   if (conv.turn) {
    this.interject(conv, prompt);
@@ -2470,7 +2472,7 @@ class Chat {
   const urls = Array.isArray(entry.content) ? entry.content.filter(part => part.type === 'image_url').map(part => part.image_url.url) : [];
   let k = 0;
   const attachments = (entry.attachments || []).map(item => ({ ...item, info: FileKinds.describe(item.name), url: item.image ? urls[k++] || '' : '' }));
-  return { text: entry.text || '', attachments, origin: entry.origin || '' };
+  return { text: entry.text || '', attachments, origin: entry.origin || '', device: entry.device || '' };
  }
 
  restoredMessage(entry, last = true, conv = null) {
@@ -2696,7 +2698,7 @@ class Chat {
   return button;
  }
 
- userMessage({ text, attachments, origin = '' }) {
+ userMessage({ text, attachments, origin = '', device = '' }) {
   const el = document.createElement('div');
   el.className = 'message is-user';
   // A message written somewhere else is labelled with where it came from; one written here
@@ -2704,7 +2706,8 @@ class Chat {
   if (origin && origin !== PLATFORM) {
    const badge = document.createElement('div');
    badge.className = `message-origin is-${origin}`;
-   badge.textContent = I18n.t(`origin.${origin}`);
+   const label = I18n.t(`origin.${origin}`);
+   badge.textContent = origin === 'app' && device ? `${label} · ${device}` : label;
    el.append(badge);
   }
   const images = attachments.filter(item => item.image && item.url), files = attachments.filter(item => !item.image);

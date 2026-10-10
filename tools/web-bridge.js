@@ -105,7 +105,15 @@ window.openghost = {
    }
   });
  },
- pickFolder: () => {
+ pickFolder: async () => {
+  // A browser has no folder dialog and the Electron remote window has no window.prompt:
+  // the in-page prompt asks for the path as text.
+  if (window.PathPrompt) {
+   const path = await window.PathPrompt.ask({ value: '', placeholder: '/home/server/projects' });
+   if (!path) return null;
+   const clean = String(path).replace(/[\\/]+$/, '');
+   return { path: clean, name: clean.split(/[\\/]/).pop() || clean };
+  }
   const path = window.prompt('Folder path for this chat:');
   if (!path) return null;
   const clean = path.replace(/[\\/]+$/, '');
@@ -220,6 +228,16 @@ window.openghost = {
  engine: {
   // Whether this machine is a server (its composer shows only the Discord switch).
   info: () => invoke('engine:info'),
+ },
+ sys: {
+  // Live machine statistics for the System panel (served by the host's sysinfo).
+  stats: () => invoke('sys:stats'),
+ },
+ logs: {
+  // Everything the server logs, streamed live; the page's own errors are mirrored in.
+  tail: () => invoke('log:tail'),
+  page: line => send('log:page', line),
+  onLine: callback => on('log:event', callback),
  },
  // A turn started on this page, for the app to run.
  delegate: {

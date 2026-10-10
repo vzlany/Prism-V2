@@ -208,6 +208,9 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   }
  }
  handlers.set("engine:info", () => ({ server: serverMode, name: hostname(), platform: process.platform, version: appVersion }));
+ // Live system information for the server's System panel.
+ const sysinfo = require(join(ROOT, "desktop", "sysinfo.js"));
+ handlers.set("sys:stats", () => sysinfo.stats());
  handlers.set("devices:list", () => (beacon ? { ...beacon.list(), name: hostname(), server: serverMode } : { self: { id: "", name: hostname(), platform: process.platform, version: appVersion, port: webPort, server: serverMode, self: true, url: "" }, devices: [], name: hostname(), server: serverMode }));
  handlers.set("devices:add", (event, entry) => (beacon ? beacon.addManual(entry || {}) : null));
  handlers.set("devices:forget", (event, host, port) => { beacon?.forgetManual(String(host || ""), Number(port) || 0); return true; });

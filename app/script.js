@@ -109,6 +109,59 @@ const parallelMeter = new ParallelMeter({ button: document.querySelector('.compo
 const deviceMenu = new DeviceMenu({ button: document.querySelector('.composer-device'), menu: document.querySelector('.device-menu') });
 const devicePicker = new DevicePicker({ root: main });
 devicePicker.maybeShow();
+// The server's System panel: live machine statistics and the console stream.
+const systemPanel = new SystemPanel({ panel: document.querySelector('.system-panel') });
+// On the web, everything the server logs is visible here; the page's own errors are mirrored
+// into that stream too, so a remote window never hides a failure.
+if (!window.openghost?.desktop && window.openghost?.logs?.page) {
+ window.addEventListener('error', event => {
+  try { window.openghost.logs.page(`${event.message} (${String(event.filename || '').split('/').pop()}:${event.lineno})`); } catch {}
+ });
+ window.addEventListener('unhandledrejection', event => {
+  try { window.openghost.logs.page(`unhandled rejection: ${event.reason?.message || event.reason}`); } catch {}
+ });
+}
+// A newer release: a pill in the titlebar (next to the window buttons) offers it; while it
+// downloads or installs it turns into a spinner, "Updating…".
+const updatePill = document.querySelector('.titlebar-update');
+if (updatePill && window.openghost?.desktop && window.openghost?.update?.params) {
+ const setPill = (state, version = '') => {
+  updatePill.hidden = !state;
+  updatePill.replaceChildren();
+  if (!state) return;
+  updatePill.dataset.state = state;
+  updatePill.disabled = state !== 'available';
+  if (state === 'downloading' || state === 'installing') {
+   const spin = document.createElement('span');
+   spin.className = 'update-spinner';
+   spin.setAttribute('aria-hidden', 'true');
+   updatePill.append(spin, document.createTextNode(I18n.t('update.installing')));
+   updatePill.title = I18n.t('update.installing');
+   return;
+  }
+  updatePill.append(document.createTextNode(`${I18n.t('update.available')} `));
+  const arrow = document.createElement('span');
+  arrow.className = 'update-arrow';
+  arrow.textContent = '⬆️';
+  updatePill.append(arrow);
+  updatePill.title = I18n.t('update.availableHint', { version: version || '' });
+ };
+ updatePill.addEventListener('click', async () => {
+  if (updatePill.dataset.state !== 'available') return;
+  setPill('installing');
+  const result = await window.openghost.update.install().catch(() => null);
+  if (result?.ok) return; // it restarts itself now
+  setPill(result?.latest ? '' : 'available');
+ });
+ window.openghost.update.onEvent?.(payload => {
+  if (payload?.state === 'available') setPill('available', payload.version);
+  else if (payload?.state === 'downloading' || payload?.state === 'installing') setPill(payload.state);
+  else if (payload?.state === 'none') setPill('');
+ });
+ window.openghost.update.params?.().then(params => {
+  if (params?.pending) setPill('available', params.pending.version);
+ }).catch(() => {});
+}
 // A conversation running on another page (the phone, a second window) shows the same busy
 // ghost here: the list has to be repainted when presence arrives, not only on local changes.
 // When such a run finishes, the chat is read again so its answer appears without a reload.
@@ -242,6 +295,7 @@ chatList = new ChatList({
   library,
   chat,
   onDashboard: () => dashboard.toggle(),
+  onSystem: () => systemPanel.toggle(),
   onNewFolder: async () => {
     const folder = await library.pick();
     if (!folder) return;
@@ -272,7 +326,11 @@ if (AgentTools.available) {
   modePicker = new ModePicker({ button: modeButton, menu: document.querySelector('.mode-menu'), settings, onChange: () => chat.onModeChange() });
   // A server device wears only the Discord switch in the mode menu: Ask/Auto/Full are the
   // machine's own business there.
-  const serverOnly = info => { if (info?.server) modePicker.setServerOnly(true); };
+  const serverOnly = info => {
+   if (!info?.server) return;
+   modePicker.setServerOnly(true);
+   chatList?.setServer(true);
+  };
   window.openghost?.engine?.info?.().then(serverOnly).catch(() => {});
   window.openghost?.auto?.get?.().then(serverOnly).catch(() => {});
   if (window.openghost?.web) {

@@ -79,7 +79,9 @@ const server = createServer((req, res) => {
   } else {
    const etag = `"${createHash("md5").update(body).digest("hex").slice(0, 16)}"`;
    headers.etag = etag;
-   headers["cache-control"] = "public, max-age=3600, must-revalidate";
+   // Revalidate every time (cheap 304s): a client that reloads right after an update must
+   // never run hour-old scripts from its cache.
+   headers["cache-control"] = "public, max-age=0, must-revalidate";
    if (req.headers["if-none-match"] === etag) { res.writeHead(304); res.end(); return; }
   }
   res.writeHead(status, headers);
@@ -122,6 +124,31 @@ const busy = error => {
 };
 server.on("error", busy);
 wss.on("error", busy);
+
+// --------------------------------------------------------------- the console mirror
+// Every line this process logs is kept (the last 500) and streamed to the connected pages, so
+// a remote window or a phone sees everything the server sees — including page errors mirrored
+// in from the clients. The System panel shows this live.
+const LOG_RING = [];
+function logLine(text, level = "log") {
+ const line = String(text ?? "").replace(/\s+$/, "");
+ if (!line) return;
+ LOG_RING.push(level === "error" ? `⚠ ${line}` : line);
+ if (LOG_RING.length > 500) LOG_RING.splice(0, LOG_RING.length - 500);
+ const frame = JSON.stringify({ t: "event", channel: "log:event", args: [LOG_RING[LOG_RING.length - 1]] });
+ try {
+  for (const client of wss.clients) if (client.readyState === 1) client.send(frame);
+ } catch {}
+}
+for (const level of ["log", "warn", "error"]) {
+ const original = console[level].bind(console);
+ console[level] = (...parts) => {
+  original(...parts);
+  try {
+   logLine(parts.map(part => typeof part === "string" ? part : (() => { try { return JSON.stringify(part); } catch { return String(part); } })()).join(" "), level);
+  } catch {}
+ };
+}
 // Which conversation is working on which page, so every other page (a phone waking up,
 // a second window) can show the same busy ghost the page that started it sees. The desktop
 // app cannot talk to this server directly, so it mirrors its runs into presence.json and
@@ -301,10 +328,15 @@ wss.on("connection", (ws, req) => {
   const reply = (t, id, payload) => ws.send(JSON.stringify({ t, id, ...payload }));
   try {
    if (msg.t === "invoke") {
+    if (msg.channel === "log:tail") { reply("result", msg.id, { value: LOG_RING.slice(-200) }); return; }
     const value = await host.invoke(msg.channel, ...(msg.args || []));
     reply("result", msg.id, { value });
     if (String(msg.channel).startsWith("tool:")) console.log(`[${stamp()}] ${msg.channel} ok`);
    } else if (msg.t === "send") {
+    if (msg.channel === "log:page") {
+     logLine(`[page ${data.id}] ${String((msg.args || [])[0] || "").slice(0, 400)}`);
+     return;
+    }
     if (msg.channel === "presence:set") {
      const [id, info] = msg.args || [];
      if (info && id) { mine.add(id); presence.set(id, { id, ...info }); }

@@ -16,6 +16,15 @@ const DELAY = 3500;               // let the window settle before the first chec
 const PERIOD = 6 * 60 * 60 * 1000;
 const RETRY = 10 * 60 * 1000;     // an automatic install waits for idle and tries again
 
+let lastInfo = null;
+
+// Tell every window what the updater is doing: the titlebar pill follows these.
+function announce(payload) {
+ for (const win of require('electron').BrowserWindow.getAllWindows()) {
+  try { win.webContents.send('update:event', payload); } catch {}
+ }
+}
+
 const userData = () => app.getPath('userData');
 const settings = () => core.readSettings(userData());
 const token = () => core.tokenOf(settings());
@@ -41,6 +50,7 @@ function params() {
   current: current(),
   platform: process.platform,
   packaged: app.isPackaged,
+  pending: lastInfo ? { version: lastInfo.version } : null,
  };
 }
 
@@ -79,9 +89,11 @@ async function install(info, { gate } = {}) {
  const win = require('electron').BrowserWindow.getAllWindows()[0] || null;
  const file = path.join(app.getPath('temp'), 'Prism V2-update', info.asset.name);
  const progress = win ? value => win.setProgressBar(Math.max(0, Math.min(1, value))) : null;
+ announce({ state: 'downloading', version: info.version });
  await core.download({ url: info.asset.url, file, token: token(), onProgress: progress });
  win?.setProgressBar(-1);
  if (gate && !gate()) return { deferred: true };
+ announce({ state: 'installing', version: info.version });
  if (process.platform === 'linux') {
   const root = installRoot();
   const applied = core.applyLinux({ root, tarFile: file });
@@ -131,8 +143,10 @@ function start({ isIdle } = {}) {
    console.log('[update] check failed:', error.message);
    return;
   }
-  if (!info) return;
+  if (!info) { lastInfo = null; announce({ state: 'none' }); return; }
   console.log(`[update] ${info.version} available (running ${current()})`);
+  lastInfo = { version: info.version };
+  announce({ state: 'available', version: info.version });
   const stored = settings();
   if (stored.install) {
    if (isIdle && !isIdle()) { setTimeout(run, RETRY); return; }

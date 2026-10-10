@@ -42,6 +42,10 @@ contextBridge.exposeInMainWorld('openghost', {
   add: entry => ipcRenderer.invoke('devices:add', entry),
   forget: (host, port) => ipcRenderer.invoke('devices:forget', host, port),
  },
+ sys: {
+  // Settings -> System / the server's System panel: live machine statistics.
+  stats: () => ipcRenderer.invoke('sys:stats'),
+ },
  path: {
   // A path written in a reply: does it exist, and open it.
   info: (target, cwd) => ipcRenderer.invoke('path:info', target, cwd),
@@ -92,6 +96,12 @@ contextBridge.exposeInMainWorld('openghost', {
   set: patch => ipcRenderer.invoke('update:set', patch),
   install: () => ipcRenderer.invoke('update:install'),
   run: args => ipcRenderer.invoke('update:run', args),
+  // The titlebar pill: available / downloading / installing / none.
+  onEvent: callback => {
+   const handler = (event, data) => callback(data);
+   ipcRenderer.on('update:event', handler);
+   return () => ipcRenderer.removeListener('update:event', handler);
+  },
  },
  instructions: {
   list: directory => ipcRenderer.invoke('instructions:list', directory),
