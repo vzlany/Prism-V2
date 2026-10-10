@@ -418,7 +418,7 @@ function startBot(auto = readAuto()) {
  const script = path.join(ROOT, 'tools', 'discord-bridge.mjs');
  try {
   botChild = spawn(process.execPath, [script, ...(PROFILE ? ['--profile', PROFILE] : [])], {
-   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PRISM_NO_BEACON: '1' },
    windowsHide: true,
    stdio: 'ignore',
   });

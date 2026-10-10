@@ -195,7 +195,10 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   return auto.server === true || (process.platform === "linux" && Boolean(process.env.PRISM_SUPERVISED || process.env.INVOCATION_ID || process.env.JOURNAL_STREAM));
  })();
  let beacon = null;
- if (!process.env.PRISM_NO_BEACON) {
+ // Only an engine that actually serves the web UI (a port) advertises itself: the Discord
+ // bridge's own host has nothing to open, and the app's children already carry the app's
+ // beacon (PRISM_NO_BEACON).
+ if (!process.env.PRISM_NO_BEACON && webPort > 0) {
   try {
    const { Beacon, deviceId } = require(join(ROOT, "desktop", "beacon.js"));
    beacon = new Beacon({ id: deviceId(USER_DATA), userData: USER_DATA, name: hostname(), platform: process.platform, version: appVersion, port: webPort, server: serverMode });
