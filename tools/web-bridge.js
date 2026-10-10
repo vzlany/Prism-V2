@@ -200,6 +200,14 @@ window.openghost = {
   get: async () => null,
   set: async () => null,
  },
+ update: {
+  // Settings -> About on a headless server: the host checks GitHub, swaps the install and
+  // comes back (the systemd unit, or `prism server`, restarts it).
+  params: () => invoke('update:params'),
+  set: patch => invoke('update:set', patch),
+  check: () => invoke('update:check'),
+  install: () => invoke('update:install'),
+ },
  // A turn started on this page, for the app to run.
  delegate: {
   send: request => send('delegate:add', request),

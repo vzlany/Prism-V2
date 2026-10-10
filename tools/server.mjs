@@ -34,7 +34,7 @@ function start(name, script, scriptArgs) {
  if (stopping) return;
  const child = spawn(process.execPath, [join(root, "tools", script), ...scriptArgs], {
   stdio: ["ignore", "inherit", "inherit"],
-  env: { ...process.env },
+  env: { ...process.env, PRISM_SUPERVISED: "1" },
  });
  children.set(name, child);
  log(`${name} started (pid ${child.pid})`);

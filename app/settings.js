@@ -657,8 +657,9 @@ class Settings {
    const asset = `Prism-V2-${version}-linux.tar.gz`;
    const port = auto.port || 8787;
    const download = [
-    'curl -fL -H "Authorization: token $GH_TOKEN" \\',
-    `  -o prism.tar.gz https://github.com/${repo}/releases/download/v${version}/${asset}`,
+    '# the releases are public — no token needed',
+    'curl -fL -o prism.tar.gz \\',
+    `  https://github.com/${repo}/releases/download/v${version}/${asset}`,
     'mkdir -p ~/prism-v2 && tar -xzf prism.tar.gz -C ~/prism-v2 --strip-components=1',
    ].join('\n');
    const headless = [
@@ -1035,10 +1036,12 @@ class Settings {
   if (!node) return;
   let version = '';
   try { version = (await window.openghost?.app?.version?.()) || ''; } catch {}
-  // Only the desktop app can fetch and run an installer; the web build just shows itself.
-  const updatable = Boolean(window.openghost?.desktop && window.openghost?.update?.check);
-  let auto = true;
-  try { auto = ((await window.openghost?.store?.read?.('update')) || {})?.auto !== false; } catch {}
+  // The desktop app on Windows/Linux and the headless server can both fetch and apply a
+  // release; the plain web page inside the app shows the controls too (they run in the app).
+  const update = window.openghost?.update || null;
+  const updatable = Boolean(update?.install);
+  let params = { auto: true, install: false, token: '', hasToken: false, current: version, platform: window.openghost?.platform || '' };
+  try { params = { ...params, ...((await update?.params?.().catch(() => null)) || {}) }; } catch {}
   node.innerHTML = `
    <div class="about-hero">
     <span class="about-logo">${Glyphs.ghost}</span>
@@ -1047,14 +1050,24 @@ class Settings {
      <p class="settings-hint">${escapeHtml(I18n.t('settings.about.line'))}</p>
     </span>
    </div>
-   ${updatable ? `<div class="settings-row about-row">
+   ${updatable ? `<div class="settings-row is-wide about-row">
     <div class="settings-text">
      <span class="settings-label">${escapeHtml(I18n.t('settings.about.updates'))}</span>
      <p class="settings-hint">${escapeHtml(I18n.t('settings.about.updatesHint'))}</p>
     </div>
     <div class="settings-control">
-     <label class="mcp-auto"><input type="checkbox" class="about-auto"${auto ? ' checked' : ''}>${escapeHtml(I18n.t('settings.about.auto'))}</label>
-     <button type="button" class="settings-button is-primary" data-about-check>${escapeHtml(I18n.t('settings.about.check'))}</button>
+     <div class="mcp-add-row">
+      <label class="mcp-auto"><input type="checkbox" class="about-auto"${params.auto !== false ? ' checked' : ''}>${escapeHtml(I18n.t('settings.about.auto'))}</label>
+      <label class="mcp-auto"><input type="checkbox" class="about-install"${params.install ? ' checked' : ''}>${escapeHtml(I18n.t('settings.about.install'))}</label>
+     </div>
+     <div class="mcp-add-row" style="margin-top:6px">
+      <input class="settings-key about-token" type="password" value="${escapeHtml(params.token || '')}" placeholder="${escapeHtml(I18n.t('settings.about.tokenPlaceholder'))}" autocomplete="off" spellcheck="false" aria-label="${escapeHtml(I18n.t('settings.about.token'))}">
+     </div>
+     <div class="mcp-add-row" style="margin-top:6px">
+      <button type="button" class="settings-button is-primary" data-about-check>${escapeHtml(I18n.t('settings.about.check'))}</button>
+      <button type="button" class="settings-button" data-about-install>${escapeHtml(I18n.t('settings.about.installNow'))}</button>
+     </div>
+     <p class="settings-status" data-about-status role="status"></p>
     </div>
    </div>` : ''}
    <div class="settings-row about-row">
@@ -1068,17 +1081,35 @@ class Settings {
    </div>
    <p class="settings-hint about-fine">${escapeHtml(I18n.t('settings.about.notice'))}</p>
    <p class="settings-status" data-provider="about" role="status"></p>`;
+  const say = (text, tone = '') => {
+   const box = node.querySelector('[data-about-status]');
+   if (!box) return;
+   box.textContent = text || '';
+   box.dataset.tone = tone;
+  };
+  const save = async patch => {
+   const next = await update?.set?.(patch).catch(() => null);
+   if (next) say(I18n.t('settings.about.saved'));
+   return next;
+  };
+  node.querySelector('.about-auto')?.addEventListener('change', event => save({ auto: event.target.checked }));
+  node.querySelector('.about-install')?.addEventListener('change', event => save({ install: event.target.checked }));
+  node.querySelector('.about-token')?.addEventListener('change', event => save({ token: event.target.value.trim() }));
   node.querySelector('[data-about-check]')?.addEventListener('click', async () => {
-   this.setStatus('about', I18n.t('settings.about.checking'));
-   const result = await window.openghost.update.check().catch(() => null);
-   if (result?.version) this.setStatus('about', I18n.t('settings.about.found', { version: result.version }));
-   else if (result?.latest) this.setStatus('about', I18n.t('settings.about.latest', { version }));
-   else this.setStatus('about', I18n.t('settings.about.failed'), 'error');
+   say(I18n.t('settings.about.checking'));
+   const result = await update.check().catch(() => null);
+   if (result?.version) say(I18n.t('settings.about.found', { version: result.version }));
+   else if (result?.latest) say(I18n.t('settings.about.latest', { version: result.current || version }));
+   else if (result?.error) say(I18n.t('settings.about.installFailed', { error: result.error }), 'error');
+   else say(I18n.t('settings.about.failed'), 'error');
   });
-  node.querySelector('.about-auto')?.addEventListener('change', async event => {
-   const on = event.target.checked;
-   try { await window.openghost?.store?.write?.('update', { version: 1, auto: on }); } catch {}
-   this.setStatus('about', I18n.t(on ? 'settings.about.autoOn' : 'settings.about.autoOff'));
+  node.querySelector('[data-about-install]')?.addEventListener('click', async () => {
+   say(I18n.t('settings.about.installing'));
+   const result = await update.install().catch(() => null);
+   if (result?.ok) say(I18n.t('settings.about.installOk', { version: result.version }));
+   else if (result?.latest) say(I18n.t('settings.about.latest', { version: result.current || version }));
+   else if (result?.error) say(I18n.t('settings.about.installFailed', { error: result.error }), 'error');
+   else say(I18n.t('settings.about.failed'), 'error');
   });
  }
 

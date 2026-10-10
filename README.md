@@ -26,6 +26,13 @@ here is in this repository; nothing else was removed.
   password set in Settings → Server lets the agent run `sudo apt-get install -y …` itself:
   the app answers sudo's prompt through an askpass helper, and the password never reaches the
   model. Downloads: see the release assets (`Prism-V2-<version>-linux.tar.gz`).
+- **Updates itself — or the agent does.** Settings → About checks GitHub at launch and every
+  six hours, and with **Install automatically** on the new release is applied by itself while
+  the app is idle: on Windows the Setup.exe replaces the install, on Linux the directory is
+  swapped and the process comes back (systemd, or `prism server`, restarts it). The same
+  works on the web and from Discord by asking the agent — "update Prism V2" runs the
+  `update_prism` tool, which downloads, applies and restarts it. Releases are public, so no
+  token is needed; a GitHub token can be set anyway for rate limits or a private fork.
 - **The website runs its turns in the app.** When the desktop app is running, a message sent
   from `prism web` (the phone) is handed to the app through a small file bridge: the app runs
   the turn with its tools, browser, skills and keys, streams it in its own window, and the

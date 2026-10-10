@@ -102,6 +102,10 @@ export function createEngineHost({ profile = "" } = {}) {
  Instructions.register(allow);
  Skills.register(allow);
  Discord.register(allow);
+ // Watch LLM activity: an automatic update swaps the install only when nothing streams.
+ let llmActive = 0;
+ const llmStart = listeners.get("llm:start");
+ if (llmStart) listeners.set("llm:start", (...args) => { llmActive++; return llmStart(...args); });
  // The mode menu's "DM me on Discord when done" switch on a headless web run.
  handlers.set("discord:message", (event, payload) => Discord.note(
   typeof payload?.text === "string" ? payload.text : "",
@@ -173,6 +177,83 @@ export function createEngineHost({ profile = "" } = {}) {
   return electron.shell.openPath(file);
  });
 
+ // ------------------------------------------------------------- updates (headless server)
+ // The About page on the web and the AI's update_prism tool run here: the newest release is
+ // downloaded and the install directory swapped in place; when a supervisor runs this process
+ // (systemd, or `prism server`), it steps aside and the new build comes right back up.
+ const updateCore = require(join(ROOT, "desktop", "update-core.js"));
+ const installRoot = resolve(ROOT, "..", "..");
+ const updateSettings = patch => updateCore.writeSettings(USER_DATA, {
+  ...(patch?.auto !== undefined ? { auto: patch.auto === true } : {}),
+  ...(patch?.install !== undefined ? { install: patch.install === true } : {}),
+  ...(patch?.token !== undefined ? { token: String(patch.token || "") } : {}),
+ });
+ const updateParams = () => {
+  const stored = updateCore.readSettings(USER_DATA);
+  return { ...stored, hasToken: Boolean(updateCore.tokenOf(stored)), current: updateCore.currentVersion(ROOT), platform: process.platform, server: true };
+ };
+ const supervised = () => Boolean(process.env.PRISM_SUPERVISED || process.env.INVOCATION_ID || process.env.JOURNAL_STREAM);
+ async function runUpdate({ force = false } = {}) {
+  const settings = updateCore.readSettings(USER_DATA);
+  const token = updateCore.tokenOf(settings);
+  let release = null;
+  try { release = await updateCore.latest({ token }); } catch (error) { return { error: error.message }; }
+  if (!release?.version) return { error: "no release found on GitHub" };
+  const current = updateCore.currentVersion(ROOT);
+  if (!force && !updateCore.isNewer(release.version, current)) return { latest: true, current };
+  if (process.platform !== "linux") return { error: "the headless updater runs on Linux — update from the app on Windows" };
+  const asset = updateCore.pickAsset(release, "linux");
+  if (!asset) return { error: `v${release.version} has no Linux build` };
+  const file = join(paths.temp, "prism-update", asset.name);
+  try { await updateCore.download({ url: asset.url, file, token }); } catch (error) { return { error: error.message }; }
+  let applied = null;
+  try { applied = updateCore.applyLinux({ root: installRoot, tarFile: file }); } catch (error) { return { error: error.message }; }
+  try {
+   const Server = require(join(ROOT, "desktop", "server.js"));
+   await updateCore.fixSandbox(installRoot, Server.sudoEnv());
+  } catch {}
+  const up = supervised();
+  if (up) setTimeout(() => process.exit(75), 2500);
+  return { ok: true, version: applied.version || release.version, restart: up };
+ }
+ handlers.set("update:params", () => updateParams());
+ handlers.set("update:set", (event, patch) => { updateSettings(patch); return updateParams(); });
+ handlers.set("update:check", async () => {
+  const settings = updateCore.readSettings(USER_DATA);
+  try {
+   const release = await updateCore.latest({ token: updateCore.tokenOf(settings) });
+   if (!release?.version) return { error: "no release found on GitHub" };
+   const current = updateCore.currentVersion(ROOT);
+   return updateCore.isNewer(release.version, current) ? { version: release.version } : { latest: true, current };
+  } catch (error) {
+   return { error: error.message };
+  }
+ });
+ handlers.set("update:install", async () => {
+  const result = await runUpdate({ force: false });
+  return { ...result, message: updateCore.message(result) };
+ });
+ handlers.set("update:run", async (event, args) => {
+  const result = await runUpdate({ force: args?.force === true });
+  return { ...result, message: updateCore.message(result) };
+ });
+ // Auto-update on a server: every six hours, when "Install automatically" is on and nothing
+ // is streaming. The supervisor brings the new build back after the 75 exit above.
+ if (process.platform === "linux") {
+  const tick = async () => {
+   try {
+    if (!updateCore.readSettings(USER_DATA).install || llmActive > 0) return;
+    const result = await runUpdate({ force: false });
+    if (result.ok) console.log(`[update] ${updateCore.message(result)}`);
+    else if (result.error && !result.latest) console.log(`[update] auto-update skipped: ${result.error}`);
+   } catch (error) {
+    console.log(`[update] auto-update failed: ${error.message}`);
+   }
+  };
+  setTimeout(tick, 90 * 1000);
+  setInterval(tick, 6 * 60 * 60 * 1000);
+ }
+
  return {
   ROOT,
   USER_DATA,
@@ -180,7 +261,16 @@ export function createEngineHost({ profile = "" } = {}) {
   handlers,
   listeners,
   engines: { Tools, MCP, Memory, LLM, Discord, Skills },
-  setSender(next) { sender = next; },
+  setSender(next) {
+   const send = typeof next?.send === "function" ? next.send : noop;
+   sender = { ...next, send: (channel, ...args) => {
+    if (channel === "llm:event") {
+     const type = args[0]?.type;
+     if (type === "done" || type === "error") llmActive = Math.max(0, llmActive - 1);
+    }
+    return send(channel, ...args);
+   } };
+  },
   // Calls a registered ipcMain.handle-style handler the way a renderer invoke would.
   invoke(channel, ...args) {
    const handler = handlers.get(channel);

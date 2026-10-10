@@ -1,98 +1,56 @@
 'use strict';
 
-// Looks at the GitHub releases of this repository when the app starts. A newer tag than the
-// running version gets a plain dialog: download the Setup.exe and start it, or say Later.
+// Looks at the GitHub releases of this repository at launch (and every six hours). A newer
+// tag gets a plain dialog: download it and start it, or say Later. With "Install updates
+// automatically" on (Settings -> About) the update is applied by itself once the app is idle:
+// on Windows the Setup.exe is downloaded and started (the app quits while it installs); on
+// Linux the tar.gz is downloaded, the install directory swapped, the sandbox bit fixed and
+// the app relaunched. The releases API needs a GitHub token while the repository is private.
 const { app, dialog, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const https = require('node:https');
+const core = require('./update-core');
+const Server = require('./server');
 
-const REPO = 'vzlany/Prism-V2';
-const DELAY = 3500;      // let the window settle before the question
-const TIMEOUT = 12000;
+const DELAY = 3500;               // let the window settle before the first check
+const PERIOD = 6 * 60 * 60 * 1000;
+const RETRY = 10 * 60 * 1000;     // an automatic install waits for idle and tries again
 
-// Settings → About keeps "Check for updates at launch" in the store; unset means on.
-const settingFile = () => path.join(app.getPath('userData'), 'store', 'update.json');
-function autoEnabled() {
- try {
-  return JSON.parse(fs.readFileSync(settingFile(), 'utf8'))?.auto !== false;
- } catch {
-  return true;
- }
-}
-
-const parts = text => String(text).replace(/^v/i, '').split('.').map(part => parseInt(part, 10) || 0);
-const isNewer = (a, b) => {
- const x = parts(a), y = parts(b);
- for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
- return false;
-};
-
-function request(url, headers = {}) {
- return new Promise((resolve, reject) => {
-  const call = https.get(url, { headers: { 'User-Agent': 'Prism V2', Accept: 'application/vnd.github+json', ...headers } }, response => {
-   if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-    response.resume();
-    request(response.headers.location, headers).then(resolve, reject);
-    return;
-   }
-   if (response.statusCode !== 200) {
-    response.resume();
-    reject(new Error(`HTTP ${response.statusCode}`));
-    return;
-   }
-   let body = '';
-   response.setEncoding('utf8');
-   response.on('data', chunk => { body += chunk; });
-   response.on('end', () => resolve(body));
-  });
-  call.setTimeout(TIMEOUT, () => call.destroy(new Error('timed out')));
-  call.on('error', reject);
- });
-}
-
-// The running version, or a stand-in when testing the flow on purpose.
+const userData = () => app.getPath('userData');
+const settings = () => core.readSettings(userData());
+const token = () => core.tokenOf(settings());
 const current = () => process.env.PRISM_UPDATE_TEST_VERSION || app.getVersion();
+const isNewer = core.isNewer;
+const installRoot = () => path.dirname(process.resourcesPath);
 
+// The release for this machine when something newer exists, else null.
 async function check() {
- const release = JSON.parse(await request(`https://api.github.com/repos/${REPO}/releases/latest`));
- const version = String(release?.tag_name || '').replace(/^v/i, '');
- if (!version || !isNewer(version, current())) return null;
- const asset = (release.assets || []).find(item => /setup\.exe$/i.test(item.name || ''));
- return { version, page: release.html_url, asset: asset ? { name: asset.name, url: asset.browser_download_url } : null };
+ const release = await core.latest({ token: token() });
+ if (!release?.version || !isNewer(release.version, current())) return null;
+ return { version: release.version, page: release.page, asset: core.pickAsset(release, process.platform) };
 }
 
-function download(url, file, onProgress) {
- return new Promise((resolve, reject) => {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const sink = fs.createWriteStream(`${file}.part`);
-  const call = https.get(url, { headers: { 'User-Agent': 'Prism V2' } }, response => {
-   if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-    sink.close(); fs.rmSync(`${file}.part`, { force: true });
-    download(response.headers.location, file, onProgress).then(resolve, reject);
-    return;
-   }
-   if (response.statusCode !== 200) { sink.close(); reject(new Error(`HTTP ${response.statusCode}`)); return; }
-   const total = Number(response.headers['content-length']) || 0;
-   let got = 0;
-   response.on('data', chunk => { got += chunk.length; onProgress?.(total ? got / total : 0); });
-   response.pipe(sink);
-   sink.on('finish', () => { sink.close(() => { fs.renameSync(`${file}.part`, file); resolve(file); }); });
-  });
-  call.setTimeout(TIMEOUT, () => call.destroy(new Error('timed out')));
-  call.on('error', error => { sink.close(); reject(error); });
+// Everything the About page and the AI tool need.
+function params() {
+ const stored = settings();
+ return {
+  auto: stored.auto !== false,
+  install: stored.install === true,
+  token: stored.token,
+  hasToken: Boolean(token()),
+  current: current(),
+  platform: process.platform,
+  packaged: app.isPackaged,
+ };
+}
+
+function updateSettings(patch) {
+ core.writeSettings(userData(), {
+  ...(patch?.auto !== undefined ? { auto: patch.auto === true } : {}),
+  ...(patch?.install !== undefined ? { install: patch.install === true } : {}),
+  ...(patch?.token !== undefined ? { token: String(patch.token || '') } : {}),
  });
-}
-
-async function install(info) {
- const win = require('electron').BrowserWindow.getAllWindows()[0] || null;
- const file = path.join(app.getPath('temp'), 'Prism V2-update', info.asset.name);
- const progress = win ? progress => win.setProgressBar(Math.max(0, Math.min(1, progress))) : null;
- await download(info.asset.url, file, progress);
- win?.setProgressBar(-1);
- await shell.openPath(file);
- // The installer replaces this very installation: step aside once it is up.
- setTimeout(() => app.quit(), 1500);
+ return params();
 }
 
 // The question both the launch check and the About page ask.
@@ -110,28 +68,91 @@ async function prompt(win, info) {
  return response === 0;
 }
 
-// Runs in the background; a failed check is only a quiet line in the log.
-function start() {
+// Downloads and applies the release. On Windows the app quits and the Setup.exe replaces it;
+// on Linux the install directory is swapped and the app relaunches itself.
+async function install(info) {
+ if (!info?.asset) {
+  shell.openExternal(info?.page || `https://github.com/${core.REPO}/releases`);
+  return { opened: true };
+ }
+ const win = require('electron').BrowserWindow.getAllWindows()[0] || null;
+ const file = path.join(app.getPath('temp'), 'Prism V2-update', info.asset.name);
+ const progress = win ? value => win.setProgressBar(Math.max(0, Math.min(1, value))) : null;
+ await core.download({ url: info.asset.url, file, token: token(), onProgress: progress });
+ win?.setProgressBar(-1);
+ if (process.platform === 'linux') {
+  const root = installRoot();
+  const applied = core.applyLinux({ root, tarFile: file });
+  await core.fixSandbox(root, Server.sudoEnv()).catch(() => false);
+  // The new build is in place; the running one steps aside.
+  setTimeout(() => { app.relaunch(); app.exit(0); }, 1200);
+  return { ok: true, version: applied.version || info.version, restart: true };
+ }
+ await shell.openPath(file);
+ // The installer replaces this very installation: step aside once it is up.
+ setTimeout(() => app.quit(), 2500);
+ return { ok: true, version: info.version, restart: true };
+}
+
+// A manual "update now" (About page, or the AI's update_prism tool). force installs even when
+// the running version equals the latest - useful to repair an install.
+async function updateNow({ force = false, onProgress } = {}) {
+ let release = null;
+ try {
+  release = await core.latest({ token: token() });
+ } catch (error) {
+  return { error: error.message };
+ }
+ if (!release?.version) return { error: 'no release found on GitHub' };
+ const newer = isNewer(release.version, current());
+ if (!newer && !force) return { latest: true, current: current() };
+ const asset = core.pickAsset(release, process.platform);
+ if (!asset) return { error: `v${release.version} has no build for this machine` };
+ const info = { version: release.version, page: release.page, asset };
+ try {
+  const applied = await install(info);
+  return { ok: true, version: applied.version || info.version, restart: applied.restart !== false };
+ } catch (error) {
+  return { error: error.message };
+ }
+}
+
+// Runs in the background; a failed check is only a quiet line in the log. `isIdle` tells
+// whether no turn is running (automatic installs wait for one).
+function start({ isIdle } = {}) {
  if (!app.isPackaged && !process.env.PRISM_UPDATE_TEST_VERSION) return;
- // The update flow downloads a Windows Setup.exe; on Linux and macOS the releases page is
- // the way to update, so the check stays quiet there.
- if (process.platform !== 'win32' && !process.env.PRISM_UPDATE_TEST_VERSION) return;
- if (!autoEnabled()) return;
- setTimeout(() => {
-  check().then(async info => {
-   if (!info) return;
-   console.log(`[update] ${info.version} available (running ${current()})`);
-   const win = require('electron').BrowserWindow.getAllWindows()[0] || null;
-   if (!(await prompt(win, info))) return;
-   if (!info.asset) { shell.openExternal(info.page); return; }
+ const run = async () => {
+  let info = null;
+  try {
+   info = await check();
+  } catch (error) {
+   console.log('[update] check failed:', error.message);
+   return;
+  }
+  if (!info) return;
+  console.log(`[update] ${info.version} available (running ${current()})`);
+  const stored = settings();
+  if (stored.install) {
+   if (isIdle && !isIdle()) { setTimeout(run, RETRY); return; }
    try {
     await install(info);
    } catch (error) {
-    console.log('[update] download failed:', error.message);
+    console.log('[update] automatic install failed:', error.message);
     shell.openExternal(info.page);
    }
-  }).catch(error => console.log('[update] check failed:', error.message));
- }, DELAY);
+   return;
+  }
+  if (stored.auto === false) return; // manual checks only
+  if (!(await prompt(require('electron').BrowserWindow.getAllWindows()[0] || null, info))) return;
+  try {
+   await install(info);
+  } catch (error) {
+   console.log('[update] download failed:', error.message);
+   shell.openExternal(info.page);
+  }
+ };
+ setTimeout(run, DELAY);
+ setInterval(run, PERIOD);
 }
 
-module.exports = { start, check, prompt, install, isNewer };
+module.exports = { start, check, prompt, install, updateNow, params, updateSettings, describe: core.message, isNewer, installRoot, prune: () => core.pruneOld(installRoot()) };

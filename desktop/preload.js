@@ -76,7 +76,13 @@ contextBridge.exposeInMainWorld('openghost', {
   setActiveTurn: active => ipcRenderer.invoke('app:set-background-throttle', !active),
  },
  update: {
+  // Settings -> About: check / install now, the switches (check at launch, install
+  // automatically) and the GitHub token the private repository's releases need.
   check: () => ipcRenderer.invoke('update:check'),
+  params: () => ipcRenderer.invoke('update:params'),
+  set: patch => ipcRenderer.invoke('update:set', patch),
+  install: () => ipcRenderer.invoke('update:install'),
+  run: args => ipcRenderer.invoke('update:run', args),
  },
  instructions: {
   list: directory => ipcRenderer.invoke('instructions:list', directory),

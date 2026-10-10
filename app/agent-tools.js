@@ -128,6 +128,9 @@ const SCHEMAS = [
   text: { type: 'string', description: 'The message to send (ask), one short paragraph' },
   wait: { type: 'boolean', description: 'Wait for the answer, up to two minutes (ask, default true)' },
  }, ['action']),
+ fn('update_prism', 'Update Prism V2 itself to the latest release on GitHub: downloads the build for this machine, applies it and restarts the app or the server it runs in. Use it when the user asks to update Prism, check whether a newer version exists, or repair an install. The releases are public, so no key is needed (a GitHub token can be set in Settings → About for rate limits or a private fork). Set force only when the user explicitly wants the latest release reinstalled.', {
+  force: { type: 'boolean', description: 'Install the latest release even when the running version already matches it' },
+ }, []),
  fn('ask_user', 'Ask the user to choose before you continue. Shows a card with lettered options (a, b, c, …) and a field for their own answer, and waits for the choice. Use it for decisions that are genuinely up to the user — which approach, which name, plan approval — never for things you can look up yourself. Give two to four short options, mark the one you recommend with recommended: true (it is picked automatically after three minutes if the user stays away), and for a "go ahead" choice, set its value to exactly "build".', {
   question: { type: 'string', description: 'The question, one short line' },
   options: {
@@ -620,6 +623,10 @@ window.AgentTools = {
   if (name === 'todo') {
    const reply = await window.__prismTodo?.(args, id);
    return reply || 'The todo list is only available inside the app.';
+  }
+  if (name === 'update_prism') {
+   const reply = await window.openghost?.update?.run?.(args);
+   return reply?.message || 'Updating is only available in the desktop app or the server build.';
   }
   if (name === 'ask_user') {
    if (!window.QuestionCard) return 'The question card is not available in this build.';

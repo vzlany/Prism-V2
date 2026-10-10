@@ -655,16 +655,30 @@ ipcMain.handle('update:check', async event => {
  if (!fromApp(event)) return null;
  try {
   const info = await Updater.check();
-  if (!info) return { latest: true };
+  if (!info) return { latest: true, current: app.getVersion() };
   const win = BrowserWindow.fromWebContents(event.sender);
   if (await Updater.prompt(win, info)) {
    if (info.asset) Updater.install(info).catch(() => shell.openExternal(info.page));
    else shell.openExternal(info.page);
   }
   return { version: info.version };
- } catch {
-  return null;
+ } catch (error) {
+  return { error: String(error?.message || error) };
  }
+});
+// Settings -> About: the update switches, the GitHub token, and Update now.
+ipcMain.handle('update:params', event => (fromApp(event) ? Updater.params() : null));
+ipcMain.handle('update:set', (event, patch) => (fromApp(event) ? Updater.updateSettings(patch) : null));
+ipcMain.handle('update:install', async event => {
+ if (!fromApp(event)) return null;
+ const result = await Updater.updateNow({ force: false });
+ return { ...result, message: Updater.describe(result) };
+});
+// The AI's update_prism tool: same path, optionally forced.
+ipcMain.handle('update:run', async (event, args) => {
+ if (!fromApp(event)) return null;
+ const result = await Updater.updateNow({ force: args?.force === true });
+ return { ...result, message: Updater.describe(result) };
 });
 ipcMain.on('browser:shown', (event, value) => { if (fromApp(event)) Browser.setShown(value); });
 ipcMain.handle('tool:cancel', (event, id) => { if (fromApp(event)) Tools.cancel(id); });
@@ -750,7 +764,9 @@ if (process.argv.includes('--create-shortcut')) {
   applyAuto();
   startWeb();
   startBot();
-  Updater.start();
+  // Old trees from an earlier Linux self-update are cleared once nothing runs from them.
+  if (app.isPackaged && process.platform === 'linux') Updater.prune();
+  Updater.start({ isIdle: () => presenceRuns.size === 0 });
   MCP.init().catch(() => {});
   win.on('closed', () => {
    win = null;
