@@ -8897,20 +8897,26 @@ body.has-lightbox{overflow:hidden}
 html.is-simple .tool-group{border-left:2px solid rgba(var(--fg-rgb),.14);margin-left:3px;padding-left:10px}
 html.is-simple .message-thinking{border-left:2px solid rgba(var(--fg-rgb),.14);margin:2px 0 2px 3px;padding-left:10px;background:transparent;box-shadow:none}
 html.is-simple .message-thinking-head{height:24px;padding:0 2px}
-/* The steps inside a line: no frame, the reason and the time, each expandable. */
-html.is-simple .tool-group .tool:not(.is-parallel){background:transparent;box-shadow:none;border-radius:0;margin:1px 0;animation:none}
-html.is-simple .tool-group .tool:not(.is-parallel) .tool-snake{display:none}
-html.is-simple .tool-group .tool:not(.is-parallel) .tool-head{height:24px;padding:0 2px;gap:7px;border-radius:7px}
-html.is-simple .tool-group .tool:not(.is-parallel) .tool-head:hover{background:rgba(var(--fg-rgb),.05)}
-html.is-simple .tool-group .tool:not(.is-parallel) .tool-title,
-html.is-simple .tool-group .tool:not(.is-parallel) .tool-summary,
-html.is-simple .tool-group .tool:not(.is-parallel) .tool-stat,
-html.is-simple .tool-group .tool:not(.is-parallel) .tool-status{display:none}
-html.is-simple .tool-group .tool:not(.is-parallel) .tool-reason{display:inline;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--fg-secondary)}
-html.is-simple .tool-group .tool:not(.is-parallel) .tool-reason::before{content:"•";margin-right:6px;color:var(--fg-tertiary)}
-html.is-simple .tool-group .tool:not(.is-parallel) .tool-time{display:inline;font-size:11px;color:var(--fg-tertiary);white-space:nowrap}
-html.is-simple .tool-group .tool:not(.is-parallel) .tool-chevron{opacity:.6}
-html.is-simple .tool-group .tool.is-error:not(.is-parallel) .tool-reason{color:rgb(var(--danger-rgb))}
+/* Every tool card, grouped or not: no frame, the reason and the time, each expandable. This
+   covers cards already on screen when the setting is flipped and chats restored from disk,
+   which never went through the grouper. */
+html.is-simple .tool:not(.is-parallel){background:transparent;box-shadow:none;border-radius:0;margin:1px 0;animation:none}
+html.is-simple .tool:not(.is-parallel) .tool-snake{display:none}
+html.is-simple .tool:not(.is-parallel) .tool-head{height:24px;padding:0 2px;gap:7px;border-radius:7px}
+html.is-simple .tool:not(.is-parallel) .tool-head:hover{background:rgba(var(--fg-rgb),.05)}
+html.is-simple .tool:not(.is-parallel) .tool-title,
+html.is-simple .tool:not(.is-parallel) .tool-summary,
+html.is-simple .tool:not(.is-parallel) .tool-stat,
+html.is-simple .tool:not(.is-parallel) .tool-status{display:none}
+html.is-simple .tool:not(.is-parallel) .tool-reason{display:inline;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--fg-secondary)}
+html.is-simple .tool:not(.is-parallel) .tool-reason::before{content:"•";margin-right:6px;color:var(--fg-tertiary)}
+html.is-simple .tool:not(.is-parallel) .tool-time{display:inline;font-size:11px;color:var(--fg-tertiary);white-space:nowrap}
+html.is-simple .tool:not(.is-parallel) .tool-chevron{opacity:.6}
+/* A line only opens its details when clicked (errors open themselves). */
+html.is-simple .tool:not(.is-parallel) .tool-body{display:none}
+html.is-simple .tool:not(.is-parallel).is-open.is-touched .tool-body{display:block}
+html.is-simple .tool:not(.is-parallel).is-error .tool-body{display:block}
+html.is-simple .tool.is-error:not(.is-parallel) .tool-reason{color:rgb(var(--danger-rgb))}
 html.is-simple .tool-group.has-error .tool-group-label{background:none;background-clip:border-box;-webkit-background-clip:border-box;color:rgb(var(--danger-rgb));animation:none}
 html.is-simple .tool-group-done.is-error{color:rgb(var(--danger-rgb))}
 

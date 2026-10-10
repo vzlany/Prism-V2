@@ -75,6 +75,9 @@ class ToolCard {
   this.head.addEventListener('click', () => {
    this.touched = true;
    this.open = !this.open && this.hasBody();
+   // Simple visuals keys the open body off this class, so a card that existed before the
+   // setting was flipped still opens on click.
+   this.el.classList.add('is-touched');
    this.sync();
   });
   this.sync();
