@@ -10,7 +10,7 @@
 // The bot connects to the Discord gateway, so it shows online with a working status; the
 // REST poll below stays as a fallback if the gateway cannot be reached.
 import { createEngineHost } from "./engine-host.mjs";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, join, resolve } from "node:path";
 import { WebSocket } from "ws";
@@ -990,5 +990,25 @@ if (ONCE) {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  // The token and user id can be changed from the web UI (Settings -> Discord) without a
+  // restart: re-read the file and reconnect the gateway when they change.
+  try {
+   let debounce = 0;
+   watch(configFile, () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+     const fresh = readJson(configFile);
+     const changed = fresh.token !== config.token || String(fresh.userId || "") !== String(config.userId || "");
+     if (!changed) return;
+     const first = !config.token;
+     config.token = fresh.token;
+     config.userId = fresh.userId;
+     log("discord.json changed — reconnecting");
+     try { gateway?.close(); } catch {}
+     if (first || !shuttingDown) connectGateway();
+    }, 400);
+   });
+  } catch {}
  })();
 }

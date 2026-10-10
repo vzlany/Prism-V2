@@ -163,10 +163,11 @@ window.openghost = {
   remove: id => invoke('memory:remove', id),
  },
  discord: {
-  // The web can send the same "finished" DM through the engine host.
-  get: async () => ({ enabled: false, userId: '', hasToken: false }),
-  set: async () => ({ enabled: false, userId: '', hasToken: false }),
-  test: async () => ({ ok: false, error: 'works only in the desktop app' }),
+  // Settings -> Discord from the web: read/write the same discord.json the app and the bot
+  // use, so a server's token and user id can be managed from a phone or another device.
+  get: () => invoke('discord:get'),
+  set: patch => invoke('discord:set', patch),
+  test: () => invoke('discord:test'),
   dm: payload => invoke('discord:dm', payload),
   message: payload => invoke('discord:message', payload),
  },

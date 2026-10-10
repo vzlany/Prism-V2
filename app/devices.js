@@ -100,8 +100,11 @@ class DevicePicker {
 
  async choose(id, offline = false) {
   if (offline) { this.note.textContent = I18n.t('devices.offline'); return; }
+  const row = this.list.querySelector(`.device-row[data-device="${window.CSS?.escape ? CSS.escape(id) : id}"]`);
+  this.note.textContent = I18n.t('devices.opening', { name: row?.querySelector('.device-name')?.textContent?.trim() || 'device' });
   const result = await pick({ id });
-  if (result?.mode === 'offline' || result?.error) { this.note.textContent = result.error || I18n.t('devices.offline'); return; }
+  if (result?.mode === 'offline') { this.note.textContent = I18n.t('devices.offline'); return; }
+  if (result?.mode === 'error') { this.note.textContent = I18n.t('devices.failed', { name: result.name || 'device', error: result.error || '' }); return; }
   this.hide();
  }
 
@@ -150,10 +153,23 @@ class DeviceMenu {
   menu.addEventListener('click', async event => {
    const row = event.target.closest('.device-row');
    if (!row) return;
+   const say = text => {
+    let box = menu.querySelector('[data-device-note]');
+    if (!box) {
+     box = document.createElement('div');
+     box.className = 'device-note';
+     box.setAttribute('data-device-note', '1');
+     menu.append(box);
+    }
+    box.textContent = text;
+   };
    if (row.dataset.current === '1') { menu.hidePopover?.(); return; }
-   if (row.dataset.offline === '1') return;
+   if (row.dataset.offline === '1') { say(I18n.t('devices.offline')); return; }
+   say(I18n.t('devices.opening', { name: row.querySelector('.device-name')?.textContent?.trim() || 'device' }));
+   const result = await pick({ id: row.dataset.device });
+   if (result?.mode === 'offline') { say(I18n.t('devices.offline')); return; }
+   if (result?.mode === 'error') { say(I18n.t('devices.failed', { name: result.name || 'device', error: result.error || '' })); return; }
    menu.hidePopover?.();
-   await pick({ id: row.dataset.device });
   });
   document.addEventListener('pointerdown', event => {
    if (!this.menu.matches(':popover-open')) return;

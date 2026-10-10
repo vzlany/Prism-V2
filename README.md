@@ -35,10 +35,15 @@ here is in this repository; nothing else was removed.
   that is the server's files and programs, never this PC's. A device in server mode asks
   nothing (it IS the server) and its composer shows only the **DM me on Discord** switch.
   The model is told where it runs and who is writing from where: `[sent from vzlany over the
-  network]`, `[sent from the website]`, `[sent from Discord]`.
+  network]`, `[sent from the website]`, `[sent from Discord]`. Every Settings page works
+  there — providers, prompt, MCP, memories, skills, instructions and Discord (token, user id,
+  DM switch, Test) are the *server's* own and are edited from the same window; the running
+  bot picks up a changed token live. A device that does not answer no longer strands the app:
+  this PC's window comes back with the reason.
 - **Updates itself — or the agent does.** Settings → About checks GitHub at launch and every
   six hours, and with **Install automatically** on the new release is applied by itself while
-  the app is idle: on Windows the Setup.exe replaces the install, on Linux the directory is
+  the app is idle — the check runs before and again after the download, so no update ever
+  lands while an agent or a conversation is working. On Windows the Setup.exe replaces the install, on Linux the directory is
   swapped and the process comes back (systemd, or `prism server`, restarts it). The same
   works on the web and from Discord by asking the agent — "update Prism V2" runs the
   `update_prism` tool, which downloads, applies and restarts it. Releases are public, so no

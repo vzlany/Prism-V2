@@ -412,6 +412,8 @@ const STRINGS = {
   'devices.addHint': 'For networks where discovery is blocked: the device\'s LAN address, port 8787 unless it was changed.',
   'devices.switch': 'Device',
   'devices.offline': 'That device has no web server running, so it cannot be opened from here yet.',
+  'devices.failed': 'Could not open {name}: {error}',
+  'devices.opening': 'Opening {name}…',
   'settings.about.tab': 'About',
   'settings.about.line': 'A personal desktop agent (Windows and Linux), forked from OpenGhost — commands, files, git, the web, and drawings next to the answer.',
   'settings.about.updates': 'Updates',

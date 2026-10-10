@@ -69,8 +69,9 @@ async function prompt(win, info) {
 }
 
 // Downloads and applies the release. On Windows the app quits and the Setup.exe replaces it;
-// on Linux the install directory is swapped and the app relaunches itself.
-async function install(info) {
+// on Linux the install directory is swapped and the app relaunches itself. `gate` is asked
+// again after the download: a turn that started meanwhile keeps the update waiting.
+async function install(info, { gate } = {}) {
  if (!info?.asset) {
   shell.openExternal(info?.page || `https://github.com/${core.REPO}/releases`);
   return { opened: true };
@@ -80,6 +81,7 @@ async function install(info) {
  const progress = win ? value => win.setProgressBar(Math.max(0, Math.min(1, value))) : null;
  await core.download({ url: info.asset.url, file, token: token(), onProgress: progress });
  win?.setProgressBar(-1);
+ if (gate && !gate()) return { deferred: true };
  if (process.platform === 'linux') {
   const root = installRoot();
   const applied = core.applyLinux({ root, tarFile: file });
@@ -135,7 +137,11 @@ function start({ isIdle } = {}) {
   if (stored.install) {
    if (isIdle && !isIdle()) { setTimeout(run, RETRY); return; }
    try {
-    await install(info);
+    const applied = await install(info, { gate: isIdle });
+    if (applied?.deferred) {
+     console.log('[update] a turn is running — the update waits');
+     setTimeout(run, RETRY);
+    }
    } catch (error) {
     console.log('[update] automatic install failed:', error.message);
     shell.openExternal(info.page);

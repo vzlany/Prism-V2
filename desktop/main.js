@@ -70,6 +70,10 @@ const TITLE_BAR = { height: 36, symbolColor: '#9a9a9a' };
 const STORE_KEY = /^[a-z0-9_-]+(\/[a-z0-9_-]+)?$/;
 
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
+// A desktop app must never die on a stray rejected promise (the old remote-window code could
+// crash the whole app when a device did not answer): log it and keep running.
+process.on('unhandledRejection', error => console.log('[main] unhandled rejection:', error?.stack || String(error)));
+process.on('uncaughtException', error => console.log('[main] uncaught exception:', error?.stack || String(error)));
 // Both the packaged build and a development checkout claim com.prismv2.app: Windows dresses
 // the taskbar button with the icon of the Start Menu shortcut that carries the same identity
 // (`installIdentityShortcut`), and that is what gives a checkout the app's own icon instead
@@ -320,48 +324,87 @@ function windowBounds() {
  };
 }
 
-function openRemoteWindow(device) {
- if (!device?.url) return null;
+// Waits until the page inside a window really loaded (or failed): the picker answers with a
+// real result, and a failure never leaves a gray window behind.
+function waitForLoad(win, timeout = 20000) {
+ return new Promise(resolve => {
+  let done = false;
+  const settle = (ok, error = '') => {
+   if (done) return;
+   done = true;
+   clearTimeout(timer);
+   win.webContents.removeListener('did-fail-load', fail);
+   win.webContents.removeListener('did-finish-load', finish);
+   resolve({ ok, error });
+  };
+  const finish = () => settle(true);
+  const fail = (event, code, description, url, isMainFrame) => {
+   if (isMainFrame === false) return;
+   settle(false, String(description || 'the page did not load'));
+  };
+  const timer = setTimeout(() => settle(false, 'the device did not answer in time'), timeout);
+  win.webContents.on('did-fail-load', fail);
+  win.webContents.on('did-finish-load', finish);
+ });
+}
+
+// Opens (or reuses) the remote device window. Resolves once the page loaded: on failure the
+// window is closed again and this PC's window comes back, so a dead server can never strand
+// the app on a gray screen.
+async function openRemoteWindow(device) {
+ if (!device?.url) return { ok: false, error: 'that device has no web address' };
  const url = `${device.url}${device.url.includes('?') ? '&' : '?'}from=${encodeURIComponent(os.hostname())}`;
- if (remoteWin && !remoteWin.isDestroyed()) {
-  remoteWin.setTitle(`Prism V2 — ${device.name}`);
-  remoteWin.loadURL(url);
-  showWindow(remoteWin);
-  if (localWin && !localWin.isDestroyed()) localWin.hide();
-  return remoteWin;
+ let win = remoteWin && !remoteWin.isDestroyed() ? remoteWin : null;
+ if (!win) {
+  win = new BrowserWindow({
+   ...windowBounds(),
+   center: true,
+   minWidth: 760,
+   minHeight: 540,
+   show: false,
+   title: `Prism V2 — ${device.name}`,
+   icon: ICON,
+   backgroundColor: CHAT_BG,
+   ...(process.platform === 'linux' ? {} : {
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: CHAT_BG, symbolColor: TITLE_BAR.symbolColor, height: TITLE_BAR.height },
+   }),
+   webPreferences: {
+    contextIsolation: true,
+    sandbox: true,
+    spellcheck: true,
+    autoplayPolicy: 'no-user-gesture-required',
+   },
+  });
+  win.__deviceName = device.name;
+  win.webContents.setWindowOpenHandler(({ url: target }) => {
+   external(target);
+   return { action: 'deny' };
+  });
+  win.webContents.on('console-message', (event, level, message) => {
+   const text = message || event?.message || '';
+   if (text) console.log(`[remote] ${text}`);
+  });
+  win.on('closed', () => { if (remoteWin === win) remoteWin = null; });
+  remoteWin = win;
  }
- remoteWin = new BrowserWindow({
-  ...windowBounds(),
-  center: true,
-  minWidth: 760,
-  minHeight: 540,
-  show: false,
-  title: `Prism V2 — ${device.name}`,
-  icon: ICON,
-  backgroundColor: CHAT_BG,
-  ...(process.platform === 'linux' ? {} : {
-   titleBarStyle: 'hidden',
-   titleBarOverlay: { color: CHAT_BG, symbolColor: TITLE_BAR.symbolColor, height: TITLE_BAR.height },
-  }),
-  webPreferences: {
-   contextIsolation: true,
-   sandbox: true,
-   spellcheck: true,
-   autoplayPolicy: 'no-user-gesture-required',
-  },
- });
- remoteWin.once('ready-to-show', () => remoteWin.show());
- remoteWin.webContents.setWindowOpenHandler(({ url: target }) => {
-  external(target);
-  return { action: 'deny' };
- });
- remoteWin.webContents.on('console-message', (event, level, message) => {
-  const text = message || event?.message || '';
-  if (text) console.log(`[remote] ${text}`);
- });
- remoteWin.on('closed', () => { remoteWin = null; });
+ win.__deviceName = device.name;
+ win.setTitle(`Prism V2 — ${device.name}`);
+ const loading = waitForLoad(win);
+ win.loadURL(url).catch(error => console.log('[remote] load failed:', error.message));
+ const result = await loading;
+ if (!result.ok) {
+  console.log(`[remote] ${device.name} did not answer: ${result.error}`);
+  if (remoteWin === win) remoteWin = null;
+  try { win.destroy(); } catch {}
+  if (localWin && !localWin.isDestroyed()) showWindow(localWin);
+  return { ok: false, error: result.error };
+ }
+ if (win.isMinimized()) win.restore();
+ win.show();
+ win.focus();
  if (localWin && !localWin.isDestroyed()) localWin.hide();
- return remoteWin;
+ return { ok: true };
 }
 
 function activeWindow() {
@@ -369,7 +412,7 @@ function activeWindow() {
  return localWin && !localWin.isDestroyed() ? localWin : null;
 }
 
-function pickDevice(id) {
+async function pickDevice(id) {
  const list = deviceBeacon ? deviceBeacon.list() : null;
  if (!list) return { mode: 'self' };
  const wanted = String(id || '').trim();
@@ -380,9 +423,10 @@ function pickDevice(id) {
  }
  const device = list.devices.find(item => item.id === wanted);
  if (!device) return { mode: 'missing' };
- deviceChoice = device.id;
  if (!device.url) return { mode: 'offline', name: device.name };
- openRemoteWindow(device);
+ const result = await openRemoteWindow(device);
+ if (!result.ok) return { mode: 'error', name: device.name, error: result.error };
+ deviceChoice = device.id;
  return { mode: 'remote', name: device.name, url: device.url };
 }
 function stopWeb() {
@@ -490,7 +534,7 @@ ipcMain.handle('devices:prompt', async event => {
  const list = deviceBeacon ? deviceBeacon.list() : { devices: [] };
  return { show: list.devices.length > 0, ...list, name: os.hostname(), server: serverMode() };
 });
-ipcMain.handle('devices:pick', (event, id) => (fromApp(event) ? pickDevice(id) : null));
+ipcMain.handle('devices:pick', async (event, id) => (fromApp(event) ? await pickDevice(id) : null));
 ipcMain.handle('devices:add', (event, entry) => {
  if (!fromApp(event) || !deviceBeacon) return null;
  return deviceBeacon.addManual(entry || {});
@@ -517,7 +561,8 @@ function createTray() {
    const runs = presenceRuns.size;
    tray.setToolTip(runs ? `Prism V2 — ${runs} working` : 'Prism V2');
    tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open Prism', click: () => showWindow(activeWindow()) },
+    { label: 'Open this PC', click: () => showWindow(localWin) },
+    ...(remoteWin && !remoteWin.isDestroyed() ? [{ label: `Open ${remoteWin.__deviceName || 'device'}`, click: () => showWindow(remoteWin) }] : []),
     { label: 'Open web', click: () => {
      const auto = readAuto();
      if (!webChild) startWeb({ ...auto, web: true });

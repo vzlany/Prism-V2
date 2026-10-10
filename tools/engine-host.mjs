@@ -3,7 +3,7 @@
 // (app paths, ipcMain, shell, notifications), so tools, models, MCP servers and memory
 // behave exactly like they do in the app.
 import { Module, createRequire } from "node:module";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, cpSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, cpSync, chmodSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, isAbsolute as isAbsolutePath, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -219,6 +219,40 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   if (!device?.url) return { error: "that device does not serve the web UI" };
   return { url: device.url };
  });
+
+ // Settings -> Discord on the web: the same discord.json the app and the bot read, so the
+ // token, the user id and the DM switch can be managed from a phone or another device.
+ const discordFile = join(USER_DATA, "discord.json");
+ const readDiscord = () => { try { return JSON.parse(readFileSync(discordFile, "utf8")) || {}; } catch { return {}; } };
+ const discordState = () => {
+  const cfg = readDiscord();
+  return { enabled: cfg.enabled !== false, userId: String(cfg.userId || ""), hasToken: Boolean(cfg.token), tools: cfg.tools !== false };
+ };
+ handlers.set("discord:get", () => discordState());
+ handlers.set("discord:set", (event, patch) => {
+  const cfg = readDiscord();
+  if (typeof patch?.token === "string" && patch.token.trim()) cfg.token = patch.token.trim();
+  if (typeof patch?.userId === "string") cfg.userId = patch.userId.trim();
+  if (patch?.enabled !== undefined) cfg.enabled = patch.enabled !== false;
+  try {
+   mkdirSync(USER_DATA, { recursive: true });
+   writeFileSync(discordFile, JSON.stringify(cfg, null, 2));
+   try { chmodSync(discordFile, 0o600); } catch {}
+  } catch {}
+  return discordState();
+ });
+ handlers.set("discord:test", async () => {
+  const cfg = readDiscord();
+  if (!cfg.token) return { ok: false, error: "no token saved yet" };
+  try {
+   const response = await fetch("https://discord.com/api/v10/users/@me", { headers: { authorization: `Bot ${cfg.token}` } });
+   if (!response.ok) return { ok: false, error: `Discord said ${response.status}` };
+   const me = await response.json().catch(() => null);
+   return { ok: true, name: String(me?.username || "") };
+  } catch (error) {
+   return { ok: false, error: String(error?.message || error) };
+  }
+ });
  const updateSettings = patch => updateCore.writeSettings(USER_DATA, {
   ...(patch?.auto !== undefined ? { auto: patch.auto === true } : {}),
   ...(patch?.install !== undefined ? { install: patch.install === true } : {}),
@@ -274,8 +308,10 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   return { ...result, message: updateCore.message(result) };
  });
  // Auto-update on a server: every six hours, when "Install automatically" is on and nothing
- // is streaming. The supervisor brings the new build back after the 75 exit above.
- if (process.platform === "linux") {
+ // is streaming. Only the engine that serves the web UI runs this — the Discord bridge's own
+ // host (no port) keeps its hands off the install. The supervisor brings the new build back
+ // after the 75 exit above.
+ if (process.platform === "linux" && webPort > 0) {
   const tick = async () => {
    try {
     if (!updateCore.readSettings(USER_DATA).install || llmActive > 0) return;
