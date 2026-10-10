@@ -1,7 +1,6 @@
 // "DM me on Discord when the reply finishes": a small switch that lives at the end of the
-// agent-mode menu. It is shared through the store, so the app and the phone see the same
-// setting; the actual DM is sent by the desktop engine (or the web engine host) with the
-// bot token from Settings -> Interface -> Discord.
+// agent-mode menu (and is the whole mode button on a server). It is shared through the store,
+// so the app and the phone see the same setting; on until the user turns it off.
 (() => {
 'use strict';
 
@@ -13,7 +12,8 @@ let loading = null;
 const local = () => {
  try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; }
 };
-const normalize = data => ({ version: 1, discord: data?.discord === true });
+// No stored choice yet means ON: a finished reply reaching the phone is the point of the bot.
+const normalize = data => ({ version: 1, discord: data ? data.discord === true : true });
 
 async function load(force = false) {
  if (cache && !force) return cache;

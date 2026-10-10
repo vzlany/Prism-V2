@@ -88,8 +88,16 @@ async function install(info, { gate } = {}) {
  }
  const win = require('electron').BrowserWindow.getAllWindows()[0] || null;
  const file = path.join(app.getPath('temp'), 'Prism V2-update', info.asset.name);
- const progress = win ? value => win.setProgressBar(Math.max(0, Math.min(1, value))) : null;
- announce({ state: 'downloading', version: info.version });
+ announce({ state: 'downloading', version: info.version, progress: 0 });
+ let lastPct = -1;
+ const progress = value => {
+  win?.setProgressBar(Math.max(0, Math.min(1, value)));
+  const pct = Math.round((value || 0) * 100);
+  if (pct !== lastPct && pct % 2 === 0) {
+   lastPct = pct;
+   announce({ state: 'downloading', version: info.version, progress: value });
+  }
+ };
  await core.download({ url: info.asset.url, file, token: token(), onProgress: progress });
  win?.setProgressBar(-1);
  if (gate && !gate()) return { deferred: true };

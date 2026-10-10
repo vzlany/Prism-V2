@@ -104,8 +104,10 @@ new ParallelPanel({
  },
 });
 const parallelMeter = new ParallelMeter({ button: document.querySelector('.composer-parallels') });
-// Other devices on the network: the switcher in the composer, and the launch picker that
-// asks which device this window should use when another one answers.
+// Other devices on the network: the switcher in the composer, the DEVICES row in the sidebar,
+// and the launch picker that asks which device this window should use when another answers.
+// A remote window (the server's UI inside the app) carries ?from=; this page is then a client.
+const FROM_DEVICE = (() => { try { return new URLSearchParams(location.search).get('from') || ''; } catch { return ''; } })();
 const deviceMenu = new DeviceMenu({ button: document.querySelector('.composer-device'), menu: document.querySelector('.device-menu') });
 const devicePicker = new DevicePicker({ root: main });
 devicePicker.maybeShow();
@@ -125,7 +127,7 @@ if (!window.openghost?.desktop && window.openghost?.logs?.page) {
 // downloads or installs it turns into a spinner, "Updating…".
 const updatePill = document.querySelector('.titlebar-update');
 if (updatePill && window.openghost?.desktop && window.openghost?.update?.params) {
- const setPill = (state, version = '') => {
+ const setPill = (state, version = '', progress = null) => {
   updatePill.hidden = !state;
   updatePill.replaceChildren();
   if (!state) return;
@@ -135,8 +137,9 @@ if (updatePill && window.openghost?.desktop && window.openghost?.update?.params)
    const spin = document.createElement('span');
    spin.className = 'update-spinner';
    spin.setAttribute('aria-hidden', 'true');
-   updatePill.append(spin, document.createTextNode(I18n.t('update.installing')));
-   updatePill.title = I18n.t('update.installing');
+   const pct = progress == null ? '' : ` (${Math.round(progress * 100)}%)`;
+   updatePill.append(spin, document.createTextNode(`${I18n.t('update.installing')}${pct}`));
+   updatePill.title = `${I18n.t('update.installing')}${pct}`;
    return;
   }
   updatePill.append(document.createTextNode(`${I18n.t('update.available')} `));
@@ -155,7 +158,7 @@ if (updatePill && window.openghost?.desktop && window.openghost?.update?.params)
  });
  window.openghost.update.onEvent?.(payload => {
   if (payload?.state === 'available') setPill('available', payload.version);
-  else if (payload?.state === 'downloading' || payload?.state === 'installing') setPill(payload.state);
+  else if (payload?.state === 'downloading' || payload?.state === 'installing') setPill(payload.state, '', payload.progress ?? null);
   else if (payload?.state === 'none') setPill('');
  });
  window.openghost.update.params?.().then(params => {
@@ -296,6 +299,7 @@ chatList = new ChatList({
   chat,
   onDashboard: () => dashboard.toggle(),
   onSystem: () => systemPanel.toggle(),
+  onDevices: () => deviceMenu.openAt(chatList.devicesHead),
   onNewFolder: async () => {
     const folder = await library.pick();
     if (!folder) return;
@@ -329,10 +333,40 @@ if (AgentTools.available) {
   const serverOnly = info => {
    if (!info?.server) return;
    modePicker.setServerOnly(true);
-   chatList?.setServer(true);
+   // The server's working indicator is the quiet dots, not the ghost — also when its chat is
+   // watched from another device. The System row stays on the server's own screen; a remote
+   // window gets the Devices row instead.
+   document.documentElement.classList.add('is-server-mode');
+   if (!FROM_DEVICE) chatList?.setServer(true);
   };
   window.openghost?.engine?.info?.().then(serverOnly).catch(() => {});
   window.openghost?.auto?.get?.().then(serverOnly).catch(() => {});
+  // The sidebar's DEVICES row: when another device is known, and never on the server's own
+  // screen (its remote windows are clients and do get it).
+  const applyDeviceRow = () => window.openghost?.devices?.list?.().then(data => {
+   const remotes = (data?.devices || []).length;
+   chatList?.setDevices(remotes > 0 && (data?.server !== true || Boolean(FROM_DEVICE)));
+  }).catch(() => {});
+  applyDeviceRow();
+  setInterval(applyDeviceRow, 10000);
+  // Inside a remote window, a banner under the search says which device this is and offers
+  // the way back to this PC's own app.
+  if (window.openghostRemote?.back && window.openghost?.engine?.info) {
+   window.openghost.engine.info().then(info => {
+    const banner = document.createElement('div');
+    banner.className = 'remote-banner';
+    const text = document.createElement('span');
+    text.className = 'remote-banner-text';
+    text.textContent = I18n.t('devices.remoteOn', { name: info?.name || 'the server' });
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'remote-banner-back';
+    back.textContent = I18n.t('devices.backToPc');
+    back.addEventListener('click', () => window.openghostRemote.back().catch(() => {}));
+    banner.append(text, back);
+    document.querySelector('.sidebar-header')?.after(banner);
+   }).catch(() => {});
+  }
   if (window.openghost?.web) {
    browserToggle.hidden = true;
   } else {

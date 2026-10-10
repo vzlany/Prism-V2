@@ -371,6 +371,7 @@ async function openRemoteWindow(device) {
     titleBarOverlay: { color: CHAT_BG, symbolColor: TITLE_BAR.symbolColor, height: TITLE_BAR.height },
    }),
    webPreferences: {
+    preload: path.join(__dirname, 'preload-remote.js'),
     contextIsolation: true,
     sandbox: true,
     spellcheck: true,
@@ -515,7 +516,7 @@ function startWeb(auto = readAuto()) {
   webChild = spawn(process.execPath, [script, '--port', String(webPort(auto)), '--host', '0.0.0.0', '--no-open', ...(PROFILE ? ['--profile', PROFILE] : [])], {
    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PRISM_NO_BEACON: '1' },
    windowsHide: true,
-   stdio: 'ignore',
+   stdio: 'inherit',
   });
   webChild.on('exit', () => { webChild = null; });
   console.log(`[auto] web server on port ${webPort(auto)}`);
@@ -538,7 +539,9 @@ function startBot(auto = readAuto()) {
   botChild = spawn(process.execPath, [script, ...(PROFILE ? ['--profile', PROFILE] : [])], {
    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PRISM_NO_BEACON: '1' },
    windowsHide: true,
-   stdio: 'ignore',
+   // The bot's own messages ("not set up yet", token errors) land in this console: without
+   // them a bot that exits on purpose looked like a silent bug.
+   stdio: 'inherit',
   });
   botChild.on('exit', code => { botChild = null; console.log(`[auto] discord bot stopped${code ? ` (${code})` : ''}`); });
   console.log('[auto] discord bot started');
@@ -609,6 +612,16 @@ ipcMain.handle('devices:prompt', async event => {
  return { show: list.devices.length > 0, ...list, name: os.hostname(), server: serverMode() };
 });
 ipcMain.handle('devices:pick', async (event, id) => (fromApp(event) ? await pickDevice(id) : null));
+// "This PC" pressed inside a remote window: close it and bring the local app back.
+ipcMain.handle('devices:back', event => {
+ if (!remoteWin || remoteWin.isDestroyed() || event.sender !== remoteWin.webContents) return false;
+ const target = localWin && !localWin.isDestroyed() ? localWin : null;
+ try { remoteWin.destroy(); } catch {}
+ remoteWin = null;
+ deviceChoice = 'self';
+ if (target) showWindow(target);
+ return true;
+});
 ipcMain.handle('devices:add', (event, entry) => {
  if (!fromApp(event) || !deviceBeacon) return null;
  return deviceBeacon.addManual(entry || {});

@@ -1,7 +1,7 @@
 // The System panel (server only): live CPU, memory, disks, network, temperatures and the
-// server's console, straight from the machine Prism runs on. It polls every 100 ms while it
+// server's console, straight from the machine Prism runs on. It polls twice a second while it
 // is open — small JSON over the same channel the app already uses, values patched in place,
-// so 10 Hz costs nothing.
+// so even 2 Hz costs nothing.
 (() => {
 'use strict';
 
@@ -44,7 +44,7 @@ class SystemPanel {
  start() {
   if (!this.built) this.build();
   if (!this.timer) {
-   this.timer = setInterval(() => this.poll(), 100);
+   this.timer = setInterval(() => this.poll(), 500);
    this.unsub = window.openghost?.logs?.onLine?.(line => this.addLog(line)) || null;
    Promise.resolve(window.openghost?.logs?.tail?.()).then(lines => {
     const box = this.logEl;
@@ -91,6 +91,7 @@ class SystemPanel {
     <section class="sys-card">
      <div class="sys-head"><span>${I18n.t('system.memory')}</span><span class="sys-head-value" data-sys="mem-line"></span></div>
      <div class="sys-bar"><span data-bar="mem"></span></div>
+     <div class="sys-bar is-thin" data-sys="swap-wrap" hidden><span data-bar="swap"></span></div>
      <div class="sys-detail" data-sys="mem-detail"></div>
     </section>
     <section class="sys-card">
@@ -158,7 +159,15 @@ class SystemPanel {
   const memory = stats.memory || {};
   this.set('mem-line', `${bytes(memory.used)} / ${bytes(memory.total)}`);
   this.setBar('mem', memory.total ? memory.used / memory.total : 0);
-  this.set('mem-detail', `cached ${bytes(memory.cached)} · free ${bytes(memory.free)}${memory.swapTotal ? ` · swap ${bytes(memory.swapTotal - memory.swapFree)} / ${bytes(memory.swapTotal)}` : ''}`);
+  const swapUsed = Math.max(0, (memory.swapTotal || 0) - (memory.swapFree || 0));
+  const swapWrap = this.get('swap-wrap');
+  if (swapWrap) {
+   swapWrap.hidden = !memory.swapTotal;
+   this.setBar('swap', memory.swapTotal ? swapUsed / memory.swapTotal : 0);
+  }
+  this.set('mem-detail', memory.swapTotal
+   ? `cached ${bytes(memory.cached)} · free ${bytes(memory.free)} · swap ${bytes(swapUsed)} / ${bytes(memory.swapTotal)}`
+   : `cached ${bytes(memory.cached)} · free ${bytes(memory.free)}`);
   const load = stats.load || {};
   this.set('load', `${(load.one || 0).toFixed(2)} · ${(load.five || 0).toFixed(2)} · ${(load.fifteen || 0).toFixed(2)}`);
   this.set('uptime', `up ${duration(stats.uptime)} · ${stats.cores} cores · ${stats.user || ''}`);

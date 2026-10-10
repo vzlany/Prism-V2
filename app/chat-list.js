@@ -74,7 +74,7 @@ function place(parent, children) {
 }
 
 class ChatList {
- constructor({ root, library, chat, onNewFolder, onNewChat, onLock, onDashboard, onSystem }) {
+ constructor({ root, library, chat, onNewFolder, onNewChat, onLock, onDashboard, onSystem, onDevices }) {
   this.root = root;
   this.list = root.querySelector('.chats-list');
   this.library = library;
@@ -84,6 +84,7 @@ class ChatList {
   this.onLock = onLock;
   this.onDashboard = onDashboard;
   this.onSystem = onSystem;
+  this.onDevices = onDevices;
   this.query = '';
   this.rows = new Map();
   // How deep a child chat sits under its parent (main -> parallel run -> its own runs).
@@ -122,6 +123,15 @@ class ChatList {
   this.systemHead.innerHTML = `${Glyphs.terminal}<span class="chats-dashboard-text">${I18n.t('system.title')}</span>`;
   this.systemHead.title = I18n.t('system.open');
   this.systemHead.setAttribute('aria-label', I18n.t('system.open'));
+  // On a client (or inside a remote window), a DEVICES row sits under the Dashboard: it
+  // opens the switcher for which device this window should work with. Never on a server.
+  this.devicesHead = element('button', 'chats-dashboard chats-devices');
+  this.devicesHead.type = 'button';
+  this.devicesHead.dataset.action = 'devices';
+  this.devicesHead.hidden = true;
+  this.devicesHead.innerHTML = `${Glyphs.grid}<span class="chats-dashboard-text">${I18n.t('devices.switch')}</span>`;
+  this.devicesHead.title = I18n.t('devices.openMenu');
+  this.devicesHead.setAttribute('aria-label', I18n.t('devices.openMenu'));
   this.hint = element('div', 'chats-empty is-hint');
   this.draft = this.row({ id: '' });
   this.draft.row.classList.add('is-draft', 'is-active');
@@ -152,6 +162,16 @@ class ChatList {
   const next = Boolean(on);
   if (this.systemHead.hidden === !next) return;
   this.systemHead.hidden = !next;
+  this.render();
+ }
+
+ // The DEVICES row: shown when another device is known and this install is a client (or a
+ // remote window); never on the server itself.
+ setDevices(on) {
+  if (!this.devicesHead) return;
+  const next = Boolean(on);
+  if (this.devicesHead.hidden === !next) return;
+  this.devicesHead.hidden = !next;
   this.render();
  }
 
@@ -506,6 +526,7 @@ class ChatList {
   if (pinned.length) order.push(this.pinnedHead, ...pinned.map(chat => this.item(chat, seen)));
   order.push(this.dashboardHead);
   if (!this.systemHead.hidden) order.push(this.systemHead);
+  if (!this.devicesHead.hidden) order.push(this.devicesHead);
   order.push(this.foldersHead);
   for (const { folder, chats } of folders) order.push(this.folder(folder, chats, !!query, seen, !!draft && key(draft.path) === key(folder.path)));
   for (const [path, group] of this.groups) if (!lib.folders.some(folder => key(folder.path) === path)) { clearTimeout(group.timer); this.groups.delete(path); }
@@ -594,6 +615,7 @@ class ChatList {
    const id = button.closest('.chat-row')?.dataset.id, group = button.closest('.chats-folder')?.__group;
    if (button.dataset.action === 'dashboard') this.onDashboard?.();
    else if (button.dataset.action === 'system') this.onSystem?.();
+   else if (button.dataset.action === 'devices') this.onDevices?.();
    else if (button.dataset.action === 'new-folder') this.onNewFolder();
    else if (button.dataset.action === 'new-chat') this.newChat(group);
    else if (button.dataset.action === 'delete-folder') this.askDeleteFolder(group);

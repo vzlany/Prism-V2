@@ -9143,6 +9143,27 @@ html.is-simple .tool-group.has-error .tool-group-label{background:none;backgroun
 .device-fail{margin-top:2px;font-size:11px;color:rgb(255,170,170);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .device-kicked{margin:0 0 12px;padding:8px 10px;border-radius:10px;background:rgba(var(--danger-rgb),.12);box-shadow:inset 0 0 0 1px rgba(var(--danger-rgb),.3);color:rgb(255,180,175);font-size:12px;line-height:1.5}
 .device-kicked[hidden]{display:none}
+
+/* Prism V2: a server's working indicator — three quiet dots instead of the ghost */
+.working-dots{display:inline-flex;align-items:center;gap:7px;padding:6px 2px}
+.working-dots i{width:7px;height:7px;border-radius:50%;background:rgba(var(--fg-rgb),.75);animation:working-dots 1.2s ease-in-out infinite}
+.working-dots i:nth-child(2){animation-delay:.16s}
+.working-dots i:nth-child(3){animation-delay:.32s}
+@keyframes working-dots{0%,65%,100%{opacity:.25;transform:translateY(0)}32%{opacity:1;transform:translateY(-2px)}}
+html.is-server-mode .message-status ghost-thinking{display:none}
+/* On a server the giant welcome ghost steps aside too; the chat keeps its quiet dots. */
+html.is-server-mode .welcome ghost-thinking{display:none}
+@media (prefers-reduced-motion: reduce){.working-dots i{animation:none;opacity:.7}}
+
+/* Prism V2: the banner inside a remote device window */
+.remote-banner{display:flex;align-items:center;gap:8px;margin:6px 10px 2px;padding:6px 8px 6px 10px;border-radius:10px;background:rgba(88,131,255,.12);box-shadow:inset 0 0 0 1px rgba(88,131,255,.25);color:rgba(var(--fg-rgb),.85);font-size:11.5px}
+.remote-banner-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#b9ccff;font-weight:600}
+.remote-banner-back{flex:none;padding:3px 9px;border:0;border-radius:999px;background:rgba(88,131,255,.22);color:#dbe6ff;font:inherit;font-size:11px;font-weight:650;cursor:pointer}
+.remote-banner-back:hover{background:rgba(88,131,255,.34)}
+
+/* The thin swap bar under the RAM bar in the System panel */
+.sys-bar.is-thin{height:3px;margin-top:4px}
+.sys-bar.is-thin span{background:linear-gradient(90deg,#8fb3ff,#c6d6ff)}
 .composer-device{display:flex;align-items:center;gap:7px;height:var(--icon-button-size,32px);padding:0 11px 0 9px;border:0;border-radius:calc(var(--icon-button-size,32px)/2);background:rgba(var(--fg-rgb),.05);color:rgba(var(--fg-rgb),.72);font:inherit;font-size:12px;line-height:1;cursor:pointer;white-space:nowrap;anchor-name:--device;transition:background-color .2s ease,color .2s ease}
 .composer-device[hidden]{display:none}
 .composer-device:hover{background:rgba(var(--fg-rgb),.09);color:rgba(var(--fg-rgb),.92)}

@@ -45,6 +45,8 @@ function listOwn() {
 
 // Which surface this page is: the desktop app can open windows; the web can only navigate.
 const isApp = () => Boolean(window.openghost?.desktop && window.openghost?.devices?.pick);
+// A remote window (the server's web UI inside the app): "This PC" asks the app to come back.
+const FROM_DEVICE = (() => { try { return new URLSearchParams(location.search).get('from') || ''; } catch { return ''; } })();
 
 async function pick(device) {
  if (isApp()) {
@@ -53,7 +55,11 @@ async function pick(device) {
  }
  // Web: hand the page over to that device's own web UI.
  const result = await window.openghost?.devices?.open?.(device.id).catch(() => null);
- if (result?.self) return { mode: 'self' };
+ if (result?.self) {
+  // "This PC" while sitting in a remote device window: go back to the local app.
+  if (window.openghostRemote?.back) { await window.openghostRemote.back().catch(() => {}); return { mode: 'self' }; }
+  return { mode: 'self' };
+ }
  if (result?.url) { window.location.href = result.url; return { mode: 'remote' }; }
  return { mode: 'offline', error: result?.error || I18n.t('devices.offline') };
 }
@@ -208,9 +214,10 @@ class DeviceMenu {
  async refresh() {
   const data = await listOwn().catch(() => null);
   const remotes = data?.devices || [];
-  // The server itself never switches to another device: the pill belongs to clients (and to
-  // installs that are not servers).
-  this.button.hidden = remotes.length === 0 || data?.server === true;
+  // The device switcher belongs to clients: not on the server's own screen, but yes inside
+  // a remote window (this page opened with ?from=), and on any install that is not a server.
+  const isServer = data?.server === true;
+  this.button.hidden = remotes.length === 0 || (isServer && !FROM_DEVICE);
   if (this.button.hidden) return;
   const name = data?.name || data?.self?.name || '';
   this.button.title = I18n.t('devices.switch');
@@ -219,6 +226,22 @@ class DeviceMenu {
    this.button.innerHTML = `<span class="composer-device-icon">${PC_ICON}</span><span class="composer-device-text"></span>`;
   }
   this.button.querySelector('.composer-device-text').textContent = name;
+ }
+
+ // The sidebar's DEVICES row opens the same menu, anchored under itself.
+ async openAt(anchor) {
+  const data = await listOwn().catch(() => null);
+  if (!data || !(data.devices || []).length) return;
+  if (anchor) {
+   anchor.style.anchorName = '--device';
+   if (this.button) this.button.style.anchorName = 'none';
+   this.menu.addEventListener('toggle', event => {
+    if (event.newState !== 'closed') return;
+    anchor.style.anchorName = '';
+    if (this.button) this.button.style.anchorName = '';
+   }, { once: true });
+  }
+  await this.open();
  }
 
  async open() {

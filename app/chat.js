@@ -2198,7 +2198,12 @@ class Chat {
   view.el.classList.remove('is-streaming');
   const text = !!entry.content.trim();
   let noted = true;
-  if (error && !aborted) this.fail(conv, view, error);
+  if (error && !aborted) {
+   this.fail(conv, view, error);
+   // The failure is kept on the entry, so the chat still shows why it stopped after a
+   // reload — and a device watching this conversation from elsewhere sees it too.
+   entry.error = String(error.message || error).slice(0, 2000);
+  }
   if (conv.record) {
    // A notification with the chat's name when the app is in the background: completed, failed or error.
    const title = this.library.chat(conv.id)?.title || conv.record.title || I18n.t('chat.new');
@@ -2425,6 +2430,7 @@ class Chat {
  // Whether an entry is worth drawing on the screen: words, reasoning, or a tool it called.
  drawable(entry) {
   if (entry.role === 'user' || entry.role === 'compact') return true;
+  if (entry.error) return true;
   if ((entry.content || '').trim() || (entry.thinking || '').trim()) return true;
   return (entry.steps || []).some(step => step.role === 'assistant' && step.tool_calls?.length);
  }
@@ -2552,6 +2558,14 @@ class Chat {
    }
   }
   if (pictures.length) el.append(new MediaSlider(pictures).el);
+  // A turn that failed keeps its reason: a device reading this conversation from elsewhere
+  // (or the same chat after a reload) still sees why the work stopped.
+  if (entry.error) {
+   const box = document.createElement('div');
+   box.className = 'message-error';
+   box.textContent = entry.error;
+   el.append(box);
+  }
   el.__entry = entry;
   if (last) {
    el.append(this.toolbar('assistant', entry.duration || 0));
@@ -2621,7 +2635,11 @@ class Chat {
   }
   const status = document.createElement('div');
   status.className = 'message-status is-working';
-  status.innerHTML = '<ghost-thinking></ghost-thinking>';
+  // A server shows the quiet triple dots instead of the ghost; the app on a normal machine
+  // keeps its ghost.
+  status.innerHTML = document.documentElement.classList.contains('is-server-mode')
+   ? '<span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span>'
+   : '<ghost-thinking></ghost-thinking>';
   view.el.append(status);
   view.status = status;
   this.pokeGhost(view);
@@ -2770,7 +2788,11 @@ class Chat {
  assistantMessage(conv) {
   const el = document.createElement('div');
   el.className = 'message is-assistant is-streaming';
-  el.innerHTML = '<div class="message-status"><ghost-thinking></ghost-thinking></div><div class="message-content markdown"></div>';
+  // Same choice as showGhost: the server's working indicator is the quiet dots, not the ghost.
+  const working = document.documentElement.classList.contains('is-server-mode')
+   ? '<span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span>'
+   : '<ghost-thinking></ghost-thinking>';
+  el.innerHTML = `<div class="message-status">${working}</div><div class="message-content markdown"></div>`;
   const content = el.querySelector('.message-content');
   const thinking = new ThinkingView();
   el.insertBefore(thinking.el, content);
