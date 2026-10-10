@@ -168,6 +168,20 @@ class DevicePicker {
   this.list.innerHTML = rows.join('');
   if ((data.devices || []).length) this.show();
  }
+
+ // The web twin of maybeShow: a browser — a phone, another computer — asking the same
+ // question once, with the devices the engine knows. Picking one hands the page over to
+ // that device's web UI; picking this one just closes the screen.
+ async webShow(data) {
+  if (!data?.self) return;
+  const banner = this.el.querySelector('.device-kicked');
+  if (banner) banner.hidden = true;
+  if (this.note) this.note.textContent = '';
+  const rows = [rowHtml({ ...data.self, self: true }, { self: true })];
+  for (const device of data.devices || []) rows.push(rowHtml(device));
+  this.list.innerHTML = rows.join('');
+  this.show();
+ }
 }
 
 // --------------------------------------------------------------- the device menu

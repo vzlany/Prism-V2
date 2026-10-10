@@ -196,7 +196,18 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
  // ------------------------------------------------------------- devices (LAN discovery)
  // This engine answers beacons itself, so a headless server (or a plain `prism web`) shows up
  // in the other apps' device list with its web port.
- const appVersion = (() => { try { return JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version || ""; } catch { return ""; } })();
+ // The version is read with a short memo, not once: an update (from the app, the bot, or the
+ // About page) swaps package.json under a running engine, and every report — About, the
+ // beacon, engine info — must tell the truth immediately instead of the version that was on
+ // disk when the process happened to start.
+ let versionMemo = { at: 0, value: "" };
+ const appVersion = () => {
+  const now = Date.now();
+  if (versionMemo.value && now - versionMemo.at < 5000) return versionMemo.value;
+  try { versionMemo = { at: now, value: JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version || "" }; } catch {}
+  return versionMemo.value || "";
+ };
+ const startedVersion = appVersion();
  const readAutoJson = () => { try { return JSON.parse(readFileSync(join(USER_DATA, "auto.json"), "utf8")) || {}; } catch { return {}; } };
  const serverMode = (() => {
   const auto = readAutoJson();
@@ -209,24 +220,39 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
  if (!process.env.PRISM_NO_BEACON && webPort > 0) {
   try {
    const { Beacon, deviceId } = require(join(ROOT, "desktop", "beacon.js"));
-   beacon = new Beacon({ id: deviceId(USER_DATA), userData: USER_DATA, name: hostname(), platform: process.platform, version: appVersion, port: webPort, server: serverMode });
+   beacon = new Beacon({ id: deviceId(USER_DATA), userData: USER_DATA, name: hostname(), platform: process.platform, version: appVersion(), port: webPort, server: serverMode });
    beacon.start();
   } catch (error) {
    console.log("[beacon] could not start:", error.message);
   }
  }
- handlers.set("engine:info", () => ({ server: serverMode, name: hostname(), platform: process.platform, version: appVersion }));
+ handlers.set("engine:info", () => ({ server: serverMode, name: hostname(), platform: process.platform, version: appVersion() }));
  // Live system information for the server's System panel.
  const sysinfo = require(join(ROOT, "desktop", "sysinfo.js"));
  handlers.set("sys:stats", () => sysinfo.stats());
- handlers.set("devices:list", () => (beacon ? { ...beacon.list(), name: hostname(), server: serverMode } : { self: { id: "", name: hostname(), platform: process.platform, version: appVersion, port: webPort, server: serverMode, self: true, url: "" }, devices: [], name: hostname(), server: serverMode }));
+ // A child of the app does not bind the discovery port (the app itself already does): it
+ // reads the list the app mirrors to beacon.json instead, so the web UI the app serves —
+ // on this machine or opened from a phone — still knows every device on the network.
+ const cachedDevices = () => {
+  try {
+   const data = JSON.parse(readFileSync(join(USER_DATA, "beacon.json"), "utf8"));
+   if (!data || Date.now() - Number(data.at || 0) > 90000) return null;
+   return data;
+  } catch { return null; }
+ };
+ const deviceList = () => {
+  if (beacon) return { ...beacon.list(), name: hostname(), server: serverMode };
+  const cached = cachedDevices();
+  if (cached?.self) return { self: cached.self, devices: cached.devices || [], name: cached.name || hostname(), server: serverMode };
+  return { self: { id: "", name: hostname(), platform: process.platform, version: appVersion(), port: webPort, server: serverMode, self: true, url: "" }, devices: [], name: hostname(), server: serverMode };
+ };
+ handlers.set("devices:list", deviceList);
  handlers.set("devices:add", (event, entry) => (beacon ? beacon.addManual(entry || {}) : null));
  handlers.set("devices:forget", (event, host, port) => { beacon?.forgetManual(String(host || ""), Number(port) || 0); return true; });
  handlers.set("devices:open", (event, id) => {
-  if (!beacon) return { error: "device discovery is off" };
-  const list = beacon.list();
+  const list = deviceList();
   if (!id || id === "self" || id === list.self.id) return { self: true };
-  const device = list.devices.find(item => item.id === id);
+  const device = (list.devices || []).find(item => item.id === id);
   if (!device?.url) return { error: "that device does not serve the web UI" };
   return { url: device.url };
  });
@@ -273,6 +299,21 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   return { ...stored, hasToken: Boolean(updateCore.tokenOf(stored)), current: updateCore.currentVersion(ROOT), platform: process.platform, server: true };
  };
  const supervised = () => Boolean(process.env.PRISM_SUPERVISED || process.env.INVOCATION_ID || process.env.JOURNAL_STREAM);
+ // An update applied by any other surface (the desktop app's updater, the bot, the About
+ // page in another window) swaps the install under a running engine: the files are the new
+ // build while this process keeps the old code. Notice, keep reporting the fresh version,
+ // and step aside — the supervisor brings the new build straight back.
+ let versionNoticed = false;
+ setInterval(() => {
+  const fresh = appVersion();
+  if (!fresh || fresh === startedVersion) return;
+  if (beacon && beacon.version !== fresh) beacon.version = fresh;
+  if (versionNoticed) return;
+  versionNoticed = true;
+  console.log(`[update] the install changed to v${fresh} (this process started v${startedVersion}) — restarting to match`);
+  if (supervised()) process.exit(75);
+  else console.log("[update] no supervisor is running this engine: restart it to pick the new build up");
+ }, 20000).unref?.();
  async function runUpdate({ force = false } = {}) {
   const settings = updateCore.readSettings(USER_DATA);
   const token = updateCore.tokenOf(settings);

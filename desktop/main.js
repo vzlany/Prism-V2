@@ -1033,6 +1033,17 @@ if (process.argv.includes('--create-shortcut')) {
   } catch (error) {
    console.log('[beacon] could not start:', error.message);
   }
+  // The web UI this app serves (and its helpers) run in their own processes and must not
+  // bind the discovery port themselves: the live device list is mirrored to a small file
+  // they read instead, so a browser on this machine — or a phone — sees every device.
+  const publishDevices = () => {
+   try {
+    if (!deviceBeacon) return;
+    fs.writeFileSync(path.join(app.getPath('userData'), 'beacon.json'), JSON.stringify({ at: Date.now(), ...deviceBeacon.list(), name: os.hostname(), server: serverMode() }));
+   } catch {}
+  };
+  publishDevices();
+  setInterval(publishDevices, 10000);
   watchStore(win);
   watchDelegate(win);
   createTray();

@@ -8,6 +8,7 @@
 //   node tools/server.mjs --profile work        a separate workspace
 //   node tools/server.mjs --no-web --no-bot     or either side alone
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +28,13 @@ const ONCE = args.includes("--once");
 const stamp = () => new Date().toISOString().slice(11, 19);
 const log = (...parts) => console.log(`[${stamp()}]`, ...parts);
 
+// The version this supervisor started with; an update swaps it on disk under our feet.
+const version = () => {
+ try { return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version || ""; } catch { return ""; }
+};
+const startedVersion = version();
+let watching = startedVersion;
+
 const children = new Map();
 let stopping = false;
 
@@ -45,6 +53,15 @@ function start(name, script, scriptArgs) {
   // restarting every few seconds; the child explained what to set.
   if (code === 1) { log(`${name} is not set up — leaving it off until the next start`); return; }
   if (code === 0) return;
+  // 75 = "the install changed under me" (an update): rotate the other helper too, so the
+  // whole stack comes back on the same build instead of one half running the old code.
+  if (code === 75) {
+   log(`${name} updated the install — restarting the other helpers as well`);
+   for (const [other, mate] of children) {
+    if (other === name) continue;
+    try { mate.kill("SIGTERM"); } catch {}
+   }
+  }
   log(`${name} stopped${code != null ? ` (${code})` : ""} — restarting in 5s`);
   setTimeout(() => start(name, script, scriptArgs), 5000);
  });
@@ -55,6 +72,21 @@ if (!NO_WEB) start("web", "web-server.mjs", ["--host", HOST, "--port", String(PO
 if (!NO_BOT) start("discord", "discord-bridge.mjs", [...(PROFILE ? ["--profile", PROFILE] : [])]);
 
 log(`prism server up — web on http://${HOST}:${PORT}${NO_BOT ? "" : ", Discord bot when a token is set"}`);
+
+// An update can also land from elsewhere (the desktop app, the bot) while this supervisor
+// keeps running: notice the new install and rotate. Under systemd the whole unit steps
+// aside (exit 75) and comes back on the new build; without one, the children are bounced
+// and come back with the new code on their own.
+setInterval(() => {
+ if (stopping) return;
+ const fresh = version();
+ if (!fresh || fresh === watching) return;
+ log(`install changed to v${fresh} (this supervisor started v${startedVersion}) — rotating`);
+ watching = fresh;
+ const supervised = Boolean(process.env.PRISM_SUPERVISED || process.env.INVOCATION_ID || process.env.JOURNAL_STREAM);
+ if (supervised) { shutdown("update"); process.exit(75); }
+ for (const child of children.values()) { try { child.kill("SIGTERM"); } catch {} }
+}, 20000).unref?.();
 
 function shutdown(signal) {
  if (stopping) return;

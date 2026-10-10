@@ -2,6 +2,10 @@
 'use strict';
 
 const STORAGE = { effort: 'deepseek.effort', mode: 'openghost.mode', model: 'openghost.model', catalog: 'openghost.catalog', catalogAt: 'openghost.catalogAt', apis: 'openghost.apis', apiActive: 'openghost.apiActive' };
+// The shared copy: what this dialog changes lives in the device's store too, so every surface
+// of the same machine (its web UI seen from another computer, its own app, the bot) sees it.
+const SETTINGS_STORE = 'settings';
+const SETTINGS_AT = 'openghost.settingsAt';
 const KEYS = { openai: 'openai.apiKey', anthropic: 'anthropic.apiKey', deepseek: 'deepseek.apiKey', 'opencode-go': 'opencode-go.apiKey' };
 // The order providers appear in, in the settings and in the model picker.
 const ORDER = ['opencode-go', 'opencode', 'chatgpt', 'openai', 'anthropic', 'deepseek'];
@@ -123,6 +127,9 @@ class Settings {
   this.collect();
   dialog.addEventListener('dismiss', () => dialog.close());
   this.refreshAll();
+  // This device's other surfaces may have saved newer settings — keys added from the web UI
+  // in a remote window, a model picked on a phone. Adopt them when they are newer.
+  this.adoptSettings();
  }
 
  // ------------------------------------------------------------- API keys per provider
@@ -142,6 +149,7 @@ class Settings {
 
  saveApis() {
   try { localStorage.setItem(STORAGE.apis, JSON.stringify(this.apis)); } catch {}
+  this.syncSettings();
  }
 
  // The Discord bridge (a separate process) cannot read the browser's localStorage, so the
@@ -162,12 +170,67 @@ class Settings {
   try { Promise.resolve(window.openghost.store.write('keys', { at: Date.now(), keys })).catch(() => {}); } catch {}
  }
 
+ // ------------------------------------------------------------- shared across surfaces
+ // The choices that shape runs — API keys, the model, the effort, the mode — also go to the
+ // store of THIS device, so its other surfaces (the web UI watched from another computer, the
+ // desktop app, the bot) adopt them instead of every browser keeping a private localStorage.
+ settingsAt() {
+  try { return Number(localStorage.getItem(SETTINGS_AT)) || 0; } catch { return 0; }
+ }
+
+ syncSettings() {
+  if (!window.openghost?.store?.write) return;
+  const at = Date.now();
+  try { localStorage.setItem(SETTINGS_AT, String(at)); } catch {}
+  const blob = {
+   at,
+   apis: this.readApis(),
+   apiActive: this.readActive(),
+   model: localStorage.getItem(STORAGE.model) || '',
+   effort: localStorage.getItem(STORAGE.effort) || '',
+   mode: localStorage.getItem(STORAGE.mode) || '',
+  };
+  try { Promise.resolve(window.openghost.store.write(SETTINGS_STORE, blob)).catch(() => {}); } catch {}
+ }
+
+ // A newer copy in the store (another surface of this device saved after us) is adopted
+ // whole: storage, keys, model, effort and mode, then the page is painted from it.
+ async adoptSettings() {
+  let data = null;
+  try { data = await window.openghost?.store?.read?.(SETTINGS_STORE); } catch {}
+  if (!data || typeof data.at !== 'number' || data.at <= this.settingsAt()) return;
+  try {
+   if (data.apis) localStorage.setItem(STORAGE.apis, JSON.stringify(data.apis));
+   if (data.apiActive) localStorage.setItem(STORAGE.apiActive, JSON.stringify(data.apiActive));
+   if (typeof data.model === 'string' && data.model) localStorage.setItem(STORAGE.model, data.model);
+   if (typeof data.effort === 'string' && data.effort) localStorage.setItem(STORAGE.effort, data.effort);
+   if (typeof data.mode === 'string' && data.mode) localStorage.setItem(STORAGE.mode, data.mode);
+   localStorage.setItem(SETTINGS_AT, String(data.at));
+  } catch {}
+  this.apis = this.readApis();
+  this.activeApi = this.readActive();
+  this.keys = Object.fromEntries(Object.keys(KEYS).map(provider => [provider, this.equippedKey(provider)]));
+  this.model = localStorage.getItem(STORAGE.model) || DEFAULT_MODEL;
+  this.shown = this.model;
+  const effort = localStorage.getItem(STORAGE.effort);
+  this.effort = typeof effort === 'string' && effort ? effort : DEFAULT_EFFORT;
+  const mode = localStorage.getItem(STORAGE.mode);
+  this.mode = MODES.includes(mode) ? mode : DEFAULT_MODE;
+  this.accepted = new Set(Object.keys(KEYS).filter(provider => this.keys[provider]));
+  for (const provider of Object.keys(KEYS)) this.paintApis(provider);
+  this.paint();
+  this.changed();
+  this.syncSharedKeys();
+  this.refreshAll();
+ }
+
  readActive() {
   try { return JSON.parse(localStorage.getItem(STORAGE.apiActive)) || {}; } catch { return {}; }
  }
 
  saveActive() {
   try { localStorage.setItem(STORAGE.apiActive, JSON.stringify(this.activeApi)); } catch {}
+  this.syncSettings();
  }
 
  equipped(provider) {
@@ -406,6 +469,7 @@ class Settings {
    const fallback = [model?.defaultEffort, DEFAULT_EFFORT].find(level => efforts.includes(level));
    this.effort = fallback || efforts[Math.min(efforts.length - 1, 2)];
    localStorage.setItem(STORAGE.effort, this.effort);
+   this.syncSettings();
   }
   if (!same) this.onEfforts?.(this.efforts);
  }
@@ -414,17 +478,20 @@ class Settings {
   if (id === this.model || !this.find(id)) return;
   this.model = id;
   localStorage.setItem(STORAGE.model, id);
+  this.syncSettings();
  }
 
  setEffort(value) {
   this.effort = value;
   localStorage.setItem(STORAGE.effort, value);
+  this.syncSettings();
  }
 
  setMode(value) {
   if (!MODES.includes(value)) return;
   this.mode = value;
   localStorage.setItem(STORAGE.mode, value);
+  this.syncSettings();
  }
 
  changed() {

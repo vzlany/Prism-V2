@@ -111,6 +111,19 @@ const FROM_DEVICE = (() => { try { return new URLSearchParams(location.search).g
 const deviceMenu = new DeviceMenu({ menu: document.querySelector('.device-menu') });
 const devicePicker = new DevicePicker({ root: main });
 devicePicker.maybeShow();
+// A browser (a phone, another computer) arriving with more than one device online gets the
+// same question the app asks at launch — once per tab, so a reload does not nag.
+const webDeviceAsk = async () => {
+ if (!window.openghost?.web || FROM_DEVICE || window.openghostRemote) return;
+ try { if (sessionStorage.getItem('openghost.devicePicked')) return; } catch {}
+ try {
+  const data = await window.openghost.devices.list();
+  if (!(data?.devices || []).length) return;
+  try { sessionStorage.setItem('openghost.devicePicked', '1'); } catch {}
+  devicePicker.webShow(data);
+ } catch {}
+};
+if (window.openghost?.web) setTimeout(webDeviceAsk, 1500);
 // The server's System panel: live machine statistics and the console stream.
 const systemPanel = new SystemPanel({ panel: document.querySelector('.system-panel') });
 // On the web, everything the server logs is visible here; the page's own errors are mirrored
