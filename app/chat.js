@@ -23,6 +23,16 @@ const PIN_TIME = 2000;
 const LOCK_FADE = 520;
 const TITLE_PROMPT = 'Name this conversation in 2 to 5 words in the language of the user message. Reply with the name only, without quotes, emoji or a final period.';
 const TITLE_INPUT = { user: 1500, reply: 800, max: 60 };
+// How much of another agent's report is handed back to the one that asked. The old 6000
+// characters left the caller with half a list ("your report was cut off after OPT-2") while
+// the agent's own chat held the rest; a report longer than this is a runaway, and even then
+// the cut says so and where to read the rest.
+const AGENT_REPORT = 100000;
+const agentReport = text => {
+ const value = String(text ?? '').trim();
+ if (value.length <= AGENT_REPORT) return value;
+ return `${value.slice(0, AGENT_REPORT)}\n\n[… the report is ${value.length} characters and was cut here; read the rest in the agent's own chat with agents read]`;
+};
 const CONTEXT = { reserve: 0.1, chars: 3.2, image: 1200 };
 // How long the world around the agent (MCP tools, instruction files, skills) is kept before
 // it is read again: long enough to keep long chats quick, short enough to follow edits.
@@ -34,6 +44,16 @@ const spell = seconds => {
  const minutes = Math.floor(seconds / 60), rest = seconds % 60;
  if (minutes < 60) return `${minutes}m ${pad(rest)}s`;
  return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m ${pad(rest)}s`;
+};
+// The same clock the Thought row shows beside its name: 840ms · 4.2s · 47s · 2m 05s.
+const thinkClock = ms => {
+ if (ms < 1000) return `${Math.round(ms)}ms`;
+ if (ms < 10000) return `${(ms / 1000).toFixed(1)}s`;
+ const total = Math.round(ms / 1000), pad = value => String(value).padStart(2, '0');
+ const seconds = total % 60, minutes = Math.floor(total / 60) % 60, hours = Math.floor(total / 3600);
+ if (hours) return `${hours}h ${pad(minutes)}m ${pad(seconds)}s`;
+ if (minutes) return `${minutes}m ${pad(seconds)}s`;
+ return `${total}s`;
 };
 const COMPACT = {
  prompt: 'You compress a long conversation between a user and Prism V2, an AI agent working on the user\'s computer, so the work can go on without the original messages. Write a dense summary in the language the user writes in, with these parts: the user\'s goals and preferences; key facts, decisions and constraints; what has been done, with file paths, commands and their results, commits; the current state and open problems; the exact next steps. Keep names, paths, numbers, versions and code identifiers exact. Leave out small talk and whatever no longer matters.',
@@ -173,6 +193,8 @@ const SIMPLE_LABEL = {
  done: { explore: 'Explored {n} files', write: 'Wrote {n} files', run: 'Ran {n} commands', search: 'Searched the web', shot: 'Took {n} screenshots' },
 };
 const SIMPLE_ORDER = ['explore', 'write', 'run', 'search', 'shot'];
+// The ⚡ before a tool line, gray like the 🧠 of a Thought row.
+const SIMPLE_ICON = '\u26A1';
 function splitQuotes(text) {
  const quotes = [];
  let rest = text || '', m;
@@ -520,9 +542,15 @@ class Chat {
   this.attach(conv);
   // Subagents are hidden from the chat list, so the Runs tab is where they are watched. The
   // prompt is shown there from the first moment, not only when the run ends.
-  window.ParallelRuns?.add({ id: record.id, title: String(label || promptText).slice(0, 80), model: I18n.t('runs.subagent'), status: 'running', snippet: String(promptText).slice(0, 140) });
+  window.ParallelRuns?.add({ id: record.id, title: String(label || promptText).slice(0, 80), model: I18n.t('runs.subagent'), status: 'running', snippet: String(promptText).slice(0, 140), subagent: true });
   const done = wait ? new Promise(resolve => { conv.awaitDone = resolve; }) : null;
-  this.run(conv, { text: promptText, attachments: [] }, this.config(parent), null);
+  // The task rides in the subagent's conversation like any message, tagged as coming from
+  // an agent (and prefixed for the model with "[from main agent]"). Without it, a caller
+  // opening a working subagent saw only its answers and wondered what it had been asked.
+  const prompt = { text: promptText, attachments: [], origin: 'agent', from: parent.record.id };
+  const bubble = this.userMessage(prompt);
+  conv.list.append(bubble);
+  this.run(conv, prompt, this.config(parent), bubble);
   this.onChange();
   // Background by default: the caller is told the id and keeps working, then checks with
   // agents list/read. Only wait:true blocks here (this one's report, 20 minutes at most).
@@ -533,7 +561,9 @@ class Chat {
    done,
    new Promise(resolve => setTimeout(() => resolve('(the subagent is still working; its chat holds the progress)'), 20 * 60 * 1000)),
   ]);
-  return String(report || '').slice(0, 6000);
+  // The report goes back whole; it used to be cut at 6000 characters, which is how the
+  // caller ended up with a list that stopped at OPT-2.
+  return agentReport(report);
  }
 
  // ---- Other agents: the 'agents' tool ----------------------------------------------------
@@ -574,7 +604,7 @@ class Chat {
    if (this.conversations.get(selfId)?.turn?.controller?.signal?.aborted) return 'Stopped while waiting for the answer.';
    const fresh = conv.messages.slice(before).filter(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
    const last = fresh[fresh.length - 1];
-   if (last) return `Answer from ${title}:\n${String(last.content).trim().slice(0, 6000)}`;
+   if (last) return `Answer from ${title}:\n${agentReport(last.content)}`;
    if (!conv.turn && !conv.waiting) break;
   }
   const latest = [...conv.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
@@ -587,7 +617,7 @@ class Chat {
   let messages = conv?.messages;
   if (!messages) messages = (await this.library.conversation(record.id).catch(() => ({ messages: [] }))).messages || [];
   const written = messages.filter(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
-  return written.slice(-max).map(message => String(message.content).trim()).join('\n\n— — —\n\n').slice(0, 6000);
+  return agentReport(written.slice(-max).map(message => String(message.content).trim()).join('\n\n— — —\n\n'));
  }
 
  // Opens (or loads) a conversation without bringing it on screen.
@@ -1349,41 +1379,120 @@ class Chat {
  // The Runs tab follows a working run, not only its ending: the newest words of the reply go
  // into the run's snippet, throttled so the panel is not rebuilt for every token.
  // ---- Simple visuals: one timeline line per stretch of tool calls ------------------------
- // Every ordinary call joins the line drawn right above it, so consecutive steps read as one
- // summarized row ("Ran 4 commands") that expands to the individual cards. A subagent box or
- // anything else in between breaks the line, and a fresh one starts after it.
- simpleGroup(view, name) {
-  if (!window.Effects?.simple || name === 'subagent') return null;
-  const kids = view.el.children;
-  let group = kids[kids.length - 1];
-  if (!group || !group.classList?.contains('tool-group')) {
-   group = document.createElement('div');
-   group.className = 'tool-group is-working';
-   group.innerHTML = '<button type="button" class="tool-group-head"><span class="tool-group-label"></span><span class="tool-chevron"></span></button><div class="tool-group-body"></div>';
-   group.__items = [];
-   // A newer line takes the stage: every older one folds away, unless the user opened it.
-   for (const other of view.el.querySelectorAll('.tool-group.is-open')) {
-    if (!other.__touched) other.classList.remove('is-open');
+ // Every ordinary call joins the line above it, so consecutive steps read as one summarized
+ // row ("Explored 2 files, Ran 13 commands") that expands to the individual cards. A subagent
+ // box or anything else in between breaks the line, and a fresh one starts after it. The
+ // steps of one turn are separate messages, so the line MOVES into the step that now owns the
+ // work: "Explored 1 files" keeps collecting until the stretch really ends.
+ groupElement() {
+  const group = document.createElement('div');
+  group.className = 'tool-group';
+  group.innerHTML = '<button type="button" class="tool-group-head" aria-expanded="false">'
+   + `<span class="tool-group-icon" aria-hidden="true">${SIMPLE_ICON}</span>`
+   + '<span class="tool-group-label"></span>'
+   + '<span class="tool-dots" aria-hidden="true"><i></i><i></i><i></i></span>'
+   + '<span class="tool-chevron"></span>'
+   + '<span class="tool-group-time" hidden></span>'
+   + '</button><div class="tool-group-body"></div>';
+  group.__items = [];
+  const head = group.querySelector('.tool-group-head');
+  head.addEventListener('click', () => {
+   group.__touched = true;
+   group.classList.toggle('is-open');
+   head.setAttribute('aria-expanded', String(group.classList.contains('is-open')));
+  });
+  return group;
+ }
+
+ // The line a new step continues: the message above may hold the very stretch this call
+ // belongs to (each step of a turn is its own message). Only a message of the same turn with
+ // nothing but text, reasoning and the line itself is walked past — a subagent box, a
+ // picture, a note or a finished turn ends the stretch.
+ previousGroup(view) {
+  const entry = view.el.__entry;
+  let prev = view.el.previousElementSibling;
+  while (prev) {
+   if (!prev.classList?.contains('message') || !prev.classList?.contains('is-assistant')) return null;
+   const prevEntry = prev.__entry;
+   if (!entry?.turn || !prevEntry?.turn || entry.turn !== prevEntry.turn) return null;
+   const last = prev.lastElementChild;
+   if (last?.classList?.contains('tool-group')) return last;
+   for (const child of prev.children) {
+    if (child.classList.contains('message-status')) continue;
+    if (child.classList.contains('message-thinking')) continue;
+    if (child.classList.contains('message-content')) continue;
+    return null;
    }
-   const head = group.querySelector('.tool-group-head');
-   head.addEventListener('click', () => {
-    group.__touched = true;
-    group.classList.toggle('is-open');
-    head.setAttribute('aria-expanded', String(group.classList.contains('is-open')));
-   });
-   view.el.append(group);
+   prev = prev.previousElementSibling;
+  }
+  return null;
+ }
+
+ simpleGroup(view, name, args = {}) {
+  if (!window.Effects?.simple || name === 'subagent') return null;
+  let group = view.__simpleGroup;
+  if (group && (!group.isConnected || group.parentElement !== view.el)) group = null;
+  // Anything that landed after the line breaks it: a subagent box, a picture, a note.
+  if (group && group.nextElementSibling) {
+   for (let node = group.nextElementSibling; node; node = node.nextElementSibling) {
+    if (node.classList.contains('message-status') || node.classList.contains('message-content')) continue;
+    group = null;
+    break;
+   }
+  }
+  if (!group) {
+   group = this.previousGroup(view);
+   if (group) {
+    // The newest step owns the line now, and its clock runs on without a hiccup.
+    group.remove();
+    group.__begun ||= performance.now();
+   } else {
+    group = this.groupElement();
+    group.__begun = performance.now();
+    // A newer line takes the stage: every older one folds away, unless the user opened it.
+    const list = view.el.closest('.thread-list');
+    for (const other of list?.querySelectorAll('.tool-group.is-open') || []) {
+     if (!other.__touched) other.classList.remove('is-open');
+    }
+   }
+   view.content.after(group);
+   view.__simpleGroup = group;
   }
   group.__items ||= [];
-  const item = { name, state: 'running', started: performance.now(), bucket: SIMPLE_BUCKET[name] || 'run' };
+  group.__ended = 0;
+  // The agents tool speaks for itself: "Reading Sub-agent's (id) answer" / "Messaging
+  // Sub-agent (id)" instead of counting it as a command.
+  const label = name === 'agents'
+   ? { running: AgentTools.agentActionLabel(args.action, args.id, true), done: AgentTools.agentActionLabel(args.action, args.id, false) }
+   : null;
+  const item = { name, state: 'running', started: performance.now(), bucket: label ? null : (SIMPLE_BUCKET[name] || 'run'), label };
   group.__items.push(item);
   this.simpleLabel(group);
   return { group, item };
  }
 
+ // The clock beside the line, the same the Thought row shows: it counts while the stretch
+ // works and stays at the total once the last step is done.
+ tickGroupClock(group) {
+  const time = group.querySelector('.tool-group-time');
+  if (!time || !group.__begun) return;
+  const end = group.__ended || performance.now();
+  time.textContent = thinkClock(Math.max(1, end - group.__begun));
+ }
+
+ startGroupClock(group) {
+  if (group.__timer || !group.__begun) return;
+  group.__timer = setInterval(() => {
+   if (!group.isConnected) { clearInterval(group.__timer); group.__timer = 0; return; }
+   this.tickGroupClock(group);
+   if (group.__ended) { clearInterval(group.__timer); group.__timer = 0; }
+  }, 100);
+ }
+
  simpleLabel(group) {
   const items = group.__items || [];
   const counts = new Map();
-  for (const item of items) counts.set(item.bucket, (counts.get(item.bucket) || 0) + 1);
+  for (const item of items) if (item.bucket) counts.set(item.bucket, (counts.get(item.bucket) || 0) + 1);
   const working = items.some(item => item.state === 'running');
   const form = working ? SIMPLE_LABEL.running : SIMPLE_LABEL.done;
   const parts = [];
@@ -1392,24 +1501,36 @@ class Chat {
    const template = n && form[bucket];
    if (template) parts.push(template.replace('{n}', String(n)));
   }
+  // The newest self-describing call (the agents tool) names what it is doing right now.
+  const said = items.filter(item => item.label);
+  if (said.length) {
+   const latest = said[said.length - 1];
+   parts.push(latest.state === 'running' ? latest.label.running : latest.label.done);
+  }
   const failed = items.filter(item => item.state === 'error').length;
-  const text = parts.join(', ') || (working ? 'Working…' : 'Done');
-  group.querySelector('.tool-group-label').textContent = failed ? `${text} · ${failed} failed` : text;
+  const text = parts.join(', ') || (working ? 'Working' : 'Done');
+  const label = group.querySelector('.tool-group-label');
+  if (label) label.textContent = failed ? `${text} · ${failed} failed` : text;
   group.classList.toggle('is-working', working);
   group.classList.toggle('has-error', failed > 0);
   // The line that is working stays open; once it is done — or a newer line starts — it folds,
   // unless the user opened it by hand.
   if (!group.__touched) group.classList.toggle('is-open', working);
-  const body = group.querySelector('.tool-group-body');
-  if (body) {
-   body.querySelector('.tool-group-done')?.remove();
-   if (!working && items.length) {
-    const done = document.createElement('div');
-    done.className = `tool-group-done${failed ? ' is-error' : ''}`;
-    done.textContent = failed ? '↳ ⚠️ Stopped with an error' : '↳ ✔️ Done';
-    body.append(done);
+  const time = group.querySelector('.tool-group-time');
+  if (time && group.__begun) {
+   time.hidden = false;
+   if (working) {
+    group.__ended = 0;
+    this.tickGroupClock(group);
+    this.startGroupClock(group);
+   } else {
+    group.__ended ||= performance.now();
+    this.tickGroupClock(group);
    }
+  } else if (time) {
+   time.hidden = true;
   }
+  const body = group.querySelector('.tool-group-body');
   const chevron = group.querySelector('.tool-chevron');
   if (chevron) chevron.hidden = !body?.childElementCount;
  }
@@ -1472,7 +1593,7 @@ class Chat {
    budget -= size;
    kept.unshift(parts[i]);
   }
-  return { state: 'running', title: String(title).slice(0, 120), model: this.modelOf(conv), started: turn.started, status, parallel: Boolean(conv.subagent || conv.record?.parent), parts: kept };
+  return { state: 'running', title: String(title).slice(0, 120), model: this.modelOf(conv), started: turn.started, status, parallel: Boolean(conv.subagent || conv.record?.parent), subagent: Boolean(conv.subagent || conv.record?.parent), parts: kept };
  }
 
  // At most one publish every ~700ms; the tail timer keeps the last change from being lost.
@@ -1825,13 +1946,17 @@ class Chat {
   const card = described ? new ToolCard({ ...described, tool: name }) : null;
   // Simple visuals: ordinary calls join the timeline line above them; subagent boxes stay
   // whole and a fresh line starts after them.
-  const simple = card ? this.simpleGroup(view, name) : null;
+  const simple = card ? this.simpleGroup(view, name, args) : null;
   if (card) {
    (simple ? simple.group.querySelector('.tool-group-body') : view.el).append(card.el);
    // The live mirror reads these back, so a card on another device wears the same icon.
    card.el.dataset.toolKind = described.kind || 'command';
    card.el.dataset.toolName = name;
-   if (simple) simple.item.card = card;
+   if (simple) {
+    simple.item.card = card;
+    // The chevron only shows once the line has a step to open.
+    this.simpleLabel(simple.group);
+   }
   }
   if (conv === this.active) this.followBottom();
   this.publishLive(conv, turn);
@@ -2319,6 +2444,11 @@ class Chat {
     if (call) call.__output = step.content;
    }
   }
+  // Simple visuals draws a reloaded step as the same timeline line the live one wore: one
+  // summarized row per stretch of ordinary calls, expanding to the cards, with subagent boxes
+  // left whole and any box breaking the stretch.
+  const simple = Boolean(window.Effects?.simple);
+  let group = null;
   for (const call of calls) {
    let card;
    try {
@@ -2328,7 +2458,24 @@ class Chat {
     card = new ToolCard({ kind: 'command', title: call.function?.name || '', code: call.function?.arguments || '' });
    }
    card.setResult(call.__output || '');
-   el.append(card.el);
+   if (simple && !card.parallel) {
+    if (!group) {
+     group = this.groupElement();
+     el.append(group);
+    }
+    group.querySelector('.tool-group-body').append(card.el);
+    let label = null;
+    if (call.function?.name === 'agents') {
+     try {
+      const args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+      label = { running: AgentTools.agentActionLabel(args.action, args.id, true), done: AgentTools.agentActionLabel(args.action, args.id, false) };
+     } catch {}
+    }
+    group.__items.push({ name: call.function?.name || '', state: 'done', started: 0, bucket: label ? null : (SIMPLE_BUCKET[call.function?.name] || 'run'), label });
+   } else {
+    group = null;
+    el.append(card.el);
+   }
    if (call.function?.name === 'write_file' || call.function?.name === 'edit_file') {
     try {
      const written = call.function.arguments ? JSON.parse(call.function.arguments) : {};
@@ -2336,6 +2483,8 @@ class Chat {
     } catch {}
    }
   }
+  // The summaries last, once every line has its steps.
+  for (const item of el.querySelectorAll('.tool-group')) this.simpleLabel(item);
   // Pictures from tools ride in their own user step, so a chat reloaded from disk has to put
   // them back under the cards instead of losing them the moment the page refreshes.
   const pictures = [];

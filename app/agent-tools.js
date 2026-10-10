@@ -352,6 +352,24 @@ function relative(cwd, path) {
  return inside(cwd, raw) ? raw.slice(norm(cwd).length).replace(/^[\\/]+/, '') || '.' : raw;
 }
 
+// What an agents call is doing, in words: a Simple visuals line reads "Reading Sub-agent's
+// (id) answer" while it waits and "Read Sub-agent's (id) answer" once it is back, so the
+// line says what is happening instead of "agents".
+function agentActionLabel(action, id, running = true) {
+ const wanted = String(id || '').trim();
+ const main = !wanted || wanted === 'main';
+ const target = main ? 'the main agent' : `Sub-agent (${wanted})`;
+ const owner = main ? "the main agent's answer" : `Sub-agent's (${wanted}) answer`;
+ const forms = {
+  read: [`Reading ${owner}`, `Read ${owner}`],
+  ask: [`Messaging ${target}`, `Messaged ${target}`],
+  wait: ['Waiting for a Sub-agent', 'A Sub-agent finished'],
+  list: ['Checking the Sub-agents', 'Checked the Sub-agents'],
+ };
+ const form = forms[String(action || 'list').toLowerCase()] || forms.list;
+ return running ? form[0] : form[1];
+}
+
 function describeTool(name, args, cwd) {
  const path = relative(cwd, args.path || '.');
  switch (name) {
@@ -366,6 +384,7 @@ function describeTool(name, args, cwd) {
    ? { kind: 'file', title: I18n.t('approve.frames'), path, text: I18n.t('approve.framesTo', { folder: relative(cwd, args.save_to) }) }
    : { kind: 'file', title: I18n.t('approve.video'), path };
   case 'subagent': return { kind: 'command', title: I18n.t('subagent.parallel'), code: String(args.description || '') };
+  case 'agents': return { kind: 'command', title: I18n.t('agents.title'), text: agentActionLabel(args.action, args.id, false), reason: agentActionLabel(args.action, args.id, false) };
   case 'ask_user': return { kind: 'command', title: I18n.t('ask.title'), code: String(args.question || '') };
   case 'screenshot': return { kind: 'command', title: I18n.t(args.window ? 'approve.screenshotWindow' : 'approve.screenshot'), code: String(args.window ? args.window : '') };
   case 'clipboard': return { kind: 'command', title: I18n.t(String(args.action || '').toLowerCase() === 'write' ? 'approve.clipboardWrite' : 'approve.clipboardRead'), code: String(args.text || '').slice(0, 200) };
@@ -580,6 +599,7 @@ window.AgentTools = {
  mcpSummary,
  needsApproval,
  describe,
+ agentActionLabel,
  inside,
  environment() {
   env ||= bridge ? bridge.environment().catch(() => null) : Promise.resolve(null);

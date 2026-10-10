@@ -66,7 +66,14 @@ class ToolCard {
   const head = this.spinner ? [this.spinner, icon] : [icon];
   // The simple line: the reason the model gave for the step, falling back to the plain title.
   this.reasonEl = element('span', 'tool-reason', String(this.info.reason || this.titleOf() || '').slice(0, 90));
-  this.head.append(...head, element('span', 'tool-title', this.titleOf()), this.reasonEl, this.summary, this.stat, this.status, this.timeEl, this.chevron);
+  // The three dots that tick at the end of a simple line while the step runs; CSS shows them
+  // only in Simple visuals and only while the card is running.
+  this.dots = this.plain ? element('span', 'tool-dots') : null;
+  if (this.dots) {
+   this.dots.setAttribute('aria-hidden', 'true');
+   for (let k = 0; k < 3; k++) this.dots.append(document.createElement('i'));
+  }
+  this.head.append(...head, element('span', 'tool-title', this.titleOf()), this.reasonEl, ...(this.dots ? [this.dots] : []), this.summary, this.stat, this.status, this.timeEl, this.chevron);
   this.body = element('div', 'tool-body');
   this.inner = element('div', 'tool-body-inner');
   this.body.append(this.inner);

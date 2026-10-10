@@ -231,27 +231,34 @@ const clock = started => {
  return total < 60 ? `${total}s` : `${Math.floor(total / 60)}m ${pad(total % 60)}s`;
 };
 
-// A small pill on the left of the composer: how many runs are working right now, with a
-// living three-dot pulse. Clicking it brings the Runs tab forward.
+// A small pill on the left of the composer: how many runs are working right now — subagents
+// counted apart from parallel runs ("2 sub-agents · 1 running") — with a living three-dot
+// pulse. Clicking it brings the Runs tab forward.
 class ParallelMeter {
  constructor({ button }) {
   this.button = button;
   this.refresh();
-  // Event-driven: the runs and presence emitters cover every change the meter shows. The old
-  // 1 s poll only existed for the running-time label, which the meter does not show.
+  // Event-driven, with a slow safety poll: the runs and presence emitters cover every change
+  // the meter shows, and the poll only makes sure a missed event can never leave it stale.
   window.ParallelRuns.on(() => this.refresh());
   window.Presence?.on?.(() => this.refresh());
+  this.timer = setInterval(() => this.refresh(), 5000);
   button.addEventListener('click', () => window.browserPanel?.showRuns?.());
  }
 
- count() {
-  // Only the runs of the parallel tab count: a plain chat working on another device is not
-  // a parallel run and must not light this bubble.
-  return window.ParallelRuns.runs.filter(run => run.status === 'running').length;
+ counts() {
+  let agents = 0, runs = 0;
+  for (const run of window.ParallelRuns.runs) {
+   if (run.status !== 'running') continue;
+   if (run.subagent) agents++;
+   else runs++;
+  }
+  return { agents, runs };
  }
 
  refresh() {
-  const count = this.count();
+  const { agents, runs } = this.counts();
+  const count = agents + runs;
   this.button.hidden = !count;
   if (!count) {
    this.button.replaceChildren();
@@ -266,7 +273,10 @@ class ParallelMeter {
    text.className = 'parallels-text';
    this.button.replaceChildren(dots, text);
   }
-  this.button.querySelector('.parallels-text').textContent = I18n.t(count === 1 ? 'parallel.meterOne' : 'parallel.meter', { count });
+  const bits = [];
+  if (agents) bits.push(I18n.t(agents === 1 ? 'parallel.subagentOne' : 'parallel.subagent', { count: agents }));
+  if (runs) bits.push(I18n.t(runs === 1 ? 'parallel.meterOne' : 'parallel.meter', { count: runs }));
+  this.button.querySelector('.parallels-text').textContent = bits.join(' · ');
   this.button.title = I18n.t('parallel.openRuns');
  }
 }

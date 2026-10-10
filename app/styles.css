@@ -8868,6 +8868,7 @@ body.has-lightbox{overflow:hidden}
   .tool.is-running .tool-snake rect{animation:none}
   .context-circle.is-lapped .context-fill{animation:none}
   .run-pulse,.parallels-dots i,.chat-spinner{animation:none}
+  .tool-group.is-working .tool-group-label,.tool-dots i{animation:none}
 }
 .composer-tags .composer-instructions{flex:none;max-width:280px}
 .composer-tags{display:flex;align-items:center;flex-wrap:wrap}
@@ -8880,45 +8881,68 @@ body.has-lightbox{overflow:hidden}
    that summarizes the stretch ("Explored 2 files, Ran 13 commands"), the single steps when
    it is opened, and no frames anywhere. Subagent boxes keep their full card. */
 .tool-reason{display:none}
+/* Without Simple visuals a group unwraps: its header goes away and the steps show as the
+   normal cards, so flipping the setting off never hides work. */
 .tool-group{margin:2px 0}
-.tool-group-body{display:none}
-.tool-group.is-open .tool-group-body{display:block}
-.tool-group-head{display:flex;align-items:center;gap:8px;width:100%;height:24px;padding:0 4px;border:0;border-radius:7px;background:transparent;color:inherit;font:inherit;font-size:12.5px;cursor:pointer}
+.tool-group-head{display:none}
+.tool-group-body{display:block}
+html.is-simple .tool-group-head{display:flex;align-items:center;gap:6px;width:100%;height:24px;padding:0 4px;border:0;border-radius:7px;background:transparent;color:inherit;font:inherit;font-size:12.5px;cursor:pointer;text-align:left}
+html.is-simple .tool-group-body{display:none}
+html.is-simple .tool-group.is-open .tool-group-body{display:block}
 .tool-group-head:hover{background:rgba(var(--fg-rgb),.05)}
-.tool-group-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;color:var(--fg-secondary)}
-/* While the stretch works, its label is a gradient moving left to right, like OpenCode's;
-   the moment it is done the words turn past tense and the gradient stops. */
-.tool-group.is-working .tool-group-label{background:linear-gradient(90deg, rgba(var(--fg-rgb),.45), rgba(var(--fg-rgb),1), rgba(var(--fg-rgb),.45));background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:simple-shimmer 1.6s linear infinite}
-@keyframes simple-shimmer{from{background-position:120% 0}to{background-position:-120% 0}}
-.tool-group .tool-chevron{transition:transform .18s ease}
-.tool-group.is-open .tool-chevron{transform:rotate(90deg)}
-.tool-group-done{padding:2px 0 3px 18px;font-size:12px;color:var(--fg-tertiary)}
-/* The rail: consecutive thoughts and tool lines hang from one vertical line. */
-html.is-simple .tool-group{border-left:2px solid rgba(var(--fg-rgb),.14);margin-left:3px;padding-left:10px}
-html.is-simple .message-thinking{border-left:2px solid rgba(var(--fg-rgb),.14);margin:2px 0 2px 3px;padding-left:10px;background:transparent;box-shadow:none}
+/* The gray ⚡ before the words, the way a Thought row wears its 🧠. */
+.tool-group-icon{flex:none;display:block;font-size:13px;line-height:1;filter:grayscale(1);opacity:.5}
+.tool-group-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;color:rgba(255,255,255,.38)}
+.tool-group-head:hover .tool-group-label{color:rgba(255,255,255,.62)}
+/* While the stretch works the line wears OpenCode's shimmer: a narrow bright band (5.2ch
+   wide, peak at its middle) sweeps over the quiet words — background-size 360%, one pass per
+   1.2s, linear — and the moment it is done the words turn past tense and it stops. */
+.tool-group.is-working .tool-group-label{background-image:linear-gradient(90deg,transparent calc(50% - 5.2ch),rgba(var(--fg-rgb),.95) 50%,transparent calc(50% + 5.2ch)),linear-gradient(rgba(var(--fg-rgb),.38),rgba(var(--fg-rgb),.38));background-size:360% 100%,100% 100%;background-repeat:no-repeat;background-position:100% 0,0 0;-webkit-background-clip:text;background-clip:text;color:transparent;animation:simple-shimmer 1.2s linear infinite}
+@keyframes simple-shimmer{from{background-position:100% 0,0 0}to{background-position:0 0,0 0}}
+/* The clock beside the line, the same as the Thought row's. */
+.tool-group-time{flex:none;margin-left:1px;font-family:var(--mono-font);font-size:11px;color:rgba(var(--fg-rgb),.4);white-space:nowrap}
+.tool-group-time[hidden]{display:none}
+/* Three dots that tick at the end of the words while the call runs; gone when it is done. */
+.tool-dots{display:none;flex:none;align-items:center;gap:2px;margin:2px -2px 0 1px;color:rgba(var(--fg-rgb),.4)}
+.tool-dots i{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.3;animation:tool-dots 1.2s ease-in-out infinite}
+.tool-dots i:nth-child(2){animation-delay:.15s}
+.tool-dots i:nth-child(3){animation-delay:.3s}
+@keyframes tool-dots{0%,60%,100%{opacity:.3}30%{opacity:1}}
+html.is-simple .tool-group.is-working .tool-dots{display:inline-flex}
+html.is-simple .tool:not(.is-parallel).is-running .tool-dots{display:inline-flex}
+html.is-simple .tool-group .tool-chevron{transition:transform .18s ease;margin:0 0 2px 1px}
+html.is-simple .tool-group.is-open .tool-chevron{transform:rotate(90deg)}
+/* The rail: consecutive thoughts and tool lines hang from one vertical line, nearly touching
+   (adjacent lines sit 1–2px apart). */
+html.is-simple .tool-group{border-left:2px solid rgba(var(--fg-rgb),.16);margin:1px 0 1px 3px;padding-left:10px}
+html.is-simple .message-thinking{border-left:2px solid rgba(var(--fg-rgb),.16);margin:1px 0 1px 3px;padding-left:10px;background:transparent;box-shadow:none}
 html.is-simple .message-thinking-head{height:24px;padding:0 2px}
-/* Every tool card, grouped or not: no frame, the reason and the time, each expandable. This
-   covers cards already on screen when the setting is flipped and chats restored from disk,
-   which never went through the grouper. */
-html.is-simple .tool:not(.is-parallel){background:transparent;box-shadow:none;border-radius:0;margin:1px 0;animation:none}
+/* The steps of one turn sit as close as the lines of one rail; a text step keeps a breath
+   above it. */
+html.is-simple .thread-list > .message.is-assistant + .message.is-assistant{margin-top:0}
+html.is-simple .message.is-assistant > .message-content:not(:empty){margin-top:4px}
+/* Every tool card: no frame — border included — the ⚡ reason and the time, expandable on
+   click. Cards already on screen when the setting is flipped keep the same look. */
+html.is-simple .tool:not(.is-parallel){background:transparent;box-shadow:none;border:0;border-left:2px solid rgba(var(--fg-rgb),.16);border-radius:0;margin:1px 0 1px 3px;padding-left:10px;animation:none}
+html.is-simple .tool-group-body .tool:not(.is-parallel){border-left:0;margin:1px 0;padding-left:0}
 html.is-simple .tool:not(.is-parallel) .tool-snake{display:none}
-html.is-simple .tool:not(.is-parallel) .tool-head{height:24px;padding:0 2px;gap:7px;border-radius:7px}
+html.is-simple .tool:not(.is-parallel) .tool-head{height:24px;padding:0 2px;gap:6px;border-radius:7px}
 html.is-simple .tool:not(.is-parallel) .tool-head:hover{background:rgba(var(--fg-rgb),.05)}
 html.is-simple .tool:not(.is-parallel) .tool-title,
 html.is-simple .tool:not(.is-parallel) .tool-summary,
 html.is-simple .tool:not(.is-parallel) .tool-stat,
 html.is-simple .tool:not(.is-parallel) .tool-status{display:none}
-html.is-simple .tool:not(.is-parallel) .tool-reason{display:inline;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--fg-secondary)}
-html.is-simple .tool:not(.is-parallel) .tool-reason::before{content:"•";margin-right:6px;color:var(--fg-tertiary)}
-html.is-simple .tool:not(.is-parallel) .tool-time{display:inline;font-size:11px;color:var(--fg-tertiary);white-space:nowrap}
-html.is-simple .tool:not(.is-parallel) .tool-chevron{opacity:.6}
+html.is-simple .tool:not(.is-parallel) .tool-reason{display:inline;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:rgba(255,255,255,.38)}
+html.is-simple .tool:not(.is-parallel) .tool-head:hover .tool-reason{color:rgba(255,255,255,.62)}
+html.is-simple .tool:not(.is-parallel) .tool-reason::before{content:"⚡";margin-right:6px;filter:grayscale(1);opacity:.5}
+html.is-simple .tool:not(.is-parallel) .tool-time{display:inline;order:9;font-family:var(--mono-font);font-size:11px;color:rgba(var(--fg-rgb),.4);white-space:nowrap}
+html.is-simple .tool:not(.is-parallel) .tool-chevron{opacity:.6;margin:0 0 2px 1px}
 /* A line only opens its details when clicked (errors open themselves). */
 html.is-simple .tool:not(.is-parallel) .tool-body{display:none}
 html.is-simple .tool:not(.is-parallel).is-open.is-touched .tool-body{display:block}
 html.is-simple .tool:not(.is-parallel).is-error .tool-body{display:block}
 html.is-simple .tool.is-error:not(.is-parallel) .tool-reason{color:rgb(var(--danger-rgb))}
 html.is-simple .tool-group.has-error .tool-group-label{background:none;background-clip:border-box;-webkit-background-clip:border-box;color:rgb(var(--danger-rgb));animation:none}
-html.is-simple .tool-group-done.is-error{color:rgb(var(--danger-rgb))}
 
 /* The todo box: one rounded card that stays with the conversation. Gray ring = not started,
    spinning white ring = working on it, green check = done, red cross = failed. */

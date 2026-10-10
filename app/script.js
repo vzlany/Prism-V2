@@ -154,7 +154,7 @@ window.Presence?.on?.(() => {
   if (!entry.parallel) continue;
   const known = (window.ParallelRuns?.runs || []).some(run => run.id === entry.id);
   if (!known) {
-   window.ParallelRuns?.add({ id: entry.id, title: entry.title || '', model: entry.model || '', status: 'running', snippet: '' });
+   window.ParallelRuns?.add({ id: entry.id, title: entry.title || '', model: entry.model || '', status: 'running', snippet: '', subagent: entry.subagent === true || entry.model === I18n.t('runs.subagent') });
    continue;
   }
   const text = (entry.parts || []).filter(part => part.kind === 'text').map(part => part.text).join(' ').replace(/\s+/g, ' ').trim();
