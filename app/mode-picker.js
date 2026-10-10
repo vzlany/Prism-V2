@@ -85,6 +85,7 @@ class ModePicker {
 
  sync() {
   this.syncDiscord(window.DiscordNotify?.on === true);
+  if (this.serverOnly) return;
   const mode = this.settings.mode;
   if (mode === this.shown) return;
   const first = this.shown === null, from = this.button.offsetWidth;
@@ -106,6 +107,24 @@ class ModePicker {
   this.discord.setAttribute('aria-checked', String(on));
   this.discord.classList.toggle('is-on', on);
   this.discord.title = I18n.t(on ? 'mode.discord.on' : 'mode.discord.off');
+ }
+
+ // On a server device the menu carries only the Discord switch: the permission mode belongs
+ // to the machine's owner, not to whoever happens to be looking at it.
+ setServerOnly(on) {
+  this.serverOnly = Boolean(on);
+  for (const option of this.options) option.hidden = this.serverOnly;
+  this.separator.hidden = this.serverOnly;
+  this.button.dataset.serverOnly = this.serverOnly ? '1' : '';
+  if (this.serverOnly) {
+   this.button.dataset.mode = 'discord';
+   this.label.textContent = I18n.t('mode.discord');
+   this.button.title = I18n.t('mode.discord.hint');
+   this.button.setAttribute('aria-label', I18n.t('mode.discord'));
+  } else {
+   this.shown = null;
+   this.sync();
+  }
  }
 
  hover(option) {

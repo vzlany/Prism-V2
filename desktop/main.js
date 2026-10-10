@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, screen, shell, Notification } = require('electron');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const Tools = require('./tools');
@@ -15,11 +16,18 @@ const Discord = require('./discord');
 const Updater = require('./updater');
 const CliCommand = require('./cli-command');
 const Server = require('./server');
+const { Beacon, deviceId } = require('./beacon');
 
 const APP_ID = 'com.prismv2.app';
 // Set when the app is really quitting (tray -> Quit, update install, system shutdown): only
 // then does the window's close actually close it.
 let quitting = false;
+// The local (this PC) window, the remote device window when another device was picked, and
+// the LAN beacon that advertises this install to the other Prism apps.
+let localWin = null;
+let remoteWin = null;
+let deviceBeacon = null;
+let deviceChoice = null;
 // Prism V2 is the V2 fork of Prism: it keeps its data under its own name, and a machine that
 // already ran Prism has its folder copied over once, so chats, keys, memory and MCP config
 // carry on here.
@@ -293,6 +301,90 @@ let webChild = null;
 function webPort(auto = readAuto()) {
  return Math.max(1, Math.min(65535, Number(auto.port) || 8787));
 }
+
+// "Server mode": this install serves the other devices. Set by Settings -> Server's one-click
+// setup, or implied on Linux when the tray app runs the web server and the bot together.
+function serverMode(auto = readAuto()) {
+ return auto.server === true || (process.platform === 'linux' && Boolean(auto.web) && Boolean(auto.bot));
+}
+
+// --------------------------------------------------------------- other devices
+// The beacon advertises this install; picking another device opens its web UI in its own
+// window (no preload: the remote page talks to ITS engine, so chats, instructions and skills
+// are that device's, and turns run there).
+function windowBounds() {
+ const { workAreaSize } = screen.getPrimaryDisplay();
+ return {
+  width: Math.min(Math.max(Math.round(workAreaSize.width * 0.8), 1280), 1720),
+  height: Math.min(Math.max(Math.round(workAreaSize.height * 0.88), 800), 1180),
+ };
+}
+
+function openRemoteWindow(device) {
+ if (!device?.url) return null;
+ const url = `${device.url}${device.url.includes('?') ? '&' : '?'}from=${encodeURIComponent(os.hostname())}`;
+ if (remoteWin && !remoteWin.isDestroyed()) {
+  remoteWin.setTitle(`Prism V2 — ${device.name}`);
+  remoteWin.loadURL(url);
+  showWindow(remoteWin);
+  if (localWin && !localWin.isDestroyed()) localWin.hide();
+  return remoteWin;
+ }
+ remoteWin = new BrowserWindow({
+  ...windowBounds(),
+  center: true,
+  minWidth: 760,
+  minHeight: 540,
+  show: false,
+  title: `Prism V2 — ${device.name}`,
+  icon: ICON,
+  backgroundColor: CHAT_BG,
+  ...(process.platform === 'linux' ? {} : {
+   titleBarStyle: 'hidden',
+   titleBarOverlay: { color: CHAT_BG, symbolColor: TITLE_BAR.symbolColor, height: TITLE_BAR.height },
+  }),
+  webPreferences: {
+   contextIsolation: true,
+   sandbox: true,
+   spellcheck: true,
+   autoplayPolicy: 'no-user-gesture-required',
+  },
+ });
+ remoteWin.once('ready-to-show', () => remoteWin.show());
+ remoteWin.webContents.setWindowOpenHandler(({ url: target }) => {
+  external(target);
+  return { action: 'deny' };
+ });
+ remoteWin.webContents.on('console-message', (event, level, message) => {
+  const text = message || event?.message || '';
+  if (text) console.log(`[remote] ${text}`);
+ });
+ remoteWin.on('closed', () => { remoteWin = null; });
+ if (localWin && !localWin.isDestroyed()) localWin.hide();
+ return remoteWin;
+}
+
+function activeWindow() {
+ if (remoteWin && !remoteWin.isDestroyed()) return remoteWin;
+ return localWin && !localWin.isDestroyed() ? localWin : null;
+}
+
+function pickDevice(id) {
+ const list = deviceBeacon ? deviceBeacon.list() : null;
+ if (!list) return { mode: 'self' };
+ const wanted = String(id || '').trim();
+ if (!wanted || wanted === 'self' || wanted === list.self.id) {
+  deviceChoice = 'self';
+  if (localWin && !localWin.isDestroyed()) showWindow(localWin);
+  return { mode: 'self' };
+ }
+ const device = list.devices.find(item => item.id === wanted);
+ if (!device) return { mode: 'missing' };
+ deviceChoice = device.id;
+ if (!device.url) return { mode: 'offline', name: device.name };
+ openRemoteWindow(device);
+ return { mode: 'remote', name: device.name, url: device.url };
+}
 function stopWeb() {
  if (!webChild) return;
  try { webChild.kill(); } catch {}
@@ -303,7 +395,7 @@ function startWeb(auto = readAuto()) {
  const script = path.join(ROOT, 'tools', 'web-server.mjs');
  try {
   webChild = spawn(process.execPath, [script, '--port', String(webPort(auto)), '--host', '0.0.0.0', '--no-open', ...(PROFILE ? ['--profile', PROFILE] : [])], {
-   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PRISM_NO_BEACON: '1' },
    windowsHide: true,
    stdio: 'ignore',
   });
@@ -339,7 +431,7 @@ function startBot(auto = readAuto()) {
 ipcMain.handle('auto:get', event => {
  if (!fromApp(event)) return null;
  const auto = readAuto();
- return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, awake: auto.awake !== false, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
+ return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, server: serverMode(auto), awake: auto.awake !== false, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
 });
 // The web server lists its live connections in web-clients.json (it may also be running
 // from a terminal, not started by this app): the Auto page shows the port and the devices.
@@ -360,6 +452,7 @@ ipcMain.handle('auto:set', (event, patch) => {
   ...(typeof patch?.hidden === 'boolean' ? { hidden: patch.hidden } : {}),
   ...(typeof patch?.web === 'boolean' ? { web: patch.web } : {}),
   ...(typeof patch?.bot === 'boolean' ? { bot: patch.bot } : {}),
+  ...(typeof patch?.server === 'boolean' ? { server: patch.server } : {}),
   ...(typeof patch?.awake === 'boolean' ? { awake: patch.awake } : {}),
   ...(patch?.port !== undefined ? { port: webPort({ port: patch.port }) } : {}),
  });
@@ -371,7 +464,41 @@ ipcMain.handle('auto:set', (event, patch) => {
  // A turn is running right now and the setting just changed: apply it at once.
  if (turnsActive && auto.awake === false) keepAwake(false);
  else if (turnsActive) keepAwake(true);
- return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, awake: auto.awake !== false, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
+ if (deviceBeacon) {
+  deviceBeacon.port = auto.web ? webPort(auto) : 0;
+  deviceBeacon.server = serverMode(auto);
+ }
+ return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, server: serverMode(auto), awake: auto.awake !== false, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
+});
+
+// --------------------------------------------------------------- devices (other Prism apps)
+// The local UI asks which device to use when another one is on the network; the list comes
+// from the beacon. Picking a remote opens its web UI in its own window.
+ipcMain.handle('devices:list', event => {
+ if (!fromApp(event)) return null;
+ const list = deviceBeacon ? deviceBeacon.list() : { self: { id: '', name: os.hostname(), platform: process.platform, version: app.getVersion(), port: 0, server: false, self: true }, devices: [] };
+ return { ...list, name: os.hostname(), server: serverMode(), hidden: HIDDEN };
+});
+ipcMain.handle('devices:prompt', async event => {
+ if (!fromApp(event)) return { show: false };
+ if (HIDDEN || serverMode() || deviceChoice) return { show: false };
+ // Give the network a moment: the picker only appears when another device answers.
+ const started = Date.now();
+ while (Date.now() - started < 4000 && deviceBeacon && deviceBeacon.list().devices.length === 0) {
+  await new Promise(resolve => setTimeout(resolve, 250));
+ }
+ const list = deviceBeacon ? deviceBeacon.list() : { devices: [] };
+ return { show: list.devices.length > 0, ...list, name: os.hostname(), server: serverMode() };
+});
+ipcMain.handle('devices:pick', (event, id) => (fromApp(event) ? pickDevice(id) : null));
+ipcMain.handle('devices:add', (event, entry) => {
+ if (!fromApp(event) || !deviceBeacon) return null;
+ return deviceBeacon.addManual(entry || {});
+});
+ipcMain.handle('devices:forget', (event, host, port) => {
+ if (!fromApp(event) || !deviceBeacon) return false;
+ deviceBeacon.forgetManual(String(host || ''), Number(port) || 0);
+ return true;
 });
 
 let tray = null;
@@ -381,7 +508,7 @@ function showWindow(win) {
  win.show();
  win.focus();
 }
-function createTray(win) {
+function createTray() {
  try {
   tray = new Tray(ICON);
   tray.setToolTip('Prism V2');
@@ -390,7 +517,7 @@ function createTray(win) {
    const runs = presenceRuns.size;
    tray.setToolTip(runs ? `Prism V2 — ${runs} working` : 'Prism V2');
    tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open Prism', click: () => showWindow(win) },
+    { label: 'Open Prism', click: () => showWindow(activeWindow()) },
     { label: 'Open web', click: () => {
      const auto = readAuto();
      if (!webChild) startWeb({ ...auto, web: true });
@@ -403,9 +530,10 @@ function createTray(win) {
   refresh();
   setInterval(refresh, 10000);
   tray.on('click', () => {
-   if (!win || win.isDestroyed()) return;
-   if (win.isVisible() && win.isFocused()) win.hide();
-   else showWindow(win);
+   const target = activeWindow();
+   if (!target) return;
+   if (target.isVisible() && target.isFocused()) target.hide();
+   else showWindow(target);
   });
  } catch (error) {
   console.log('[tray] could not create the tray icon:', error.message);
@@ -748,9 +876,7 @@ if (process.argv.includes('--create-shortcut')) {
 } else {
  let win = null;
  app.on('second-instance', () => {
-  if (!win) return;
-  // The window may be hidden in the tray, not minimized: show it again.
-  showWindow(win);
+  showWindow(activeWindow());
  });
  app.whenReady().then(() => {
   Browser.setup();
@@ -758,9 +884,26 @@ if (process.argv.includes('--create-shortcut')) {
   // Installed builds put the `prism` command in the terminal for the current user.
   if (CliCommand.install()) console.log('The prism command is now available in terminals');
   win = createWindow();
+  localWin = win;
+  // Advertise this install on the LAN, so the other Prism apps list it as a device.
+  try {
+   const auto = readAuto();
+   deviceBeacon = new Beacon({
+    id: deviceId(app.getPath('userData')),
+    userData: app.getPath('userData'),
+    name: os.hostname(),
+    platform: process.platform,
+    version: app.getVersion(),
+    port: auto.web ? webPort(auto) : 0,
+    server: serverMode(auto),
+   });
+   deviceBeacon.start();
+  } catch (error) {
+   console.log('[beacon] could not start:', error.message);
+  }
   watchStore(win);
   watchDelegate(win);
-  createTray(win);
+  createTray();
   applyAuto();
   startWeb();
   startBot();
@@ -782,6 +925,7 @@ if (process.argv.includes('--create-shortcut')) {
   MCP.stopAll();
   stopWeb();
   stopBot();
+  deviceBeacon?.stop();
   if (!writes.size) return;
   event.preventDefault();
   Promise.allSettled([...writes.values()]).then(() => app.quit());

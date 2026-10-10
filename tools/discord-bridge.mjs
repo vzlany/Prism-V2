@@ -360,6 +360,11 @@ async function turn(prompt, display = {}) {
     }
    }
   }
+  // A <discord_summary> block belongs to the app's finish DM; here the answer IS the DM, so
+  // only its words are kept.
+  if (content.includes("<discord_summary>")) {
+   content = content.replace(/<discord_summary>([\s\S]*?)<\/discord_summary>/gi, "$1").trim();
+  }
   if (!calls.length) {
    const answer = content.trim();
    // One silent retry when a model returns nothing at all: a hiccup, not a real answer.

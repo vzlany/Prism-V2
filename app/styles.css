@@ -9108,6 +9108,43 @@ html.is-simple .tool-group.has-error .tool-group-label{background:none;backgroun
 .server-cmd{margin:0;max-height:220px;overflow:auto;white-space:pre;user-select:text}
 .server-copy{margin:6px 0 12px}
 .server-path{display:inline-block;padding:3px 8px;border-radius:7px;background:rgba(var(--fg-rgb),.06);font-family:var(--mono-font);font-size:11.5px;color:var(--fg-secondary);overflow-wrap:anywhere}
+
+/* Prism V2: other devices — the launch picker and the composer switcher */
+.device-overlay{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(10,10,12,.66);backdrop-filter:blur(6px);opacity:0;transition:opacity .25s ease}
+.device-overlay[hidden]{display:none}
+.device-overlay.is-shown{opacity:1}
+.device-sheet{width:min(460px,calc(100vw - 40px));max-height:min(78vh,640px);overflow:auto;padding:22px 22px 16px;border-radius:18px;background:var(--composer-bg);box-shadow:inset 0 0 0 1px var(--composer-border),0 24px 60px rgba(0,0,0,.5);color:rgba(var(--fg-rgb),.9)}
+.device-head{font-size:17px;font-weight:650}
+.device-hint{margin:6px 0 14px;font-size:12.5px;line-height:1.5;color:var(--fg-secondary)}
+.device-list{display:flex;flex-direction:column;gap:6px}
+.device-row{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border:0;border-radius:12px;background:rgba(var(--fg-rgb),.045);box-shadow:inset 0 0 0 1px rgba(var(--fg-rgb),.07);color:inherit;font:inherit;text-align:left;cursor:pointer;transition:background-color .15s ease,box-shadow .15s ease}
+.device-row:hover,.device-row:focus-visible{background:rgba(var(--fg-rgb),.09);box-shadow:inset 0 0 0 1px rgba(var(--fg-rgb),.16)}
+.device-row[data-offline="1"]{opacity:.55;cursor:default}
+.device-row[data-current="1"]{box-shadow:inset 0 0 0 1px rgba(138,180,255,.4)}
+.device-pc{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:rgba(var(--fg-rgb),.07);color:rgba(var(--fg-rgb),.8)}
+.device-pc svg{width:19px;height:19px}
+.device-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.device-name{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;color:rgba(var(--fg-rgb),.92);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.device-meta{font-size:11.5px;color:var(--fg-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.device-offline{font-size:11px;color:rgba(255,214,140,.85)}
+.device-chip{flex:none;padding:1px 7px;border-radius:999px;background:rgba(var(--fg-rgb),.09);font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--fg-secondary)}
+.device-chip.is-server{background:rgba(120,220,150,.14);color:rgb(150,230,170)}
+.device-go{flex:none;display:grid;place-items:center;width:18px;height:18px;color:var(--fg-tertiary)}
+.device-go svg{width:14px;height:14px}
+.device-foot{display:flex;gap:8px;margin-top:14px}
+.device-address{flex:1;min-width:0}
+.device-note{margin:8px 2px 0;font-size:11px;line-height:1.5;color:var(--fg-tertiary)}
+.device-menu{padding:6px;width:min(360px,calc(100vw - 24px))}
+.device-menu .device-row{background:transparent;box-shadow:none;padding:9px 10px}
+.device-menu .device-row:hover{background:rgba(var(--fg-rgb),.06)}
+.composer-device{display:flex;align-items:center;gap:7px;height:var(--icon-button-size,32px);padding:0 11px 0 9px;border:0;border-radius:calc(var(--icon-button-size,32px)/2);background:rgba(var(--fg-rgb),.05);color:rgba(var(--fg-rgb),.72);font:inherit;font-size:12px;line-height:1;cursor:pointer;white-space:nowrap;anchor-name:--device;transition:background-color .2s ease,color .2s ease}
+.composer-device[hidden]{display:none}
+.composer-device:hover{background:rgba(var(--fg-rgb),.09);color:rgba(var(--fg-rgb),.92)}
+.composer-device:focus-visible{box-shadow:0 0 0 2px var(--focus-ring)}
+.composer-device-icon{display:grid;place-items:center;width:14px;height:14px}
+.composer-device-icon svg{width:14px;height:14px}
+.device-menu{position:fixed;position-anchor:--device;position-area:top span-left;position-try-fallbacks:flip-block;inset:auto;margin:0 0 10px;background:var(--composer-bg);border:0;border-radius:14px;box-shadow:inset 0 0 0 1px var(--composer-border),0 18px 48px rgba(0,0,0,.45);color:rgba(var(--fg-rgb),.85)}
+.composer-mode[data-server-only="1"] .composer-mode-icons{display:none}
 .auto-bot-state.is-on{color:rgb(var(--success-rgb))}
 .auto-devices{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .auto-device{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg-secondary)}

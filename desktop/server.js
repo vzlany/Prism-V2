@@ -122,6 +122,7 @@ function info() {
   os: process.platform,
   chosen: platform(),
   version: app.getVersion(),
+  host: os.hostname(),
   home: process.env.HOME || os.homedir(),
   userData: app.getPath('userData'),
   autostart: process.platform === 'linux' ? autostartFile() : '',

@@ -208,6 +208,18 @@ window.openghost = {
   check: () => invoke('update:check'),
   install: () => invoke('update:install'),
  },
+ devices: {
+  // The other Prism apps on this network. The page can only navigate: open() hands back the
+  // device's web address and the caller goes there.
+  list: () => invoke('devices:list'),
+  open: id => invoke('devices:open', id),
+  add: entry => invoke('devices:add', entry),
+  forget: (host, port) => invoke('devices:forget', host, port),
+ },
+ engine: {
+  // Whether this machine is a server (its composer shows only the Discord switch).
+  info: () => invoke('engine:info'),
+ },
  // A turn started on this page, for the app to run.
  delegate: {
   send: request => send('delegate:add', request),

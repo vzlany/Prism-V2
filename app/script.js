@@ -104,6 +104,11 @@ new ParallelPanel({
  },
 });
 const parallelMeter = new ParallelMeter({ button: document.querySelector('.composer-parallels') });
+// Other devices on the network: the switcher in the composer, and the launch picker that
+// asks which device this window should use when another one answers.
+const deviceMenu = new DeviceMenu({ button: document.querySelector('.composer-device'), menu: document.querySelector('.device-menu') });
+const devicePicker = new DevicePicker({ root: main });
+devicePicker.maybeShow();
 // A conversation running on another page (the phone, a second window) shows the same busy
 // ghost here: the list has to be repainted when presence arrives, not only on local changes.
 // When such a run finishes, the chat is read again so its answer appears without a reload.
@@ -261,9 +266,15 @@ new ContextCircle({
 const modeButton = document.querySelector('.composer-mode');
 const browserToggle = document.querySelector('.browser-toggle');
 let browserPanel = null;
+let modePicker = null;
 if (AgentTools.available) {
   modeButton.hidden = false;
-  new ModePicker({ button: modeButton, menu: document.querySelector('.mode-menu'), settings, onChange: () => chat.onModeChange() });
+  modePicker = new ModePicker({ button: modeButton, menu: document.querySelector('.mode-menu'), settings, onChange: () => chat.onModeChange() });
+  // A server device wears only the Discord switch in the mode menu: Ask/Auto/Full are the
+  // machine's own business there.
+  const serverOnly = info => { if (info?.server) modePicker.setServerOnly(true); };
+  window.openghost?.engine?.info?.().then(serverOnly).catch(() => {});
+  window.openghost?.auto?.get?.().then(serverOnly).catch(() => {});
   if (window.openghost?.web) {
    browserToggle.hidden = true;
   } else {

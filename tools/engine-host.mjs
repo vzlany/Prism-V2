@@ -4,6 +4,7 @@
 // behave exactly like they do in the app.
 import { Module, createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, cpSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, isAbsolute as isAbsolutePath, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -11,7 +12,7 @@ import { spawn } from "node:child_process";
 const require = createRequire(import.meta.url);
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-export function createEngineHost({ profile = "" } = {}) {
+export function createEngineHost({ profile = "", webPort = 0 } = {}) {
  const APP_DATA = process.env.APPDATA || join(process.env.HOME || ".", ".config");
  const USER_DATA = join(APP_DATA, "Prism V2" + (profile ? `-${profile}` : ""));
  // A machine coming from Prism keeps its chats, keys and memory: copy what matters once.
@@ -183,6 +184,38 @@ export function createEngineHost({ profile = "" } = {}) {
  // (systemd, or `prism server`), it steps aside and the new build comes right back up.
  const updateCore = require(join(ROOT, "desktop", "update-core.js"));
  const installRoot = resolve(ROOT, "..", "..");
+
+ // ------------------------------------------------------------- devices (LAN discovery)
+ // This engine answers beacons itself, so a headless server (or a plain `prism web`) shows up
+ // in the other apps' device list with its web port.
+ const appVersion = (() => { try { return JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version || ""; } catch { return ""; } })();
+ const readAutoJson = () => { try { return JSON.parse(readFileSync(join(USER_DATA, "auto.json"), "utf8")) || {}; } catch { return {}; } };
+ const serverMode = (() => {
+  const auto = readAutoJson();
+  return auto.server === true || (process.platform === "linux" && Boolean(process.env.PRISM_SUPERVISED || process.env.INVOCATION_ID || process.env.JOURNAL_STREAM));
+ })();
+ let beacon = null;
+ if (!process.env.PRISM_NO_BEACON) {
+  try {
+   const { Beacon, deviceId } = require(join(ROOT, "desktop", "beacon.js"));
+   beacon = new Beacon({ id: deviceId(USER_DATA), userData: USER_DATA, name: hostname(), platform: process.platform, version: appVersion, port: webPort, server: serverMode });
+   beacon.start();
+  } catch (error) {
+   console.log("[beacon] could not start:", error.message);
+  }
+ }
+ handlers.set("engine:info", () => ({ server: serverMode, name: hostname(), platform: process.platform, version: appVersion }));
+ handlers.set("devices:list", () => (beacon ? { ...beacon.list(), name: hostname(), server: serverMode } : { self: { id: "", name: hostname(), platform: process.platform, version: appVersion, port: webPort, server: serverMode, self: true, url: "" }, devices: [], name: hostname(), server: serverMode }));
+ handlers.set("devices:add", (event, entry) => (beacon ? beacon.addManual(entry || {}) : null));
+ handlers.set("devices:forget", (event, host, port) => { beacon?.forgetManual(String(host || ""), Number(port) || 0); return true; });
+ handlers.set("devices:open", (event, id) => {
+  if (!beacon) return { error: "device discovery is off" };
+  const list = beacon.list();
+  if (!id || id === "self" || id === list.self.id) return { self: true };
+  const device = list.devices.find(item => item.id === id);
+  if (!device?.url) return { error: "that device does not serve the web UI" };
+  return { url: device.url };
+ });
  const updateSettings = patch => updateCore.writeSettings(USER_DATA, {
   ...(patch?.auto !== undefined ? { auto: patch.auto === true } : {}),
   ...(patch?.install !== undefined ? { install: patch.install === true } : {}),

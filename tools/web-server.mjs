@@ -40,7 +40,7 @@ const PROFILE = /^[a-z0-9-]{1,24}$/.test(rawProfile) ? rawProfile : "";
 const OPEN = !args.includes("--no-open");
 
 // --------------------------------------------------------------- the engine host
-const host = createEngineHost({ profile: PROFILE });
+const host = createEngineHost({ profile: PROFILE, webPort: PORT });
 const { USER_DATA } = host;
 
 // --------------------------------------------------------------- http + websocket

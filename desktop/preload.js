@@ -33,6 +33,15 @@ contextBridge.exposeInMainWorld('openghost', {
   get: () => ipcRenderer.invoke('server:get'),
   set: patch => ipcRenderer.invoke('server:set', patch),
  },
+ devices: {
+  // The other Prism apps on this network: the startup picker, the list, and picking one to
+  // work with (its own window, its own chats and tools).
+  list: () => ipcRenderer.invoke('devices:list'),
+  prompt: () => ipcRenderer.invoke('devices:prompt'),
+  pick: id => ipcRenderer.invoke('devices:pick', id),
+  add: entry => ipcRenderer.invoke('devices:add', entry),
+  forget: (host, port) => ipcRenderer.invoke('devices:forget', host, port),
+ },
  path: {
   // A path written in a reply: does it exist, and open it.
   info: (target, cwd) => ipcRenderer.invoke('path:info', target, cwd),

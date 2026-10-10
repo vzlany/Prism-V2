@@ -1,7 +1,7 @@
 {
   "name": "prism-v2",
   "productName": "Prism V2",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "author": "Prism V2",
   "private": true,
   "description": "Prism V2 — a personal Windows desktop agent forked from Prism (itself a fork of OpenGhost), with OpenCode Go, MCP, memory, subagents, Claude skills, sounds and Discord notifications",

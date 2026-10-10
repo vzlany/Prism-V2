@@ -130,6 +130,9 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 // "Website", one written in Discord shows everywhere as "Discord", and so on. A message is
 // never labelled in the place it was written.
 const PLATFORM = window.openghost?.desktop ? 'app' : (window.openghost?.web ? 'web' : 'app');
+// When another device's app opens this page it says who it is (?from=…) — the turns run
+// here, on this machine, and the label tells the model the user is elsewhere.
+const FROM_DEVICE = (() => { try { return new URLSearchParams(location.search).get('from') || ''; } catch { return ''; } })();
 const attr = text => text.replace(/[&"<\n]/g, c => ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '\n': ' ' })[c]);
 const samePath = (a, b) => a.toLowerCase() === b.toLowerCase();
 
@@ -161,6 +164,7 @@ const join = (base, text) => [base.trimEnd(), text.trim()].filter(Boolean).join(
 // A <send_discord_message> block: the agent talking to the user on Discord on its own.
 // `@file: C:\path\shot.png` lines inside it become attachments, the rest is the message.
 const DISCORD_BLOCK = /<send_discord_message>([\s\S]*?)<\/send_discord_message>/gi;
+const DISCORD_SUMMARY = /<discord_summary>([\s\S]*?)<\/discord_summary>/gi;
 const DISCORD_FILE = /^@(?:file|image|attach)\s*:\s*(.+)$/i;
 // The agent can write to another agent from its text: <write-message_ID>…</write-message_ID>.
 const AGENT_BLOCK = /<write-message[_-]([a-z0-9-]+)>([\s\S]*?)<\/write-message[_-]\1>/gi;
@@ -708,9 +712,9 @@ class Chat {
  }
 
  // ---- The todo tool ----------------------------------------------------------------------
- // One live list per conversation, drawn as a single box that moves to the newest position
- // every time it changes. A step is idle (gray circle), doing (spinning white circle),
- // done (green check) or failed (red cross).
+ // One live list per conversation, drawn as a single box that stays where it first appeared:
+ // updates redraw it in place instead of moving it down the thread. A step is idle (gray
+ // circle), doing (spinning white circle), done (green check) or failed (red cross).
  async todo(args = {}, toolId = '') {
   const selfId = this.toolConvs?.get(toolId) || this.active?.id || '';
   const conv = this.conversations.get(selfId) || this.active;
@@ -748,15 +752,23 @@ class Chat {
   return `Todo (${done}/${list.length} done):\n${list.map(item => `${sign[item.state] || '[ ]'} ${item.text}`).join('\n')}`;
  }
 
- // The one todo box: removed and put back at the end of the conversation on every change, so
- // it always sits at the newest position.
+ // The one todo box: it stays where it first appeared; a change redraws it in place, and a
+ // stale box from an older position (after a reload, a store refresh) is removed so only one
+ // ever shows.
  renderTodos(conv) {
   if (!conv) return;
-  conv.todoCard?.remove();
-  conv.todoCard = null;
-  if (!conv.todos?.length) return;
-  conv.todoCard = new TodoCard(conv.todos);
-  conv.list.append(conv.todoCard.el);
+  for (const stale of conv.list.querySelectorAll(':scope > .todo-card')) {
+   if (stale !== conv.todoCard?.el) stale.remove();
+  }
+  if (!conv.todos?.length) {
+   conv.todoCard?.el.remove();
+   conv.todoCard = null;
+   return;
+  }
+  const fresh = new TodoCard(conv.todos);
+  if (conv.todoCard?.el.parentElement === conv.list) conv.todoCard.el.replaceWith(fresh.el);
+  else conv.list.append(fresh.el);
+  conv.todoCard = fresh;
   if (conv === this.active) this.followBottom();
  }
 
@@ -1034,7 +1046,7 @@ class Chat {
    this.library.update(conv.id, { updated: Date.now() });
   }
   for (const actions of conv.list.querySelectorAll('.message-actions')) actions.remove();
-  const prompt = { text, attachments, origin: PLATFORM };
+  const prompt = { text, attachments, origin: PLATFORM, ...(FROM_DEVICE ? { device: FROM_DEVICE } : {}) };
   this.follow = true;
   if (conv.turn) {
    this.interject(conv, prompt);
@@ -1058,7 +1070,7 @@ class Chat {
   const bubble = this.userMessage(prompt);
   conv.list.append(bubble);
   this.main.classList.remove('is-empty');
-  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM };
+  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM, ...(prompt.device || FROM_DEVICE ? { device: prompt.device || FROM_DEVICE } : {}) };
   conv.messages.push(entry);
   this.nodes.set(entry, bubble);
   conv.waiting = Date.now();
@@ -1358,6 +1370,19 @@ class Chat {
   part.entry.content = content.replace(DISCORD_BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
  }
 
+ // A finished <discord_summary> block: the agent's own text for the finish DM. It leaves the
+ // chat answer (like the other blocks) and waits on the turn until end() sends it.
+ flushDiscordSummary(turn, part) {
+  const content = String(part.entry.content || '');
+  if (!content.includes('<discord_summary>')) return;
+  let match = null, last = '';
+  DISCORD_SUMMARY.lastIndex = 0;
+  while ((match = DISCORD_SUMMARY.exec(content))) last = String(match[1] || '').trim();
+  if (!last) return;
+  turn.discordSummary = last.slice(0, 16000);
+  part.entry.content = content.replace(DISCORD_SUMMARY, '').replace(/\n{3,}/g, '\n\n').trim();
+ }
+
  // A finished <write-message_ID> block: delivered to that agent as its own chat message and
  // removed from the reply. The sender does not wait here — use the agents tool when you want
  // the answer back.
@@ -1614,7 +1639,7 @@ class Chat {
   const turn = this.begin(conv, config);
   window.Presence?.publish(conv.id, { state: 'running', title: String(prompt.text || '').slice(0, 80), model: this.modelOf(conv), started: Date.now() });
   this.publishLive(conv, turn);
-  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM, ...(prompt.from ? { from: prompt.from } : {}) };
+  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM, ...(prompt.from ? { from: prompt.from } : {}), ...(prompt.device || FROM_DEVICE ? { device: prompt.device || FROM_DEVICE } : {}) };
   conv.messages.push(entry);
   if (bubble) this.nodes.set(entry, bubble);
   this.openPart(conv, turn);
@@ -1752,7 +1777,29 @@ class Chat {
    const items = (await window.openghost?.memory?.list?.()) || [];
    if (items.length) memory = ['# Memory', 'Short facts you saved earlier (with memory_save). They are meant for every chat, not just the one they were written in: keep only durable things another conversation would need, and never save details that belong to one task.', ...items.map(item => `- [${item.id}] ${item.text}`)].join('\n');
   } catch {}
-  return `${AgentPrompt.build({ folder: conv.record.folder, mode: this.settings.mode, env, browser, mcp, memory, plan: this.agentMode === 'plan' ? PLAN_SECTION : '', instructions, skills })}${custom ? `\n\n${custom}` : ''}${extra}\n\n# Formatting\n${FORMAT_GUIDE}${note}`;
+  return `${AgentPrompt.build({ folder: conv.record.folder, mode: this.settings.mode, env, browser, mcp, memory, plan: this.agentMode === 'plan' ? PLAN_SECTION : '', instructions, skills, serverNote: await this.serverNote(conv) })}${custom ? `\n\n${custom}` : ''}${extra}\n\n# Formatting\n${FORMAT_GUIDE}${note}`;
+ }
+
+ // When this install is the home server, the prompt says so — and who is writing right now:
+ // the tools act on the server's files and programs, not on the user's own computer.
+ async serverNote(conv) {
+  let server = false, name = '';
+  try {
+   const engine = await window.openghost?.engine?.info?.();
+   if (engine) { server = Boolean(engine.server); name = String(engine.name || ''); }
+   else {
+    const auto = await window.openghost?.auto?.get?.();
+    if (auto) server = Boolean(auto.server);
+   }
+  } catch {}
+  if (!server) return '';
+  const latest = [...(conv.messages || [])].reverse().find(entry => entry.role === 'user' && entry.device);
+  const from = latest?.device || 'another device';
+  return [
+   '# This machine is a server',
+   `- This Prism runs on the user's server${name ? ` (${name})` : ''}; the user is talking to you from ${from}, over the network.`,
+   '- Every tool acts on THIS server — files, commands, installs, long-running jobs — never on the user\'s personal computer. Say which machine a path or program lives on when it could be ambiguous.',
+  ].join('\n');
  }
 
  context() {
@@ -1762,11 +1809,13 @@ class Chat {
  }
 
  // How a user message is addressed to the model when another surface wrote it: a Discord
- // message, a subagent asking its main agent (with the task it was launched for), the main
- // answering one of its own runs, or an unrelated agent.
+ // message, a message from another device over the network, the website, a subagent asking
+ // its main agent, the main answering one of its own runs, or an unrelated agent.
  addressOf(conv, entry) {
   const text = entry.content ?? entry.text ?? '';
   if (entry.origin === 'discord') return `[sent from Discord] ${text}`;
+  if (entry.device) return `[sent from ${entry.device} over the network — answer on this machine] ${text}`;
+  if (entry.origin === 'web') return `[sent from the website] ${text}`;
   if (entry.origin !== 'agent') return text;
   const source = entry.from ? this.library.chat(entry.from) : null;
   const name = source ? String(source.title || source.id) : 'another agent';
@@ -1850,6 +1899,8 @@ class Chat {
        this.flushDiscord(conv, part);
        // The same for a <write-message_ID> block addressed to another agent.
        this.flushAgentMessages(conv, part);
+       // A <discord_summary> block is kept for the finish DM and removed from the reply.
+       this.flushDiscordSummary(turn, part);
        view.stream.push(part.entry.content);
        this.runSnippet(conv, part.entry.content);
        this.publishLive(conv, turn);
@@ -2053,7 +2104,7 @@ class Chat {
   const queued = turn.queue.splice(0);
   this.closePart(conv, turn.part);
   for (const { prompt, bubble } of queued) {
-   const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: await userContent(prompt), origin: prompt.origin || PLATFORM, ...(prompt.from ? { from: prompt.from } : {}) };
+   const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: await userContent(prompt), origin: prompt.origin || PLATFORM, ...(prompt.from ? { from: prompt.from } : {}), ...(prompt.device || FROM_DEVICE ? { device: prompt.device || FROM_DEVICE } : {}) };
    conv.messages.push(entry);
    this.nodes.set(entry, bubble);
    conv.tokens += estimate([entry]);
@@ -2119,7 +2170,7 @@ class Chat {
   if (!entry.steps.length && !entry.content?.trim() && !entry.thinking?.trim()) drop(conv.messages, entry);
   if (turn.next) collapse(turn.next.el);
   const queued = turn.queue.splice(0).map(({ prompt, bubble }) => {
-   const item = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM };
+   const item = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM, ...(prompt.device || FROM_DEVICE ? { device: prompt.device || FROM_DEVICE } : {}) };
    conv.messages.push(item);
    this.nodes.set(item, bubble);
    return userContent(prompt).then(content => { item.content = content; }, () => {});
@@ -2164,7 +2215,7 @@ class Chat {
     window.openghost?.discord?.dm?.({
      title,
      outcome,
-     summary: reason ? `⚠️ ${reason}` : String(entry.content || '').trim().slice(0, 8000),
+     summary: reason ? `⚠️ ${reason}` : (turn.discordSummary || String(entry.content || '').trim().slice(0, 16000)),
      files: (turn.files || []).map(file => file.path).filter(Boolean),
      // Replying to that DM continues this exact conversation.
      chatId: conv.record?.id || conv.id,

@@ -26,6 +26,16 @@ here is in this repository; nothing else was removed.
   password set in Settings → Server lets the agent run `sudo apt-get install -y …` itself:
   the app answers sudo's prompt through an askpass helper, and the password never reaches the
   model. Downloads: see the release assets (`Prism-V2-<version>-linux.tar.gz`).
+- **Pick which device to work with.** Every running Prism (app, tray or headless server)
+  announces itself on the LAN; when another one answers, the app asks at launch which device
+  this window should use — a PC icon, the device's name, its system and version, a **Server**
+  chip — and the composer's device pill switches later (devices can also be added by address
+  where discovery is blocked). Choosing another device opens its web UI in its own window:
+  its chats, instructions, skills and tools are its own, and turns run there — on the server
+  that is the server's files and programs, never this PC's. A device in server mode asks
+  nothing (it IS the server) and its composer shows only the **DM me on Discord** switch.
+  The model is told where it runs and who is writing from where: `[sent from vzlany over the
+  network]`, `[sent from the website]`, `[sent from Discord]`.
 - **Updates itself — or the agent does.** Settings → About checks GitHub at launch and every
   six hours, and with **Install automatically** on the new release is applied by itself while
   the app is idle: on Windows the Setup.exe replaces the install, on Linux the directory is

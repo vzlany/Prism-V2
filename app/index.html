@@ -78,6 +78,7 @@
             <add-button class="composer-add" label="Add photos and files" data-i18n-attr="label:attach.add"></add-button>
             <button type="button" class="composer-mode" popovertarget="mode-menu" aria-haspopup="menu" aria-expanded="false" hidden></button>
             <button type="button" class="composer-parallels" hidden aria-live="polite"></button>
+            <button type="button" class="composer-device" hidden></button>
           </div>
           <div class="composer-actions">
             <parallel-button class="composer-parallel"></parallel-button>
@@ -107,6 +108,8 @@
   <div class="instructions-menu" popover="auto" role="menu"></div>
 
   <div class="folder-menu" popover="auto" role="menu" aria-label="Folders" data-i18n-attr="aria-label:folder.recent"></div>
+
+  <div class="device-menu" popover="auto" role="menu" aria-label="Devices" data-i18n-attr="aria-label:devices.switch"></div>
 
   <div class="model-menu" popover="manual" role="dialog" aria-label="Model" data-i18n-attr="aria-label:model"></div>
 
@@ -327,6 +330,7 @@
   <script src="chat.js"></script>
   <script src="chat-list.js"></script>
   <script src="live-view.js"></script>
+  <script src="devices.js"></script>
   <script src="sidebar-resizer.js"></script>
   <script src="recent-folders.js"></script>
   <script src="folder-pill.js"></script>

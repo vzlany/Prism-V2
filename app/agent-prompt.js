@@ -14,6 +14,7 @@ const AGENT = [
  '',
  '# Environment',
  '{environment}',
+ '{server}',
  '',
  '{instructions}',
  '',
@@ -139,6 +140,7 @@ const AGENT = [
  '- A message marked "[sent from Discord]" came from there. When such a request means more than a step or two of work, begin with a short acknowledgement block and send a one-line block whenever a phase finishes or something important changes, so the phone never shows only "working…".',
  '- Inside the block, a line like `@file: C:\\path\\to\\shot.png` (or @image / @attach) attaches that file or picture to the same message. Paths are relative to the project folder unless absolute.',
  '- The block is sent to the user\'s Discord DM as its own message and removed from your reply. The finished summary is sent automatically, so never wrap your whole answer in the block and never use it just to repeat the summary.',
+ '- When the finish DM should carry your own words instead of the answer\'s opening lines, end your reply with a <discord_summary>…</discord_summary> block: it becomes the DM text (short markdown, no tables) and is removed from the chat reply. A diagram, chart or wireframe never goes there — describe what it shows in one line instead.',
  '',
  '# Built-in browser',
  '- The app has a real browser in a panel on the right side of the window, shared with the user: they open it with the globe button in the top right corner of the chat, browse in it themselves and stay signed in to their sites there, in every chat. You control the same browser with the browser_* tools, and the user watches you work when the panel is open.',
@@ -198,10 +200,11 @@ window.AgentPrompt = {
  // of the user's own prompts.
  template: AGENT,
  plain: PLAIN,
- build({ folder, mode, env, browser = '', mcp = '', memory = '', plan = '', instructions = '', skills = '', now = new Date() }) {
+ build({ folder, mode, env, browser = '', mcp = '', memory = '', plan = '', instructions = '', skills = '', serverNote = '', now = new Date() }) {
   if (!folder) return PLAIN;
   return AGENT.replace('{environment}', () => environment({ folder, mode, env, now }))
    .replace('{shell}', () => env?.shell || 'Windows PowerShell 5.1')
+   .replace('{server}', () => serverNote ? `\n${serverNote}` : '')
    .replace('{browser}', () => browser ? `\nThe browser right now:\n${browser}` : '')
    .replace('{mcp}', () => mcp ? `\n${mcp}\n` : '')
    .replace('{memory}', () => memory ? `\n${memory}\n` : '')

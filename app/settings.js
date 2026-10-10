@@ -674,7 +674,7 @@ class Settings {
    const block = (id, text) => `<pre class="prompt-pre server-cmd" id="server-cmd-${id}">${escapeHtml(text)}</pre>
     <button type="button" class="settings-button server-copy" data-copy="${id}">${escapeHtml(I18n.t('settings.server.copy'))}</button>`;
    node.innerHTML = [
-    row('settings.server.machine', 'settings.server.machineHint', `<div class="auto-server"><span class="is-on">${escapeHtml(osName(info.os))}${version ? ` · v${escapeHtml(version)}` : ''}</span>${chosen !== info.os ? `<span class="server-other">${escapeHtml(I18n.t('settings.server.elsewhere', { system: osName(chosen) }))}</span>` : ''}</div>`),
+    row('settings.server.machine', 'settings.server.machineHint', `<div class="auto-server"><span class="is-on">${escapeHtml(osName(info.os))}${version ? ` · v${escapeHtml(version)}` : ''}</span>${chosen !== info.os ? `<span class="server-other">${escapeHtml(I18n.t('settings.server.elsewhere', { system: osName(chosen) }))}</span>` : ''}<div class="settings-hint server-address">${escapeHtml(I18n.t('settings.server.thisDevice', { name: info.host || '', port: auto.port || 8787 }))}</div></div>`),
     row('settings.server.where', 'settings.server.whereHint', `<select class="settings-select server-platform" aria-label="${escapeHtml(I18n.t('settings.server.where'))}">
       <option value="auto" ${info.platform === 'auto' ? 'selected' : ''}>${escapeHtml(I18n.t('settings.server.auto'))}</option>
       <option value="windows" ${info.platform === 'windows' ? 'selected' : ''}>Windows</option>
@@ -721,7 +721,7 @@ class Settings {
    node.querySelector('.server-hidden')?.addEventListener('change', event => saveAuto({ hidden: event.target.checked }));
    node.querySelector('.server-web')?.addEventListener('change', event => saveAuto({ web: event.target.checked }));
    node.querySelector('.server-bot')?.addEventListener('change', event => saveAuto({ bot: event.target.checked }));
-   node.querySelector('.server-all')?.addEventListener('click', () => saveAuto({ login: true, hidden: true, web: true, bot: true }));
+   node.querySelector('.server-all')?.addEventListener('click', () => saveAuto({ login: true, hidden: true, web: true, bot: true, server: true }));
    node.querySelector('.server-sudo-save')?.addEventListener('click', async () => {
     const value = node.querySelector('.server-sudo')?.value || '';
     const next = await window.openghost?.server?.set?.({ sudo: value }).catch(() => null);
