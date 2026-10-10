@@ -7,6 +7,9 @@ const path = require('node:path');
 const { net, clipboard, shell: electronShell, Notification, desktopCapturer, nativeImage, screen } = require('electron');
 const Media = require('./media');
 const Browser = require('./browser');
+const Server = require('./server');
+
+const IS_WIN = process.platform === 'win32';
 
 const OUTPUT = { head: 12000, tail: 18000 };
 const TIMEOUT = { shell: 120, max: 900, git: 120, fetch: 30, probe: 10 };
@@ -71,14 +74,19 @@ class Output {
 
 function kill(child) {
  if (!child.pid || child.exitCode !== null) return;
- spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill());
+ if (IS_WIN) {
+  spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill());
+  return;
+ }
+ // Linux/macOS: the shell runs detached, so its whole process group goes down with it.
+ try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
 }
 
-function run(id, exe, args, { cwd, timeout }) {
+function run(id, exe, args, { cwd, timeout, env }) {
  return new Promise(resolve => {
   let child;
   try {
-   child = spawn(exe, args, { cwd, env: ENV, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+   child = spawn(exe, args, { cwd, env: env ? { ...ENV, ...env } : ENV, windowsHide: true, detached: !IS_WIN, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
    resolve({ missing: error.code === 'ENOENT', error: error.message });
    return;
@@ -106,8 +114,15 @@ function run(id, exe, args, { cwd, timeout }) {
  });
 }
 
-// The Microsoft Store pwsh.exe is an execution alias that takes seconds to start and blocks the main process meanwhile, so only a regular install is used.
+// The Microsoft Store pwsh.exe is an execution alias that takes seconds to start and blocks the main process meanwhile, so only a regular install is used. Linux and macOS run the system shell: bash.
 function detectShell() {
+ if (!IS_WIN) {
+  shell ||= run('', 'bash', ['--version'], { cwd: os.homedir(), timeout: TIMEOUT.probe })
+   .then(result => result.code === 0
+    ? { exe: '/bin/bash', name: 'bash', version: result.output.replace(/^GNU bash,\s*version\s*/, '').split('\n')[0].trim() }
+    : { exe: '/bin/sh', name: 'sh', version: '' });
+  return shell;
+ }
  const exe = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe');
  shell ||= (fs.existsSync(exe)
   ? run('', exe, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], { cwd: os.homedir(), timeout: TIMEOUT.probe })
@@ -152,16 +167,35 @@ function decode(buffer, charset = 'utf-8') {
  return text;
 }
 
+// Linux runs bash. When a root password is set in Settings -> Server, sudo answers its own
+// password prompt through the askpass helper — `sudo apt-get install -y …` simply works.
+const LINUX_PRELUDE = [
+ 'export DEBIAN_FRONTEND=noninteractive',
+ 'sudo() { command sudo -A "$@"; }',
+ '',
+].join('\n');
+const usesSudo = command => /(^|[^\w-])sudo([^\w-]|$)/.test(String(command || ''));
+
 async function runShell(id, { command, timeout }, cwd) {
  if (typeof command !== 'string' || !command.trim()) return { error: 'command is empty' };
  const { exe } = await detectShell();
  const dir = path.join(os.tmpdir(), 'openghost');
  await fs.promises.mkdir(dir, { recursive: true });
- const file = path.join(dir, `command-${process.pid}-${String(id).replace(/[^\w-]/g, '')}.ps1`);
- await fs.promises.writeFile(file, `\ufeff${PRELUDE}${command}${EPILOGUE}`, 'utf8');
+ const safe = String(id).replace(/[^\w-]/g, '');
  const seconds = clampSeconds(timeout, TIMEOUT.shell);
- const result = await run(id, exe, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { cwd, timeout: seconds });
- fs.promises.rm(file, { force: true }).catch(() => {});
+ let result;
+ if (IS_WIN) {
+  const file = path.join(dir, `command-${process.pid}-${safe}.ps1`);
+  await fs.promises.writeFile(file, `\ufeff${PRELUDE}${command}${EPILOGUE}`, 'utf8');
+  result = await run(id, exe, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { cwd, timeout: seconds });
+  fs.promises.rm(file, { force: true }).catch(() => {});
+ } else {
+  const file = path.join(dir, `command-${process.pid}-${safe}.sh`);
+  const sudo = usesSudo(command) ? Server.sudoEnv() : null;
+  await fs.promises.writeFile(file, sudo ? `${LINUX_PRELUDE}${command}\n` : `${command}\n`, 'utf8');
+  result = await run(id, exe, [file], { cwd, timeout: seconds, env: sudo });
+  fs.promises.rm(file, { force: true }).catch(() => {});
+ }
  if (result.error && result.code === null) return { error: result.error };
  return { code: result.code, output: result.output, timedOut: result.timedOut, cancelled: result.cancelled, seconds: result.seconds, timeout: seconds };
 }
@@ -184,7 +218,7 @@ async function readFile(id, { path: file, offset, limit }, cwd) {
   const picture = await cancellable(id, signal => Media.image(full, signal));
   return { path: full, image: picture.url, width: picture.width, height: picture.height, size: formatSize(stat.size) };
  }
- if (stat.size > READ.max) return { error: `${file} is ${formatSize(stat.size)}, too big to read at once. Read parts of it with run_powershell (Get-Content -TotalCount, Select-String).` };
+ if (stat.size > READ.max) return { error: `${file} is ${formatSize(stat.size)}, too big to read at once. Read parts of it with run_powershell (${IS_WIN ? 'Get-Content -TotalCount, Select-String' : 'head, tail, sed -n, grep'}).` };
  const buffer = await fs.promises.readFile(full);
  if (isBinary(buffer)) return { binary: true, size: formatSize(stat.size), path: full };
  const lines = decode(buffer).split(/\r?\n/);
@@ -383,6 +417,9 @@ async function screenshot(id, { window: wantedWindow } = {}, cwd) {
   await fs.promises.writeFile(file, captured.jpeg);
   return { path: file, image: `data:image/jpeg;base64,${captured.jpeg.toString('base64')}`, size: formatSize(captured.jpeg.length), screen: captured.name, window: wantedWindow ? String(wantedWindow) : '' };
  }
+ // The fallbacks below are Windows-only (ffmpeg gdigrab, then .NET drawing). Everywhere else
+ // the Electron capture above is the only path, and a headless session has no screen to show.
+ if (!IS_WIN) return { error: 'The screen could not be captured — this machine has no desktop session.' };
  const ffmpeg = await new Promise(resolve => {
   const child = spawn('ffmpeg', ['-y', '-f', 'gdigrab', '-i', 'desktop', '-frames:v', '1', '-update', '1', '-vf', "scale='min(1600,iw)':-2", '-q:v', '3', file], { windowsHide: true, env: ENV });
   let noise = '';
@@ -538,14 +575,28 @@ function cancelAll() {
  for (const stop of jobs.values()) stop();
 }
 
+// The Linux distribution, so the agent knows it is on Debian and which package manager to use.
+function distro() {
+ if (IS_WIN) return `Windows ${os.release()}`;
+ try {
+  const text = fs.readFileSync('/etc/os-release', 'utf8');
+  const pretty = /^PRETTY_NAME="?([^"\n]+)"?/m.exec(text)?.[1];
+  if (pretty) return pretty.trim();
+ } catch {}
+ return `Linux ${os.release()}`;
+}
+
 async function environment() {
  const [found, gitVersion] = await Promise.all([detectShell(), detectGit()]);
  return {
-  os: `Windows ${os.release()}`,
-  shell: `${found.name} ${found.version}`,
+  os: distro(),
+  platform: IS_WIN ? 'win32' : process.platform,
+  shell: `${found.name} ${found.version}`.trim(),
   git: gitVersion,
   home: os.homedir(),
   user: os.userInfo().username,
+  // A root password set in Settings -> Server: sudo works without asking (Linux only).
+  sudo: Server.hasSudo() && !IS_WIN,
  };
 }
 

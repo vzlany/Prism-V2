@@ -14,6 +14,7 @@ const Skills = require('./skills');
 const Discord = require('./discord');
 const Updater = require('./updater');
 const CliCommand = require('./cli-command');
+const Server = require('./server');
 
 const APP_ID = 'com.prismv2.app';
 // Set when the app is really quitting (tray -> Quit, update install, system shutdown): only
@@ -271,6 +272,14 @@ function applyAuto(auto = readAuto()) {
    app.setLoginItemSettings({ openAtLogin: false });
    if (auto.login) writeStartupShortcut(Boolean(auto.hidden));
    else removeStartupShortcut();
+   return;
+  }
+  if (process.platform === 'linux') {
+   // Linux starts with the session through an XDG desktop entry (Settings -> Server shows
+   // the file); --hidden goes straight into the tray, the web server and the bot stay up.
+   const args = app.isPackaged ? [] : [ROOT];
+   if (auto.hidden) args.push('--hidden');
+   Server.applyLinuxAutostart(Boolean(auto.login), args);
    return;
   }
   app.setLoginItemSettings({
@@ -666,6 +675,7 @@ Memory.register(fromApp);
 Instructions.register(fromApp);
 Skills.register(fromApp);
 Discord.register(fromApp);
+Server.register(fromApp, ipcMain);
 // The mode menu's "DM me on Discord when done" switch: a finished reply sends its own DM,
 // whether or not the Windows toast was shown.
 ipcMain.handle('discord:dm', (event, payload) => {

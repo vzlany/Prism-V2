@@ -4,6 +4,8 @@
 //   prism                 opens the desktop app
 //   prism web             serves Prism V2 to the browser and logs what it does in this terminal
 //   prism web --host 0.0.0.0 --port 8787     for a server or another device
+//   prism server          web + Discord bot together, headless (for the Linux server)
+//   prism discord         talk to Prism V2 from Discord DMs
 //   prism web --profile work                a separate workspace
 //   prism import [--dry]  brings OpenCode chats over
 //
@@ -34,6 +36,14 @@ if (command === "web") {
  process.exit(run("node", [join(root, "tools", "web-server.mjs"), ...passthrough]))
 }
 
+if (command === "server") {
+ if (!has("node")) {
+  console.error("prism server needs Node.js on PATH (the engines run in Node). Install it from https://nodejs.org and try again.")
+  process.exit(1)
+ }
+ process.exit(run("node", [join(root, "tools", "server.mjs"), ...args.slice(1)]))
+}
+
 if (command === "discord") {
  if (!has("node")) {
   console.error("prism discord needs Node.js on PATH (the engines run in Node). Install it from https://nodejs.org and try again.")
@@ -51,14 +61,19 @@ if (command === "import") {
 }
 
 if (command === "--help" || command === "help") {
- console.log("prism            open the desktop app\nprism web        serve Prism V2 to the browser (terminal logs activity)\nprism discord    talk to Prism V2 from Discord DMs (works from any network)\nprism import     bring OpenCode chats into Prism V2")
+ console.log("prism            open the desktop app\nprism web        serve Prism V2 to the browser (terminal logs activity)\nprism server     web + Discord bot together, headless (Linux server)\nprism discord    talk to Prism V2 from Discord DMs (works from any network)\nprism import     bring OpenCode chats into Prism V2")
  process.exit(0)
 }
 
 // default: the desktop app — the installed one when there is one, else Electron from this folder
 // (the installed one may also sit right next to this command line, under resources/app)
-const sibling = join(root, "..", "..", "Prism V2.exe")
-const installed = [process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Programs", "Prism V2", "Prism V2.exe") : "", sibling].find(file => file && existsSync(file))
+const sibling = process.platform === "win32"
+ ? join(root, "..", "..", "Prism V2.exe")
+ : ["prism-v2", "Prism V2"].map(name => join(root, "..", "..", name)).find(file => existsSync(file)) || ""
+const installed = [
+ process.platform === "win32" && process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Programs", "Prism V2", "Prism V2.exe") : "",
+ sibling,
+].find(file => file && existsSync(file))
 if (installed) {
  const child = spawn(installed, args, { detached: true, stdio: "ignore" })
  child.unref()

@@ -18,6 +18,14 @@ here is in this repository; nothing else was removed.
 
 ### Running on the desktop app and on the phone
 
+- **Also runs on Linux (Debian).** The same build serves a home server: Settings → Server
+  picks the machine, and on Linux autostart is an XDG entry in `~/.config/autostart`, so the
+  app (hidden in the tray) plus the web server and the Discord bot come up with the session.
+  `prism server` (or `node tools/server.mjs`) runs the web UI and the bot headless with no
+  window at all — one process, restart-on-crash — for a box without a desktop. A root
+  password set in Settings → Server lets the agent run `sudo apt-get install -y …` itself:
+  the app answers sudo's prompt through an askpass helper, and the password never reaches the
+  model. Downloads: see the release assets (`Prism-V2-<version>-linux.tar.gz`).
 - **The website runs its turns in the app.** When the desktop app is running, a message sent
   from `prism web` (the phone) is handed to the app through a small file bridge: the app runs
   the turn with its tools, browser, skills and keys, streams it in its own window, and the

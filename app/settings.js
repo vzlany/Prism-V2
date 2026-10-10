@@ -519,11 +519,14 @@ class Settings {
   if (!window.openghost?.auth) this.accountBox.closest('.settings-row').hidden = true;
   this.mcpPage = this.dialog.querySelector('.settings-mcp-page');
   this.autoPage = this.dialog.querySelector('.settings-auto-page');
+  this.serverPage = this.dialog.querySelector('.settings-server-page');
   this.tabs = [...this.dialog.querySelectorAll('.settings-tab')];
-  // The Auto page is about this desktop install: a browser has nothing to set there.
+  // The Auto and Server pages are about this desktop install: a browser has nothing to set there.
   if (!window.openghost?.desktop) {
-   const autoTab = this.dialog.querySelector('.settings-tab[data-tab="auto"]');
-   if (autoTab) autoTab.hidden = true;
+   for (const name of ['auto', 'server']) {
+    const tab = this.dialog.querySelector(`.settings-tab[data-tab="${name}"]`);
+    if (tab) tab.hidden = true;
+   }
   }
   this.pages = [...this.dialog.querySelectorAll('.settings-page')];
   for (const tab of this.tabs) tab.addEventListener('click', () => this.showTab(tab.dataset.tab));
@@ -564,7 +567,8 @@ class Settings {
   if (name === 'effects') this.paintEffects();
   if (name === 'memory') this.paintMemory();
   if (name === 'auto') this.paintAuto();
-  else { clearInterval(this.autoTimer); this.autoTimer = 0; }
+  if (name === 'server') this.paintServer();
+  else if (name !== 'auto') { clearInterval(this.autoTimer); this.autoTimer = 0; }
   if (name === 'about') this.paintAbout();
  }
 
@@ -628,6 +632,116 @@ class Settings {
   node.querySelector('.auto-port')?.addEventListener('change', event => save({ port: Number(event.target.value) || 8787 }));
   node.querySelector('[data-auto-open]')?.addEventListener('click', () => window.open(`http://localhost:${auto.port}/`, '_blank'));
  }
+
+  // Settings -> Server: where this app runs (this machine or the Debian server), the one
+  // switch that turns it into a server (autostart, hidden, web, bot), the root password sudo
+  // uses on Linux, and the commands that install and run it on Debian.
+  async paintServer() {
+   const node = this.serverPage;
+   if (!node) return;
+   const host = window.openghost?.platform || 'win32';
+   const info = (await window.openghost?.server?.get?.().catch(() => null)) || { platform: 'auto', sudo: '', os: host, chosen: host, version: '', autostart: '', sudoReady: false };
+   const auto = (await window.openghost?.auto?.get?.().catch(() => null)) || { login: false, hidden: false, web: false, bot: false, port: 8787 };
+   const row = (labelKey, hintKey, control) => `<div class="settings-row is-wide">
+    <div class="settings-text">
+     <span class="settings-label">${escapeHtml(I18n.t(labelKey))}</span>
+     <p class="settings-hint">${escapeHtml(I18n.t(hintKey))}</p>
+    </div>
+    <div class="settings-control">${control}</div>
+   </div>`;
+   const toggle = (cls, on, label) => `<label class="mcp-auto"><input type="checkbox" class="${cls}" ${on ? 'checked' : ''}>${escapeHtml(label)}</label>`;
+   const osName = value => value === 'win32' ? 'Windows' : value === 'linux' ? 'Linux' : String(value || '?');
+   const chosen = info.chosen || host;
+   const version = String(info.version || '');
+   const repo = 'vzlany/Prism-V2';
+   const asset = `Prism-V2-${version}-linux.tar.gz`;
+   const port = auto.port || 8787;
+   const download = [
+    'curl -fL -H "Authorization: token $GH_TOKEN" \\',
+    `  -o prism.tar.gz https://github.com/${repo}/releases/download/v${version}/${asset}`,
+    'mkdir -p ~/prism-v2 && tar -xzf prism.tar.gz -C ~/prism-v2 --strip-components=1',
+   ].join('\n');
+   const headless = [
+    '# headless: web UI + Discord bot in one process (Node 20+)',
+    'cd ~/prism-v2/resources/app',
+    `node tools/server.mjs --host 0.0.0.0 --port ${port}`,
+   ].join('\n');
+   const desktop = [
+    '# or the desktop app with its tray (needs a desktop session)',
+    'cd ~/prism-v2 && ./prism-v2 --hidden',
+   ].join('\n');
+   const block = (id, text) => `<pre class="prompt-pre server-cmd" id="server-cmd-${id}">${escapeHtml(text)}</pre>
+    <button type="button" class="settings-button server-copy" data-copy="${id}">${escapeHtml(I18n.t('settings.server.copy'))}</button>`;
+   node.innerHTML = [
+    row('settings.server.machine', 'settings.server.machineHint', `<div class="auto-server"><span class="is-on">${escapeHtml(osName(info.os))}${version ? ` · v${escapeHtml(version)}` : ''}</span>${chosen !== info.os ? `<span class="server-other">${escapeHtml(I18n.t('settings.server.elsewhere', { system: osName(chosen) }))}</span>` : ''}</div>`),
+    row('settings.server.where', 'settings.server.whereHint', `<select class="settings-select server-platform" aria-label="${escapeHtml(I18n.t('settings.server.where'))}">
+      <option value="auto" ${info.platform === 'auto' ? 'selected' : ''}>${escapeHtml(I18n.t('settings.server.auto'))}</option>
+      <option value="windows" ${info.platform === 'windows' ? 'selected' : ''}>Windows</option>
+      <option value="linux" ${info.platform === 'linux' ? 'selected' : ''}>Linux (Debian)</option>
+     </select>`),
+    row('settings.server.mode', 'settings.server.modeHint', `<div class="mcp-add-row server-toggles">
+      ${toggle('server-login', auto.login, I18n.t('settings.auto.login'))}
+      ${toggle('server-hidden', auto.hidden, I18n.t('settings.auto.hidden'))}
+      ${toggle('server-web', auto.web, I18n.t('settings.auto.web'))}
+      ${toggle('server-bot', auto.bot, I18n.t('settings.auto.bot'))}
+      <button type="button" class="settings-button server-all">${escapeHtml(I18n.t('settings.server.enableAll'))}</button>
+     </div>`),
+    row('settings.server.sudo', 'settings.server.sudoHint', `<div class="mcp-add-row">
+      <input class="settings-key server-sudo" type="password" value="${escapeHtml(info.sudo)}" autocomplete="off" spellcheck="false" placeholder="••••••">
+      <button type="button" class="settings-button server-sudo-save">${escapeHtml(I18n.t('settings.server.sudoSave'))}</button>
+      <button type="button" class="settings-button server-sudo-clear">${escapeHtml(I18n.t('settings.server.sudoClear'))}</button>
+     </div>`),
+    chosen === 'linux'
+     ? `<div class="settings-row is-wide">
+      <div class="settings-text">
+       <span class="settings-label">${escapeHtml(I18n.t('settings.server.install'))}</span>
+       <p class="settings-hint">${escapeHtml(I18n.t('settings.server.installHint', { version }))}</p>
+      </div>
+      <div class="settings-control">
+       ${block('download', download)}
+       ${block('headless', headless)}
+       ${block('desktop', desktop)}
+      </div>
+     </div>`
+     : '',
+    `<p class="settings-status" role="status" data-server-status></p>`,
+   ].join('');
+   const status = node.querySelector('[data-server-status]');
+   const say = (text, tone = '') => { status.textContent = text; status.dataset.tone = tone; };
+   const saveAuto = async patch => {
+    const next = await window.openghost?.auto?.set?.(patch).catch(() => null);
+    if (next) { say(I18n.t('settings.server.saved')); this.paintServer(); }
+   };
+   node.querySelector('.server-platform')?.addEventListener('change', async event => {
+    const next = await window.openghost?.server?.set?.({ platform: event.target.value }).catch(() => null);
+    if (next) { say(I18n.t('settings.server.saved')); this.paintServer(); }
+   });
+   node.querySelector('.server-login')?.addEventListener('change', event => saveAuto({ login: event.target.checked }));
+   node.querySelector('.server-hidden')?.addEventListener('change', event => saveAuto({ hidden: event.target.checked }));
+   node.querySelector('.server-web')?.addEventListener('change', event => saveAuto({ web: event.target.checked }));
+   node.querySelector('.server-bot')?.addEventListener('change', event => saveAuto({ bot: event.target.checked }));
+   node.querySelector('.server-all')?.addEventListener('click', () => saveAuto({ login: true, hidden: true, web: true, bot: true }));
+   node.querySelector('.server-sudo-save')?.addEventListener('click', async () => {
+    const value = node.querySelector('.server-sudo')?.value || '';
+    const next = await window.openghost?.server?.set?.({ sudo: value }).catch(() => null);
+    say(next ? I18n.t(next.sudoReady ? 'settings.server.sudoSaved' : 'settings.server.sudoCleared') : I18n.t('settings.server.sudoFailed'), next ? '' : 'error');
+   });
+   node.querySelector('.server-sudo-clear')?.addEventListener('click', async () => {
+    const next = await window.openghost?.server?.set?.({ sudo: '' }).catch(() => null);
+    const field = node.querySelector('.server-sudo');
+    if (field) field.value = '';
+    say(next ? I18n.t('settings.server.sudoCleared') : I18n.t('settings.server.sudoFailed'), next ? '' : 'error');
+   });
+   for (const button of node.querySelectorAll('.server-copy')) {
+    button.addEventListener('click', () => {
+     const text = node.querySelector(`#server-cmd-${button.dataset.copy}`)?.textContent || '';
+     window.Clip?.text?.(text);
+     const was = button.textContent;
+     button.textContent = I18n.t('settings.server.copied');
+     setTimeout(() => { button.textContent = was; }, 1500);
+    });
+   }
+  }
 
  mcpNote(text, tone = '') {
   const node = this.mcpPage?.querySelector('.mcp-status');

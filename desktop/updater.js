@@ -113,6 +113,9 @@ async function prompt(win, info) {
 // Runs in the background; a failed check is only a quiet line in the log.
 function start() {
  if (!app.isPackaged && !process.env.PRISM_UPDATE_TEST_VERSION) return;
+ // The update flow downloads a Windows Setup.exe; on Linux and macOS the releases page is
+ // the way to update, so the check stays quiet there.
+ if (process.platform !== 'win32' && !process.env.PRISM_UPDATE_TEST_VERSION) return;
  if (!autoEnabled()) return;
  setTimeout(() => {
   check().then(async info => {

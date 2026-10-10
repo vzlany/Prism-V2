@@ -297,7 +297,7 @@ async function systemPrompt() {
  if (prompts && prompts.enabled !== false && typeof prompts.global === "string" && prompts.global.trim()) custom += `\n\n# User instructions (global)\n${prompts.global.trim()}`;
  const own = prompts?.models?.[state.model];
  if (typeof own === "string" && own.trim()) custom += `\n\n# User instructions (this model)\n${own.trim()}`;
- return `${AgentPrompt.build({ folder: state.folder, mode: "full", env, browser: "", mcp, memory, plan: "", instructions, skills, now: new Date() })}${custom}\n\n# Remote control\nYou are answering over Discord, from the user's phone. Keep replies short and plain; Discord markdown works, but **never write markdown tables** — Discord does not render them and they arrive as a wall of pipes. Use short lists with bold labels instead, one line per item (for example \`- **Title:** what changed\`).\n\nWhile you work you can also message the user here on your own: write a block like \`<send_discord_message>Sure, let me decompile that client and check it for malware.</send_discord_message>\` and it is posted as its own DM as soon as that step ends (before the tools of the step run). A line inside the block like \`@file: C:\\\\path\\\\shot.png\` attaches that file or picture. Use it only when you actually want to say something before the final summary, which is sent automatically — never wrap your whole answer in it and never use it to repeat something you are about to say.${state.tools ? " Tools run without asking." : " Tools are unavailable in this session: never attempt a tool call, answer in plain text."}`;
+ return `${AgentPrompt.build({ folder: state.folder, mode: "full", env, browser: "", mcp, memory, plan: "", instructions, skills, now: new Date() })}${custom}\n\n# Remote control\nYou are answering over Discord, from the user's phone. Keep replies short and plain; Discord markdown works, but **never write markdown tables** — Discord does not render them and they arrive as a wall of pipes. Use short lists with bold labels instead, one line per item (for example \`- **Title:** what changed\`).\n\nWhile you work you can also message the user here on your own: write a block like \`<send_discord_message>On it — checking the sources now.</send_discord_message>\` and it is posted as its own DM right away. Tell them you are on it: when a request means more than a step or two of work, begin with a short acknowledgement, and keep one-line updates coming whenever a phase finishes or something important changes, so the phone never shows only "working…". A line inside the block like \`@file: C:\\\\path\\\\shot.png\` attaches that file or picture. Never wrap your whole answer in the block and never use it to repeat the final summary, which is sent automatically.${state.tools ? " Tools run without asking." : " Tools are unavailable in this session: never attempt a tool call, answer in plain text."}`;
 }
 
 async function turn(prompt, display = {}) {
@@ -310,14 +310,14 @@ async function turn(prompt, display = {}) {
   lastStatus = line;
   display.status?.(line);
  };
- // A hard question can take many calls: 12 used to cut real work off mid-task. The loop still
- // ends on its own when the model answers without asking for another tool.
- const MAX_STEPS = 50;
+ // No cap on tool steps: a hard question takes as many calls as it takes. The loop ends on
+ // its own when the model answers without asking for another tool; !stop (or the app
+ // stopping the turn) ends a runaway.
  // DeepSeek's thinking mode insists its reasoning comes back with every assistant message
  // that made tool calls; without it the next step fails with invalid_request_error.
  const keepReasoning = /deepseek/i.test(String(state.model || ""));
  let retried = false;
- for (let step = 0; step < MAX_STEPS; step++) {
+ for (let step = 0; ; step++) {
   if (state.stopped) return "⏹ stopped";
   let reasoning = "", result = null;
   // A failure gets three more tries, five seconds apart, with the attempt shown in the DM.
@@ -403,7 +403,7 @@ async function turn(prompt, display = {}) {
    state.messages.push({ role: "user", content });
   }
  }
- return `(stopped after ${MAX_STEPS} tool steps)`;
+ return "(the turn ended without an answer)";
 }
 
 // --------------------------------------------------------------- full display formatting

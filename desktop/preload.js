@@ -27,6 +27,12 @@ contextBridge.exposeInMainWorld('openghost', {
   set: patch => ipcRenderer.invoke('auto:set', patch),
   clients: () => ipcRenderer.invoke('auto:clients'),
  },
+ server: {
+  // Settings -> Server: which machine this install serves, the root password for sudo on
+  // Linux, and where the Linux autostart entry lives.
+  get: () => ipcRenderer.invoke('server:get'),
+  set: patch => ipcRenderer.invoke('server:set', patch),
+ },
  path: {
   // A path written in a reply: does it exist, and open it.
   info: (target, cwd) => ipcRenderer.invoke('path:info', target, cwd),

@@ -164,6 +164,10 @@
         <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M60 37v22"/><path d="M45 44a21 21 0 1 0 30 0"/></svg>
         <span data-i18n="settings.auto.tab">Auto</span>
       </button>
+      <button type="button" class="settings-tab" data-tab="server">
+        <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="36" y="36" width="48" height="48" rx="7"/><path d="M36 52h48M36 68h48"/><circle cx="46" cy="44" r="1.9" fill="currentColor"/><circle cx="46" cy="60" r="1.9" fill="currentColor"/><circle cx="46" cy="76" r="1.9" fill="currentColor"/></svg>
+        <span data-i18n="settings.server.tab">Server</span>
+      </button>
       <button type="button" class="settings-tab" data-tab="about">
         <svg class="settings-tab-icon" viewBox="30 30 60 60" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="60" cy="60" r="23"/><path d="M60 53.5v.5M60 63v13"/></svg>
         <span data-i18n="settings.about.tab">About</span>
@@ -224,6 +228,14 @@
       </header>
       <p class="settings-lead" data-i18n="settings.memory.lead">Facts the agent keeps for later turns and other chats. It saves them itself with its memory tool; here you can add or forget them.</p>
       <div class="settings-memory-page"></div>
+    </section>
+    <section class="settings-page" data-page="server" hidden aria-labelledby="settings-server-title">
+      <header class="settings-page-header">
+        <h2 class="settings-page-title" id="settings-server-title" data-i18n="settings.server.tab">Server</h2>
+        <close-button class="settings-close"></close-button>
+      </header>
+      <p class="settings-lead" data-i18n="settings.server.lead">Where this app runs — this machine or the Linux server — with autostart, the web server, the Discord bot, root access for installs, and the commands that set the Debian machine up.</p>
+      <div class="settings-server-page"></div>
     </section>
     <section class="settings-page" data-page="auto" hidden aria-labelledby="settings-auto-title">
       <header class="settings-page-header">
