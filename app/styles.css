@@ -9137,6 +9137,12 @@ html.is-simple .tool-group.has-error .tool-group-label{background:none;backgroun
 .device-menu{padding:6px;width:min(360px,calc(100vw - 24px))}
 .device-menu .device-row{background:transparent;box-shadow:none;padding:9px 10px}
 .device-menu .device-row:hover{background:rgba(var(--fg-rgb),.06)}
+/* A device that stopped answering: red name and one line saying why underneath. */
+.device-row.is-failed{box-shadow:inset 0 0 0 1px rgba(var(--danger-rgb),.4)}
+.device-row.is-failed .device-name,.device-row.is-failed .device-pc{color:rgb(var(--danger-rgb))}
+.device-fail{margin-top:2px;font-size:11px;color:rgb(255,170,170);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.device-kicked{margin:0 0 12px;padding:8px 10px;border-radius:10px;background:rgba(var(--danger-rgb),.12);box-shadow:inset 0 0 0 1px rgba(var(--danger-rgb),.3);color:rgb(255,180,175);font-size:12px;line-height:1.5}
+.device-kicked[hidden]{display:none}
 .composer-device{display:flex;align-items:center;gap:7px;height:var(--icon-button-size,32px);padding:0 11px 0 9px;border:0;border-radius:calc(var(--icon-button-size,32px)/2);background:rgba(var(--fg-rgb),.05);color:rgba(var(--fg-rgb),.72);font:inherit;font-size:12px;line-height:1;cursor:pointer;white-space:nowrap;anchor-name:--device;transition:background-color .2s ease,color .2s ease}
 .composer-device[hidden]{display:none}
 .composer-device:hover{background:rgba(var(--fg-rgb),.09);color:rgba(var(--fg-rgb),.92)}

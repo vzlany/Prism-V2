@@ -28,10 +28,11 @@ contextBridge.exposeInMainWorld('openghost', {
   clients: () => ipcRenderer.invoke('auto:clients'),
  },
  server: {
-  // Settings -> Server: which machine this install serves, the root password for sudo on
+  // Settings -> Server: which machine this install serves, the sudo password for installs on
   // Linux, and where the Linux autostart entry lives.
   get: () => ipcRenderer.invoke('server:get'),
   set: patch => ipcRenderer.invoke('server:set', patch),
+  sudoTest: () => ipcRenderer.invoke('server:sudo-test'),
  },
  devices: {
   // The other Prism apps on this network: the startup picker, the list, and picking one to
@@ -41,6 +42,13 @@ contextBridge.exposeInMainWorld('openghost', {
   pick: id => ipcRenderer.invoke('devices:pick', id),
   add: entry => ipcRenderer.invoke('devices:add', entry),
   forget: (host, port) => ipcRenderer.invoke('devices:forget', host, port),
+  // A remote window that was kicked out (its device stopped answering): the picker comes
+  // back with the device red and the reason.
+  onKicked: callback => {
+   const handler = (event, data) => callback(data);
+   ipcRenderer.on('devices:kicked', handler);
+   return () => ipcRenderer.removeListener('devices:kicked', handler);
+  },
  },
  sys: {
   // Settings -> System / the server's System panel: live machine statistics.

@@ -9,6 +9,7 @@ const { app } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 
 const MODES = ['auto', 'windows', 'linux'];
 
@@ -114,6 +115,25 @@ function hasSudo() {
  return Boolean(read().sudo);
 }
 
+// "Test" on the Server page: sudo -v through the same askpass helper a command would use.
+function sudoTest() {
+ return new Promise(resolve => {
+  if (process.platform !== 'linux') { resolve({ ok: false, error: 'this machine is not Linux' }); return; }
+  const env = sudoEnv();
+  if (!env) { resolve({ ok: false, error: 'no sudo password is saved' }); return; }
+  let output = '';
+  const child = spawn('bash', ['-c', 'sudo -A -v'], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} resolve({ ok: false, error: 'timed out' }); }, 15000);
+  child.stdout.on('data', chunk => { output += chunk; });
+  child.stderr.on('data', chunk => { output += chunk; });
+  child.on('error', error => { clearTimeout(timer); resolve({ ok: false, error: error.message }); });
+  child.on('close', code => {
+   clearTimeout(timer);
+   resolve({ ok: code === 0, error: String(output).replace(/\s+/g, ' ').trim().slice(0, 200) });
+  });
+ });
+}
+
 // --------------------------------------------------------------- Settings -> Server IPC
 function info() {
  const cfg = read();
@@ -140,6 +160,7 @@ function register(fromApp, ipcMain) {
   });
   return info();
  });
+ ipcMain.handle('server:sudo-test', async event => (fromApp(event) ? sudoTest() : null));
 }
 
-module.exports = { read, write, platform, info, register, applyLinuxAutostart, sudoEnv, hasSudo, autostartFile };
+module.exports = { read, write, platform, info, register, applyLinuxAutostart, sudoEnv, hasSudo, sudoTest, autostartFile };

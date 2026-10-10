@@ -386,7 +386,7 @@ async function openRemoteWindow(device) {
    const text = event?.message || '';
    if (text) console.log(`[remote] ${text}`);
   });
-  win.on('closed', () => { if (remoteWin === win) remoteWin = null; });
+  win.on('closed', () => { stopRemoteWatch(); if (remoteWin === win) remoteWin = null; });
   remoteWin = win;
  }
  win.__deviceName = device.name;
@@ -395,21 +395,95 @@ async function openRemoteWindow(device) {
  win.loadURL(url).catch(error => console.log('[remote] load failed:', error.message));
  const result = await loading;
  if (!result.ok) {
-  console.log(`[remote] ${device.name} did not answer: ${result.error}`);  if (remoteWin === win) remoteWin = null;
+  console.log(`[remote] ${device.name} did not answer: ${result.error}`);
+  lastKicked = { id: device.id, name: device.name, reason: result.error };
+  if (remoteWin === win) remoteWin = null;
   try { win.destroy(); } catch {}
   if (localWin && !localWin.isDestroyed()) showWindow(localWin);
   return { ok: false, error: result.error };
  }
+ lastKicked = null;
  if (win.isMinimized()) win.restore();
  win.show();
  win.focus();
  if (localWin && !localWin.isDestroyed()) localWin.hide();
+ watchRemote(device, win);
  return { ok: true };
 }
 
 function activeWindow() {
  if (remoteWin && !remoteWin.isDestroyed()) return remoteWin;
  return localWin && !localWin.isDestroyed() ? localWin : null;
+}
+
+// --------------------------------------------------------------- the remote watchdog
+// While a remote window is open, its device is probed every few seconds. A short drop (an
+// update, a systemd restart) only reloads the page when the server is back; a device that
+// stays silent for half a minute kicks the app out — this PC's window comes up with the
+// picker, the dead device red and the reason underneath.
+let remoteWatch = null;
+let lastKicked = null;
+
+function kickFromRemote(device, reason) {
+ lastKicked = { id: device.id, name: device.name, reason: reason || 'it stopped answering' };
+ console.log(`[remote] kicked out of ${device.name}: ${lastKicked.reason}`);
+ if (remoteWin && !remoteWin.isDestroyed()) { try { remoteWin.destroy(); } catch {} }
+ remoteWin = null;
+ deviceChoice = 'self';
+ if (localWin && !localWin.isDestroyed()) {
+  showWindow(localWin);
+  try { localWin.webContents.send('devices:kicked', lastKicked); } catch {}
+ }
+}
+
+function stopRemoteWatch() {
+ clearInterval(remoteWatch);
+ remoteWatch = null;
+}
+
+function watchRemote(device, win) {
+ stopRemoteWatch();
+ let downSince = 0, reason = '';
+ const probe = async () => {
+  if (!win || win.isDestroyed() || remoteWin !== win) { stopRemoteWatch(); return; }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2500);
+  try {
+   const response = await fetch(device.url, { signal: controller.signal, redirect: 'follow' });
+   if (!response.ok) throw new Error(`HTTP ${response.status}`);
+   if (downSince) {
+    console.log(`[remote] ${device.name} is back — reloading the window`);
+    downSince = 0; reason = '';
+    win.webContents.reload();
+   }
+  } catch (error) {
+   if (!reason) reason = error?.name === 'AbortError' ? 'it stopped answering' : String(error?.cause?.code || error?.message || error);
+   if (!downSince) downSince = Date.now();
+   if (Date.now() - downSince > 30000) {
+    stopRemoteWatch();
+    kickFromRemote(device, reason);
+    return;
+   }
+  } finally {
+   clearTimeout(timer);
+  }
+ };
+ probe();
+ remoteWatch = setInterval(probe, 3000);
+}
+
+// True when nothing is working anywhere on this machine: the app's own turns (parallel runs
+// and subagents included) and the turns running inside its web child or the Discord bot —
+// both mirror their activity into small busy files while they work.
+function updatesIdle() {
+ if (presenceRuns.size) return false;
+ for (const name of ['web-busy', 'bot-busy']) {
+  try {
+   const data = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), `${name}.json`), 'utf8'));
+   if (Date.now() - (Number(data?.at) || 0) < 30000 && Number(data?.busy) > 0) return false;
+  } catch {}
+ }
+ return true;
 }
 
 async function pickDevice(id) {
@@ -521,7 +595,7 @@ ipcMain.handle('auto:set', (event, patch) => {
 ipcMain.handle('devices:list', event => {
  if (!fromApp(event)) return null;
  const list = deviceBeacon ? deviceBeacon.list() : { self: { id: '', name: os.hostname(), platform: process.platform, version: app.getVersion(), port: 0, server: false, self: true }, devices: [] };
- return { ...list, name: os.hostname(), server: serverMode(), hidden: HIDDEN };
+ return { ...list, name: os.hostname(), server: serverMode(), hidden: HIDDEN, kicked: lastKicked };
 });
 ipcMain.handle('devices:prompt', async event => {
  if (!fromApp(event)) return { show: false };
@@ -956,7 +1030,7 @@ if (process.argv.includes('--create-shortcut')) {
   startBot();
   // Old trees from an earlier Linux self-update are cleared once nothing runs from them.
   if (app.isPackaged && process.platform === 'linux') Updater.prune();
-  Updater.start({ isIdle: () => presenceRuns.size === 0 });
+  Updater.start({ isIdle: updatesIdle });
   MCP.init().catch(() => {});
   win.on('closed', () => {
    win = null;

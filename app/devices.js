@@ -14,7 +14,7 @@ const deviceMeta = device => [
  device.manual ? I18n.t('devices.manual') : '',
 ].filter(Boolean).join(' · ');
 
-function rowHtml(device, { self = false } = {}) {
+function rowHtml(device, { self = false, failed = '' } = {}) {
  const name = escapeHtml(device.name || device.id || 'device');
  const chips = [
   self ? `<span class="device-chip">${escapeHtml(I18n.t('devices.thisPc'))}</span>` : '',
@@ -22,12 +22,14 @@ function rowHtml(device, { self = false } = {}) {
  ].join('');
  const meta = deviceMeta(device);
  const offline = !self && !device.url ? `<span class="device-offline">${escapeHtml(I18n.t('devices.noWeb'))}</span>` : '';
- return `<button type="button" class="device-row${self ? ' is-self' : ''}" data-device="${escapeHtml(device.id || 'self')}" ${!self && !device.url ? 'data-offline="1"' : ''}>
+ const fail = failed ? `<span class="device-fail">${escapeHtml(I18n.t('devices.kickedLine', { reason: failed }))}</span>` : '';
+ return `<button type="button" class="device-row${self ? ' is-self' : ''}${failed ? ' is-failed' : ''}" data-device="${escapeHtml(device.id || 'self')}" ${!self && !device.url ? 'data-offline="1"' : ''}>
   <span class="device-pc">${PC_ICON}</span>
   <span class="device-text">
    <span class="device-name">${name}${chips}</span>
    <span class="device-meta">${escapeHtml(meta)}</span>
    ${offline}
+   ${fail}
   </span>
   <span class="device-go">${GO_ICON}</span>
  </button>`;
@@ -67,6 +69,7 @@ class DevicePicker {
    <div class="device-sheet" role="dialog" aria-modal="true" aria-label="${escapeHtml(I18n.t('devices.title'))}">
     <div class="device-head">${I18n.t('devices.title')}</div>
     <p class="device-hint">${escapeHtml(I18n.t('devices.hint'))}</p>
+    <p class="device-kicked" hidden></p>
     <div class="device-list"></div>
     <div class="device-foot">
      <input class="device-address" type="text" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(I18n.t('devices.addPlaceholder'))}">
@@ -86,6 +89,8 @@ class DevicePicker {
   this.el.querySelector('.device-address')?.addEventListener('keydown', event => {
    if (event.key === 'Enter') this.add();
   });
+  this.kicked = null;
+  window.openghost?.devices?.onKicked?.(kicked => this.showKicked(kicked));
  }
 
  async add() {
@@ -111,8 +116,9 @@ class DevicePicker {
  async render() {
   const data = await listOwn();
   if (!data) return;
+  if (data.kicked) this.kicked = data.kicked;
   const rows = [rowHtml({ ...data.self, self: true }, { self: true })];
-  for (const device of data.devices || []) rows.push(rowHtml(device));
+  for (const device of data.devices || []) rows.push(rowHtml(device, { failed: this.kicked?.id === device.id ? this.kicked.reason : '' }));
   this.list.innerHTML = rows.join('');
  }
 
@@ -127,14 +133,32 @@ class DevicePicker {
   this.el.hidden = true;
  }
 
+ // The device the app was connected to stopped answering: the picker comes back with that
+ // device red and one line saying why.
+ async showKicked(kicked) {
+  this.kicked = kicked || null;
+  const banner = this.el.querySelector('.device-kicked');
+  if (banner) {
+   banner.hidden = !kicked;
+   banner.textContent = kicked ? I18n.t('devices.kickedBanner', { name: kicked.name || 'device', reason: kicked.reason || '' }) : '';
+  }
+  await this.show();
+ }
+
  // The app asks on launch; the screen only appears when another device answers.
  async maybeShow() {
   if (!window.openghost?.devices?.prompt) return;
   let data = null;
   try { data = await window.openghost.devices.prompt(); } catch { data = null; }
   if (!data?.show) return;
+  if (data.kicked) this.kicked = data.kicked;
+  const banner = this.el.querySelector('.device-kicked');
+  if (banner && this.kicked) {
+   banner.hidden = false;
+   banner.textContent = I18n.t('devices.kickedBanner', { name: this.kicked.name || 'device', reason: this.kicked.reason || '' });
+  }
   const rows = [rowHtml({ ...data.self, self: true }, { self: true })];
-  for (const device of data.devices || []) rows.push(rowHtml(device));
+  for (const device of data.devices || []) rows.push(rowHtml(device, { failed: this.kicked?.id === device.id ? this.kicked.reason : '' }));
   this.list.innerHTML = rows.join('');
   if ((data.devices || []).length) this.show();
  }
@@ -200,8 +224,9 @@ class DeviceMenu {
  async open() {
   const data = await listOwn().catch(() => null);
   if (!data) return;
+  const kicked = data.kicked;
   const rows = [rowHtml(data.self, { self: true })];
-  for (const device of data.devices || []) rows.push(rowHtml(device));
+  for (const device of data.devices || []) rows.push(rowHtml(device, { failed: kicked?.id === device.id ? kicked.reason : '' }));
   this.menu.innerHTML = rows.join('');
   const current = this.menu.querySelector(`.device-row[data-device="self"], .device-row.is-self`);
   if (current) current.dataset.current = '1';

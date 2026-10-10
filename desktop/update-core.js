@@ -151,6 +151,11 @@ function applyLinux({ root, tarFile }) {
     try { return fs.statSync(entry).isDirectory() && fs.existsSync(path.join(entry, 'resources', 'app', 'package.json')); } catch { return false; }
    });
   if (!top) throw new Error('the archive does not contain a Prism V2 install');
+  // The archive is built on Windows, which stores no execute bits: put them back before the
+  // swap, or the relaunched app cannot start ("LaunchProcess: failed to execvp").
+  for (const name of ['prism-v2', 'chrome_crashpad_handler', 'chrome-sandbox']) {
+   try { fs.chmodSync(path.join(top, name), 0o755); } catch {}
+  }
   const version = currentVersion(path.join(top, 'resources', 'app'));
   const old = `${root}.old-${Date.now().toString(36)}`;
   fs.renameSync(root, old);

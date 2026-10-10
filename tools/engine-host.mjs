@@ -106,7 +106,15 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
  // Watch LLM activity: an automatic update swaps the install only when nothing streams.
  let llmActive = 0;
  const llmStart = listeners.get("llm:start");
- if (llmStart) listeners.set("llm:start", (...args) => { llmActive++; return llmStart(...args); });
+ if (llmStart) listeners.set("llm:start", (...args) => { llmActive++; writeBusy(); return llmStart(...args); });
+ // A busy mirror for this machine's updater: the app waits for quiet before installing, and
+ // the turns of the web pages (this process) and the Discord bot (its own process) live
+ // outside the app — each writes what it is doing into a small file the updater reads.
+ const busyFile = join(USER_DATA, webPort > 0 ? "web-busy.json" : "bot-busy.json");
+ function writeBusy() {
+  try { writeFileSync(busyFile, JSON.stringify({ at: Date.now(), busy: llmActive })); } catch {}
+ }
+ setInterval(writeBusy, 10000).unref?.();
  // The mode menu's "DM me on Discord when done" switch on a headless web run.
  handlers.set("discord:message", (event, payload) => Discord.note(
   typeof payload?.text === "string" ? payload.text : "",
@@ -341,7 +349,7 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
    sender = { ...next, send: (channel, ...args) => {
     if (channel === "llm:event") {
      const type = args[0]?.type;
-     if (type === "done" || type === "error") llmActive = Math.max(0, llmActive - 1);
+     if (type === "done" || type === "error") { llmActive = Math.max(0, llmActive - 1); writeBusy(); }
     }
     return send(channel, ...args);
    } };

@@ -661,6 +661,8 @@ class Settings {
     'curl -fL -o prism.tar.gz \\',
     `  https://github.com/${repo}/releases/download/v${version}/${asset}`,
     'mkdir -p ~/prism-v2 && tar -xzf prism.tar.gz -C ~/prism-v2 --strip-components=1',
+    '# the archive is packed on Windows: give the executable its bit back',
+    'chmod +x ~/prism-v2/prism-v2 ~/prism-v2/chrome_crashpad_handler',
    ].join('\n');
    const headless = [
     '# headless: web UI + Discord bot in one process (Node 20+)',
@@ -690,6 +692,7 @@ class Settings {
     row('settings.server.sudo', 'settings.server.sudoHint', `<div class="mcp-add-row">
       <input class="settings-key server-sudo" type="password" value="${escapeHtml(info.sudo)}" autocomplete="off" spellcheck="false" placeholder="••••••">
       <button type="button" class="settings-button server-sudo-save">${escapeHtml(I18n.t('settings.server.sudoSave'))}</button>
+      <button type="button" class="settings-button server-sudo-test">${escapeHtml(I18n.t('settings.server.sudoTest'))}</button>
       <button type="button" class="settings-button server-sudo-clear">${escapeHtml(I18n.t('settings.server.sudoClear'))}</button>
      </div>`),
     chosen === 'linux'
@@ -732,6 +735,12 @@ class Settings {
     const field = node.querySelector('.server-sudo');
     if (field) field.value = '';
     say(next ? I18n.t('settings.server.sudoCleared') : I18n.t('settings.server.sudoFailed'), next ? '' : 'error');
+   });
+   node.querySelector('.server-sudo-test')?.addEventListener('click', async () => {
+    say(I18n.t('settings.server.sudoTesting'));
+    const result = await window.openghost?.server?.sudoTest?.().catch(() => null);
+    if (result?.ok) say(I18n.t('settings.server.sudoOk'));
+    else say(I18n.t('settings.server.sudoDenied', { error: result?.error || 'no answer' }), 'error');
    });
    for (const button of node.querySelectorAll('.server-copy')) {
     button.addEventListener('click', () => {
