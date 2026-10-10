@@ -10,10 +10,21 @@ const { plainTables } = require('./discord-format');
 
 const file = () => path.join(app.getPath('userData'), 'discord.json');
 let prefs = null;
+let prefsStamp = '';
 
 function load() {
- if (prefs) return prefs;
- try { prefs = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { prefs = {}; }
+ // Settings (or another process — the web engine, the headless server) may rewrite this file
+ // while we run: re-read it whenever it changed, so a saved token or user id applies at once
+ // instead of when the app restarts.
+ try {
+  const stat = fs.statSync(file());
+  const stamp = `${stat.mtimeMs}:${stat.size}`;
+  if (prefs && stamp === prefsStamp) return prefs;
+  prefs = JSON.parse(fs.readFileSync(file(), 'utf8'));
+  prefsStamp = stamp;
+ } catch {
+  if (!prefs) prefs = {};
+ }
  return prefs || {};
 }
 

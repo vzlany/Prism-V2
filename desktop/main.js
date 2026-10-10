@@ -366,10 +366,8 @@ async function openRemoteWindow(device) {
    title: `Prism V2 — ${device.name}`,
    icon: ICON,
    backgroundColor: CHAT_BG,
-   ...(process.platform === 'linux' ? {} : {
-    titleBarStyle: 'hidden',
-    titleBarOverlay: { color: CHAT_BG, symbolColor: TITLE_BAR.symbolColor, height: TITLE_BAR.height },
-   }),
+   // No hidden title bar here: the page inside is a web UI with no drag strip of its own, so
+   // the window keeps the normal OS frame — draggable, closable, titled with the device it shows.
    webPreferences: {
     preload: path.join(__dirname, 'preload-remote.js'),
     contextIsolation: true,

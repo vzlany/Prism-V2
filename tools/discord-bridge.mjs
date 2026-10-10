@@ -936,11 +936,8 @@ if (ONCE) {
    process.exit(1);
   }
  })();
-} else if (!config.token || !config.userId) {
- console.error(`\n  The Discord bot is not set up yet. Add a bot token and your user id in Prism V2:\n  Settings -> Interface -> Discord notifications (the same bot is used here),\n  or edit ${configFile} by hand:\n\n  { "token": "…", "userId": "…", "enabled": true }\n\n  Create the bot at https://discord.com/developers (New Application -> Bot), enable\n  "Message Content Intent" on the Bot page, invite it to a private server of yours\n  (OAuth2 -> URL Generator -> scope "bot") so Discord lets it DM you, then DM it.\n`);
- process.exit(1);
 } else {
- (async () => {
+ const run = () => (async () => {
   let channel = null;
   const ensureChannel = async () => {
    if (channel) return channel;
@@ -1010,5 +1007,21 @@ if (ONCE) {
     }, 400);
    });
   } catch {}
- })();
+ })().catch(error => log(`bot crashed: ${String(error?.message || error)}`));
+ if (!config.token || !config.userId) {
+  console.error(`\n  The Discord bot is not set up yet — waiting for a token.\n  Add one in Prism V2: Settings -> Interface -> Discord notifications (the same bot is used here),\n  or edit ${configFile} by hand:\n\n  { "token": "…", "userId": "…", "enabled": true }\n\n  Create the bot at https://discord.com/developers (New Application -> Bot), enable\n  "Message Content Intent" on the Bot page, invite it to a private server of yours\n  (OAuth2 -> URL Generator -> scope "bot") so Discord lets it DM you, then DM it.\n`);
+  // Stay alive instead of exiting: Settings writes discord.json, and the bot comes online by
+  // itself the moment a token lands — no restart of the service needed.
+  const wait = setInterval(() => {
+   const fresh = readJson(configFile);
+   if (!fresh.token || !fresh.userId) return;
+   clearInterval(wait);
+   Object.assign(config, fresh);
+   state.tools = NO_TOOLS ? false : config.tools !== false;
+   log("token found — starting the bot");
+   run();
+  }, 4000);
+ } else {
+  run();
+ }
 }

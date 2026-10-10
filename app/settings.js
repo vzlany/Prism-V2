@@ -22,8 +22,9 @@ const LINKS = {
 };
 const MODES = ['ask', 'auto', 'full'];
 // The website runs turns through the desktop app when it is there; locally (a headless
-// `prism web`) Full access is the useful default, since the page is the only operator.
-const DEFAULT_MODE = window.openghost?.web ? 'full' : 'ask';
+// `prism web`) Full access is the useful default, since the page is the only operator. A
+// remote window inside the app is the app for this purpose — it keeps the app's own default.
+const DEFAULT_MODE = (window.openghost?.web && !window.openghostRemote) ? 'full' : 'ask';
 const CHECK_DELAY = 400;
 // How long a provider's model list is trusted. OpenCode adds and drops models on its side,
 // so the catalog is re-read in the background once it is this old, and periodically after.

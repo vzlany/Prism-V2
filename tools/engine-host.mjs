@@ -254,15 +254,14 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
  });
  handlers.set("discord:test", async () => {
   const cfg = readDiscord();
-  if (!cfg.token) return { ok: false, error: "no token saved yet" };
-  try {
-   const response = await fetch("https://discord.com/api/v10/users/@me", { headers: { authorization: `Bot ${cfg.token}` } });
-   if (!response.ok) return { ok: false, error: `Discord said ${response.status}` };
-   const me = await response.json().catch(() => null);
-   return { ok: true, name: String(me?.username || "") };
-  } catch (error) {
-   return { ok: false, error: String(error?.message || error) };
-  }
+  if (!cfg.token) return { ok: false, error: "no token saved yet — paste the bot token and press Save first" };
+  if (!cfg.userId) return { ok: false, error: "no user id saved yet — paste your Discord user id and press Save first" };
+  // This is the very DM the finish-notifications use — not just a token check — so what the
+  // page reports is what actually landed in Discord.
+  const result = await Discord.send("Prism V2", "test", "Discord notifications are wired up.");
+  if (result?.ok) return result;
+  if (result?.error === "not configured") return { ok: false, error: "DMs are switched off — tick \"send DMs\", press Save, then test again" };
+  return { ok: false, error: result?.error || "unknown error" };
  });
  const updateSettings = patch => updateCore.writeSettings(USER_DATA, {
   ...(patch?.auto !== undefined ? { auto: patch.auto === true } : {}),

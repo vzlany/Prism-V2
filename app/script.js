@@ -104,11 +104,11 @@ new ParallelPanel({
  },
 });
 const parallelMeter = new ParallelMeter({ button: document.querySelector('.composer-parallels') });
-// Other devices on the network: the switcher in the composer, the DEVICES row in the sidebar,
-// and the launch picker that asks which device this window should use when another answers.
-// A remote window (the server's UI inside the app) carries ?from=; this page is then a client.
+// Other devices on the network: the DEVICES row in the sidebar, and the launch picker that
+// asks which device this window should use when another answers. A remote window (the
+// server's UI inside the app) carries ?from=; this page is then a client.
 const FROM_DEVICE = (() => { try { return new URLSearchParams(location.search).get('from') || ''; } catch { return ''; } })();
-const deviceMenu = new DeviceMenu({ button: document.querySelector('.composer-device'), menu: document.querySelector('.device-menu') });
+const deviceMenu = new DeviceMenu({ menu: document.querySelector('.device-menu') });
 const devicePicker = new DevicePicker({ root: main });
 devicePicker.maybeShow();
 // The server's System panel: live machine statistics and the console stream.
@@ -334,18 +334,18 @@ if (AgentTools.available) {
    if (!info?.server) return;
    modePicker.setServerOnly(true);
    // The server's working indicator is the quiet dots, not the ghost — also when its chat is
-   // watched from another device. The System row stays on the server's own screen; a remote
-   // window gets the Devices row instead.
+   // watched from another device. The System row shows on every view of that server.
    document.documentElement.classList.add('is-server-mode');
-   if (!FROM_DEVICE) chatList?.setServer(true);
+   chatList?.setServer(true);
   };
   window.openghost?.engine?.info?.().then(serverOnly).catch(() => {});
   window.openghost?.auto?.get?.().then(serverOnly).catch(() => {});
-  // The sidebar's DEVICES row: when another device is known, and never on the server's own
-  // screen (its remote windows are clients and do get it).
+  // The sidebar's DEVICES row: whenever another device is known — but not on the server's
+  // own screen (its remote windows and web pages are clients and do get it).
+  const ownDesktop = window.openghost?.desktop === true;
   const applyDeviceRow = () => window.openghost?.devices?.list?.().then(data => {
    const remotes = (data?.devices || []).length;
-   chatList?.setDevices(remotes > 0 && (data?.server !== true || Boolean(FROM_DEVICE)));
+   chatList?.setDevices(remotes > 0 && !(data?.server === true && ownDesktop && !FROM_DEVICE));
   }).catch(() => {});
   applyDeviceRow();
   setInterval(applyDeviceRow, 10000);

@@ -423,6 +423,7 @@ const STRINGS = {
   'devices.openMenu': 'Choose which device this window works with',
   'devices.remoteOn': 'You are on {name}',
   'devices.backToPc': 'Back to this PC',
+  'devices.thisServer': 'This server',
   'path.title': 'Folder on the server',
   'path.hint': 'An absolute path on the machine Prism runs on, for example /home/server/projects. It becomes this chat\'s workspace.',
   'path.ok': 'Use this folder',

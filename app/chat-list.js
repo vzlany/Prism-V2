@@ -67,7 +67,11 @@ function place(parent, children) {
  children.forEach((child, k) => {
   const at = parent.children[k] || null;
   if (at === child) return;
-  if (child.isConnected && parent.moveBefore) parent.moveBefore(child, at);
+  // moveBefore keeps a node's state (focus, a playing video) while it is reordered — but the
+  // atomic move is only valid inside one connected tree. A row traveling to another folder,
+  // or into a group that is not attached yet, takes the plain insert instead: cross-parent
+  // and detached moves are not "state-preserving" moves and made the API throw.
+  if (parent.moveBefore && parent.isConnected && child.isConnected && child.parentNode === parent) parent.moveBefore(child, at);
   else parent.insertBefore(child, at);
  });
  while (parent.children.length > children.length) parent.lastElementChild.remove();

@@ -89,7 +89,7 @@ class FolderPill {
     if (folder) this.choose(folder, { remember: kind === 'public' });
    });
   }
-  this.menu.querySelector('[data-pick-new]')?.addEventListener('click', () => { this.menu.hidePopover?.(); this.pick(true); });
+  this.menu.querySelector('[data-pick-new]')?.addEventListener('click', () => { this.menu.hidePopover?.(); this.pick(false); });
  }
 
  choose(folder, { remember = true } = {}) {

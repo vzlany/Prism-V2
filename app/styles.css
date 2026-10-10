@@ -9164,6 +9164,26 @@ html.is-server-mode .welcome ghost-thinking{display:none}
 /* The thin swap bar under the RAM bar in the System panel */
 .sys-bar.is-thin{height:3px;margin-top:4px}
 .sys-bar.is-thin span{background:linear-gradient(90deg,#8fb3ff,#c6d6ff)}
+
+/* Prism V2: settings tabs marked hidden must really disappear (the display:flex above used
+   to win over the attribute, so the desktop-only Server and Auto pages leaked into browsers) */
+.settings-tab[hidden]{display:none}
+
+/* Prism V2: on a phone the conversation breathes smaller — tighter bubbles, lighter type */
+@media (max-width: 640px){
+ html{--composer-font-size:13.5px;--message-line-height:1.5}
+ .message.is-user{gap:5px}
+ .message-bubble{max-width:88%;padding:8px 13px;border-radius:17px}
+ .message-quote{max-width:88%;padding:7px 12px 7px 9px;border-radius:14px;font-size:13px;line-height:18px}
+ .message-origin{font-size:9.5px;padding:1px 7px}
+ .message-status{gap:8px}
+}
+@media (max-width: 480px){
+ .dashboard-panel{width:calc(100vw - 8px);max-height:calc(100vh - 8px);border-radius:14px;padding:12px 10px 13px}
+ .dash-grid{grid-template-columns:repeat(auto-fit,minmax(126px,1fr));gap:7px}
+ .dash-value{font-size:20px}
+ .sys-log{max-height:150px}
+}
 .composer-device{display:flex;align-items:center;gap:7px;height:var(--icon-button-size,32px);padding:0 11px 0 9px;border:0;border-radius:calc(var(--icon-button-size,32px)/2);background:rgba(var(--fg-rgb),.05);color:rgba(var(--fg-rgb),.72);font:inherit;font-size:12px;line-height:1;cursor:pointer;white-space:nowrap;anchor-name:--device;transition:background-color .2s ease,color .2s ease}
 .composer-device[hidden]{display:none}
 .composer-device:hover{background:rgba(var(--fg-rgb),.09);color:rgba(var(--fg-rgb),.92)}

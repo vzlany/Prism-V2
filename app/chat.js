@@ -129,7 +129,7 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 // Where this window runs from: a message written on the phone shows on the desktop as
 // "Website", one written in Discord shows everywhere as "Discord", and so on. A message is
 // never labelled in the place it was written.
-const PLATFORM = window.openghost?.desktop ? 'app' : (window.openghost?.web ? 'web' : 'app');
+const PLATFORM = window.openghost?.desktop || window.openghostRemote ? 'app' : (window.openghost?.web ? 'web' : 'app');
 // When another device's app opens this page it says who it is (?from=…) — the turns run
 // here, on this machine, and the label tells the model the user is elsewhere.
 const FROM_DEVICE = (() => { try { return new URLSearchParams(location.search).get('from') || ''; } catch { return ''; } })();

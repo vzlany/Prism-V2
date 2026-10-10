@@ -14,16 +14,16 @@ const deviceMeta = device => [
  device.manual ? I18n.t('devices.manual') : '',
 ].filter(Boolean).join(' · ');
 
-function rowHtml(device, { self = false, failed = '' } = {}) {
+function rowHtml(device, { self = false, failed = '', chip = '', localPc = false } = {}) {
  const name = escapeHtml(device.name || device.id || 'device');
  const chips = [
-  self ? `<span class="device-chip">${escapeHtml(I18n.t('devices.thisPc'))}</span>` : '',
+  chip ? `<span class="device-chip">${escapeHtml(chip)}</span>` : self ? `<span class="device-chip">${escapeHtml(I18n.t('devices.thisPc'))}</span>` : '',
   device.server && !self ? `<span class="device-chip is-server">${escapeHtml(I18n.t('devices.server'))}</span>` : '',
  ].join('');
  const meta = deviceMeta(device);
- const offline = !self && !device.url ? `<span class="device-offline">${escapeHtml(I18n.t('devices.noWeb'))}</span>` : '';
+ const offline = !self && !localPc && !device.url ? `<span class="device-offline">${escapeHtml(I18n.t('devices.noWeb'))}</span>` : '';
  const fail = failed ? `<span class="device-fail">${escapeHtml(I18n.t('devices.kickedLine', { reason: failed }))}</span>` : '';
- return `<button type="button" class="device-row${self ? ' is-self' : ''}${failed ? ' is-failed' : ''}" data-device="${escapeHtml(device.id || 'self')}" ${!self && !device.url ? 'data-offline="1"' : ''}>
+ return `<button type="button" class="device-row${self ? ' is-self' : ''}${failed ? ' is-failed' : ''}" data-device="${escapeHtml(device.id || 'self')}"${localPc ? ' data-local-pc="1"' : ''} ${!self && !localPc && !device.url ? 'data-offline="1"' : ''}>
   <span class="device-pc">${PC_ICON}</span>
   <span class="device-text">
    <span class="device-name">${name}${chips}</span>
@@ -170,16 +170,23 @@ class DevicePicker {
  }
 }
 
-// --------------------------------------------------------------- the composer switcher
+// --------------------------------------------------------------- the device menu
+// Opened from the sidebar's DEVICES row (and, before, from a composer pill). A remote window
+// (the server's UI in the app) gets the honest picture there: the server it is watching wears
+// "This server", and the PC the app runs on wears "This PC" and leads back to it.
+const IN_REMOTE = () => Boolean(window.openghostRemote?.back);
+
 class DeviceMenu {
  constructor({ button, menu }) {
-  this.button = button;
+  this.button = button || null;
   this.menu = menu;
-  if (!button || !menu) return;
-  button.addEventListener('click', () => {
-   if (this.menu.matches(':popover-open')) this.menu.hidePopover?.();
-   else this.open();
-  });
+  if (!menu) return;
+  if (this.button) {
+   this.button.addEventListener('click', () => {
+    if (this.menu.matches(':popover-open')) this.menu.hidePopover?.();
+    else this.open();
+   });
+  }
   menu.addEventListener('click', async event => {
    const row = event.target.closest('.device-row');
    if (!row) return;
@@ -194,6 +201,12 @@ class DeviceMenu {
     box.textContent = text;
    };
    if (row.dataset.current === '1') { menu.hidePopover?.(); return; }
+   // The PC this remote window was opened from: one press goes back to its own app.
+   if (row.dataset.localPc === '1' && IN_REMOTE()) {
+    menu.hidePopover?.();
+    window.openghostRemote.back().catch(() => {});
+    return;
+   }
    if (row.dataset.offline === '1') { say(I18n.t('devices.offline')); return; }
    say(I18n.t('devices.opening', { name: row.querySelector('.device-name')?.textContent?.trim() || 'device' }));
    const result = await pick({ id: row.dataset.device });
@@ -203,29 +216,9 @@ class DeviceMenu {
   });
   document.addEventListener('pointerdown', event => {
    if (!this.menu.matches(':popover-open')) return;
-   if (this.menu.contains(event.target) || this.button.contains(event.target)) return;
+   if (this.menu.contains(event.target) || this.button?.contains(event.target)) return;
    this.menu.hidePopover?.();
   }, true);
-  this.refresh();
-  // Devices come and go; a quiet check keeps the button honest.
-  setInterval(() => this.refresh(), 15000);
- }
-
- async refresh() {
-  const data = await listOwn().catch(() => null);
-  const remotes = data?.devices || [];
-  // The device switcher belongs to clients: not on the server's own screen, but yes inside
-  // a remote window (this page opened with ?from=), and on any install that is not a server.
-  const isServer = data?.server === true;
-  this.button.hidden = remotes.length === 0 || (isServer && !FROM_DEVICE);
-  if (this.button.hidden) return;
-  const name = data?.name || data?.self?.name || '';
-  this.button.title = I18n.t('devices.switch');
-  this.button.setAttribute('aria-label', I18n.t('devices.switch'));
-  if (!this.button.querySelector('.composer-device-text')) {
-   this.button.innerHTML = `<span class="composer-device-icon">${PC_ICON}</span><span class="composer-device-text"></span>`;
-  }
-  this.button.querySelector('.composer-device-text').textContent = name;
  }
 
  // The sidebar's DEVICES row opens the same menu, anchored under itself.
@@ -248,10 +241,19 @@ class DeviceMenu {
   const data = await listOwn().catch(() => null);
   if (!data) return;
   const kicked = data.kicked;
-  const rows = [rowHtml(data.self, { self: true })];
-  for (const device of data.devices || []) rows.push(rowHtml(device, { failed: kicked?.id === device.id ? kicked.reason : '' }));
+  const remote = IN_REMOTE();
+  // In a remote window the engine's "self" is the server being watched (it wears "This
+  // server"); the PC this window came from (?from=name) wears "This PC" and leads back home.
+  const rows = [rowHtml(data.self, { self: true, ...(remote ? { chip: I18n.t('devices.thisServer') } : {}) })];
+  for (const device of data.devices || []) {
+   const localPc = remote && FROM_DEVICE && String(device.name || '').toLowerCase() === FROM_DEVICE.toLowerCase();
+   rows.push(rowHtml(device, {
+    failed: kicked?.id === device.id ? kicked.reason : '',
+    ...(localPc ? { chip: I18n.t('devices.thisPc'), localPc: true } : {}),
+   }));
+  }
   this.menu.innerHTML = rows.join('');
-  const current = this.menu.querySelector(`.device-row[data-device="self"], .device-row.is-self`);
+  const current = this.menu.querySelector('.device-row.is-self');
   if (current) current.dataset.current = '1';
   window.PopoverMotion?.show ? window.PopoverMotion.show(this.menu) : this.menu.showPopover?.();
  }
