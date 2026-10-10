@@ -142,7 +142,7 @@ if (updatePill && window.openghost?.desktop && window.openghost?.update?.params)
   updatePill.append(document.createTextNode(`${I18n.t('update.available')} `));
   const arrow = document.createElement('span');
   arrow.className = 'update-arrow';
-  arrow.textContent = '⬆️';
+  arrow.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3.4M3.8 7.6 8 3.4l4.2 4.2"/></svg>';
   updatePill.append(arrow);
   updatePill.title = I18n.t('update.availableHint', { version: version || '' });
  };
