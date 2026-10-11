@@ -10,7 +10,7 @@
 // The bot connects to the Discord gateway, so it shows online with a working status; the
 // REST poll below stays as a fallback if the gateway cannot be reached.
 import { createEngineHost } from "./engine-host.mjs";
-import { existsSync, mkdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { hostname } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -30,6 +30,12 @@ const host = createEngineHost({ profile: PROFILE });
 const { ROOT, USER_DATA, engines } = host;
 // Shared with the finish DM: Discord has no tables, so both convert them before posting.
 const { plainTables } = createRequire(import.meta.url)(join(ROOT, "desktop", "discord-format.js"));
+// The instance registry: what other Prism engines run on this machine, and from which build.
+const Instances = createRequire(import.meta.url)(join(ROOT, "desktop", "instances.js"));
+const VERSION = (() => {
+ try { return JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version || ""; } catch { return ""; }
+})();
+const instance = Instances.attach({ userData: USER_DATA, role: "bridge", port: 0, version: VERSION, root: ROOT });
 
 const stamp = () => new Date().toISOString().slice(11, 19);
 const log = (...parts) => console.log(`[${stamp()}]`, ...parts);
@@ -67,7 +73,18 @@ const lockFree = () => {
  const data = readJson(lockFile, {});
  if (!data.pid || Number(data.pid) === process.pid) return true;
  if (Date.now() - (Number(data.at) || 0) > 15000) return true;
- return !pidAlive(Number(data.pid));
+ if (!pidAlive(Number(data.pid))) return true;
+ // The holder is alive — but does it belong to an older build? After an update the old bot
+ // must not keep the lock forever: it is stopped here, and this build takes the bot over.
+ try {
+  const entry = Instances.list(USER_DATA).find(item => item.pid === Number(data.pid));
+  if (entry && Instances.isForeignBuild(entry, { root: ROOT, version: VERSION })) {
+   log(`the bot lock is held by an old build (pid ${data.pid}, v${entry.version || "?"}) — stopping it`);
+   Instances.stopEntry(USER_DATA, entry, { grace: 2000 });
+   return !pidAlive(Number(data.pid));
+  }
+ } catch {}
+ return false;
 };
 function takeLock() { writeJson(lockFile, { pid: process.pid, at: Date.now(), name: hostname() }); }
 
@@ -250,10 +267,10 @@ function loadContext(record) {
  state.chatId = record.id;
  savedState();
 }
-function saveConversation(record, userText, answer) {
+function saveConversation(record, userText, answer, { userWritten = false } = {}) {
  const body = readJson(chatFile(record.id), { version: 1 });
  const messages = Array.isArray(body.messages) ? body.messages : [];
- if (userText) messages.push({ role: "user", text: userText, content: userText, origin: "discord" });
+ if (userText && !userWritten) messages.push({ role: "user", text: userText, content: userText, origin: "discord" });
  if (answer) messages.push({ role: "assistant", content: answer });
  const index = readIndex();
  const chat = index.chats.find(item => item.id === record.id);
@@ -266,6 +283,163 @@ function saveConversation(record, userText, answer) {
  // characters/4 estimate the app falls back to keeps the numbers honest.
  const used = Math.ceil(((userText || "").length + (answer || "").length) / 4);
  writeJson(chatFile(record.id), { ...body, version: 1, messages, botContext: state.messages, tokens: (Number(body.tokens) || 0) + used });
+}
+
+// The user's line, written the moment the message arrives: the app and the website watch the
+// store, so the phone sees what was sent while the bot is still thinking instead of only when
+// the answer lands. A turn that dies halfway leaves the message behind — which is the truth.
+function appendUserMessage(record, text, attachments = []) {
+ try {
+  const body = readJson(chatFile(record.id), { version: 1 });
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const slim = (Array.isArray(attachments) ? attachments : []).slice(0, 10).map(file => ({
+   name: String(file.name || "file").slice(0, 120),
+   size: Number(file.size) || 0,
+   image: /^image\//.test(String(file.type || "")),
+  }));
+  messages.push({
+   role: "user",
+   text: String(text || ""),
+   content: String(text || ""),
+   origin: "discord",
+   ...(slim.length ? { attachments: slim } : {}),
+  });
+  const index = readIndex();
+  const chat = index.chats.find(item => item.id === record.id);
+  if (chat) {
+   chat.updated = Date.now();
+   if (!chat.named && text) { chat.title = String(text).split("\n")[0].slice(0, 60) || chat.title; chat.named = true; }
+   writeIndex(index);
+  }
+  writeJson(chatFile(record.id), { ...body, version: 1, messages });
+ } catch (error) {
+  log("could not write the user line:", String(error?.message || error));
+ }
+}
+
+// Files the user sent in Discord are pulled into the store's own folder, so the model and
+// the app can read them even after Discord's signed links expire. Anything missing or over
+// 25 MB is skipped rather than failing the message.
+const MAX_ATTACH = 25 * 1024 * 1024;
+async function downloadAttachments(message) {
+ const list = Array.isArray(message?.attachments) ? message.attachments : [];
+ if (!list.length) return [];
+ const dir = join(USER_DATA, "attachments", String(message.id || Date.now()));
+ const saved = [];
+ try { mkdirSync(dir, { recursive: true }); } catch {}
+ for (const item of list.slice(0, 10)) {
+  try {
+   if (Number(item.size) > MAX_ATTACH) continue;
+   const clean = String(item.filename || "file").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 120) || "file";
+   const target = join(dir, clean);
+   const res = await fetch(String(item.url || ""), { headers: { "user-agent": "Mozilla/5.0 (Prism V2)" } });
+   if (!res.ok) continue;
+   const buffer = Buffer.from(await res.arrayBuffer());
+   if (!buffer.length || buffer.length > MAX_ATTACH) continue;
+   writeFileSync(target, buffer);
+   saved.push({ name: clean, path: target, size: buffer.length, type: String(item.content_type || "") });
+  } catch {}
+ }
+ if (saved.length) log(`downloaded ${saved.length} attachment(s)`);
+ return saved;
+}
+
+// --------------------------------------------------------------- live presence
+// While a turn runs here, this chat shows up in presence.json the same way a turn the app
+// itself runs does — the website (and any phone) draws the live card from it, and removes it
+// when the turn ends. Other writers (the desktop app) keep their own runs: the file is
+// merged, never overwritten wholesale.
+function writePresenceRun(id, info) {
+ try {
+  const file = join(USER_DATA, "presence.json");
+  let data = {};
+  try { data = JSON.parse(readFileSync(file, "utf8")) || {}; } catch {}
+  const runs = (Array.isArray(data.runs) ? data.runs : [])
+   .filter(run => run?.id && run.id !== id && Date.now() - (Number(run.at) || 0) < 60000);
+  if (info) runs.push({ id, ...info, at: Date.now() });
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ ...data, at: Date.now(), runs }));
+  renameSync(tmp, file);
+ } catch {}
+}
+
+// The live mirror of one turn: thoughts, tool cards and the answer being written, small
+// enough for presence.json. At most a few writes a second, and a heartbeat so a slow tool
+// does not let the card expire.
+function createMirror(record) {
+ const id = record?.id;
+ if (!id) return null;
+ const clip = (text, max) => { const value = String(text || ""); return value.length > max ? `…${value.slice(-max)}` : value; };
+ const parts = [];
+ let status = "thinking";
+ let textPart = null;
+ let started = Date.now();
+ let last = 0, timer = 0, stopped = false;
+ const snapshot = () => ({
+  state: "running",
+  title: clip(record.title || "Discord chat", 120),
+  model: state.model,
+  started,
+  status,
+  origin: "discord",
+  parts: parts.slice(-20),
+ });
+ const flush = () => { last = Date.now(); if (!stopped) writePresenceRun(id, snapshot()); };
+ const soon = () => {
+  if (stopped) return;
+  const wait = 350 - (Date.now() - last);
+  if (wait > 0) { clearTimeout(timer); timer = setTimeout(flush, wait); return; }
+  flush();
+ };
+ const beat = setInterval(() => { if (!stopped) flush(); }, 8000);
+ beat.unref?.();
+ return {
+  thought(words) {
+   const text = String(words || "").trim();
+   if (!text) return;
+   parts.push({ kind: "thinking", text: clip(text, 2400) });
+   status = "thinking";
+   soon();
+  },
+  toolStart(item) {
+   const part = {
+    kind: "tool",
+    tool: String(item?.name || "tool"),
+    toolKind: "command",
+    title: toolTitle(item?.name, true),
+    summary: clip(toolDetail(item?.name, item?.args || {}), 220),
+    state: "running",
+    ms: null,
+    output: "",
+    at: Date.now(),
+   };
+   parts.push(part);
+   status = "working";
+   soon();
+   return part;
+  },
+  toolEnd(part, { output = "", error = false } = {}) {
+   if (!part) return;
+   part.state = error ? "error" : "done";
+   part.ms = Date.now() - (part.at || Date.now());
+   part.output = clip(output, 1200);
+   soon();
+  },
+  text(value) {
+   const text = String(value || "");
+   if (!text) return;
+   if (!textPart) { textPart = { kind: "text", text: "" }; parts.push(textPart); }
+   textPart.text = clip(text, 8000);
+   status = "writing";
+   soon();
+  },
+  done() {
+   stopped = true;
+   clearInterval(beat);
+   clearTimeout(timer);
+   writePresenceRun(id, null);
+  },
+ };
 }
 
 // Pick the conversation this message belongs to: the chosen one, or a fresh chat.
@@ -310,6 +484,11 @@ window.openghost = {
   list: () => host.invoke("memory:list"),
   add: text => host.invoke("memory:add", text),
   remove: id => host.invoke("memory:remove", id),
+ },
+ // The send_discord_message tool: a short message from the agent to the user's DM.
+ discord: {
+  get: () => host.invoke("discord:get"),
+  message: payload => host.invoke("discord:message", payload),
  },
 };
 for (const file of ["agent-tools.js", "agent-prompt.js"]) {
@@ -408,7 +587,7 @@ async function systemPrompt() {
  if (prompts && prompts.enabled !== false && typeof prompts.global === "string" && prompts.global.trim()) custom += `\n\n# User instructions (global)\n${prompts.global.trim()}`;
  const own = prompts?.models?.[state.model];
  if (typeof own === "string" && own.trim()) custom += `\n\n# User instructions (this model)\n${own.trim()}`;
- return `${AgentPrompt.build({ folder: state.folder, mode: "full", env, browser: "", mcp, memory, plan: "", instructions, skills, now: new Date() })}${custom}\n\n# Remote control\nYou are answering over Discord, from the user's phone. Keep replies short and plain; Discord markdown works, but **never write markdown tables** — Discord does not render them and they arrive as a wall of pipes. Use short lists with bold labels instead, one line per item (for example \`- **Title:** what changed\`).\n\nWhile you work you can also message the user here on your own: write a block like \`<send_discord_message>On it — checking the sources now.</send_discord_message>\` and it is posted as its own DM right away. Tell them you are on it: when a request means more than a step or two of work, begin with a short acknowledgement, and keep one-line updates coming whenever a phase finishes or something important changes, so the phone never shows only "working…". A line inside the block like \`@file: C:\\\\path\\\\shot.png\` attaches that file or picture. Never wrap your whole answer in the block and never use it to repeat the final summary, which is sent automatically.${state.tools ? " Tools run without asking." : " Tools are unavailable in this session: never attempt a tool call, answer in plain text."}`;
+ return `${AgentPrompt.build({ folder: state.folder, mode: "full", env, browser: "", mcp, memory, plan: "", instructions, skills, now: new Date() })}${custom}\n\n# Remote control\nYou are answering over Discord, from the user's phone. Keep replies short and plain; Discord markdown works, but **never write markdown tables** — Discord does not render them and they arrive as a wall of pipes. Use short lists with bold labels instead, one line per item (for example \`- **Title:** what changed\`).\n\nWhile you work you can also message the user here on your own with the send_discord_message tool (text, and optional file paths in "files") — it lands in this DM right away. Tell them you are on it: when a request means more than a step or two of work, send one short acknowledgement right after your first thoughts, and keep one-line updates coming whenever a phase finishes or something important changes, so the phone never shows only "working…". A few small messages, not a stream. Never use it just to repeat the final summary, which is sent automatically.${state.tools ? " Tools run without asking." : " Tools are unavailable in this session: never attempt a tool call, answer in plain text."}`;
 }
 
 async function turn(prompt, display = {}) {
@@ -430,13 +609,13 @@ async function turn(prompt, display = {}) {
  let retried = false;
  for (let step = 0; ; step++) {
   if (state.stopped) return "⏹ stopped";
-  let reasoning = "", result = null;
+  let reasoning = "", result = null, live = "";
   // A failure gets three more tries, five seconds apart, with the attempt shown in the DM.
   for (let attempt = 1; ; attempt++) {
    try {
     result = await stream([{ role: "system", content: system }, ...state.messages], {
      tools,
-     onDelta: () => status("✍️ writing…"),
+     onDelta: delta => { live += delta; status("✍️ writing…"); display.mirrorText?.(live); },
      onThought: delta => { reasoning += delta; status("🤔 thinking…"); },
     });
     break;
@@ -447,12 +626,13 @@ async function turn(prompt, display = {}) {
     await new Promise(resolve => setTimeout(resolve, 5000));
     if (state.stopped) throw error;
     reasoning = "";
+    live = "";
    }
   }
   // The thinking is finished when the step's stream ends, so the whole thought goes out at
   // once — never a half sentence in the middle of it.
   const thought = String(result.reasoning || reasoning || "").trim();
-  if (thought) await display.thought?.(thought);
+  if (thought) { await display.thought?.(thought); display.mirrorThought?.(thought); }
   const calls = (result.toolCalls || []).filter(call => call?.function?.name);
   // A <send_discord_message> block is the agent talking to the user on its own. While work
   // continues it goes out right away and leaves the reply; on the final step a plain one
@@ -498,6 +678,7 @@ async function turn(prompt, display = {}) {
    status(`🔧 ${call.function.name}`);
    const item = { name: call.function.name, args: callArgs };
    const messageId = await display.running?.(item);
+   const mirrorPart = display.mirrorTool?.(item);
    let output = "", failed = false;
    try {
     const toolResult = await AgentTools.run(call.function.name, callArgs, { id: `dc-tool-${call.id}`, cwd: state.folder });
@@ -510,6 +691,7 @@ async function turn(prompt, display = {}) {
     output = `Error: ${error.message}`;
     failed = true;
    }
+   display.mirrorToolEnd?.(mirrorPart, { output, error: failed });
    state.messages.push({ role: "tool", tool_call_id: call.id, content: output });
    await display.event?.({ ...item, output, error: failed, messageId });
   }
@@ -673,10 +855,13 @@ function setPresence(name, status = "online") {
 }
 
 // The app keeps its running turns in presence.json: while anything works there (or a web
-// turn delegated to it) the bot wears DND too; when nothing is working it goes back to ready.
+// turn delegated to it) the bot wears its busy status too; when nothing is working it goes
+// back to ready. Web-engine turns are counted in web-busy.json, the app's in presence.json.
 function appBusy() {
  const runs = readJson(join(USER_DATA, "presence.json"), {})?.runs;
- return Array.isArray(runs) && runs.some(run => Date.now() - (Number(run.at) || 0) < 30000);
+ if (Array.isArray(runs) && runs.some(run => Date.now() - (Number(run.at) || 0) < 30000)) return true;
+ const web = readJson(join(USER_DATA, "web-busy.json"), {});
+ return Number(web?.busy) > 0 && Date.now() - (Number(web?.at) || 0) < 30000;
 }
 
 // The status is put back in line every few seconds unless a turn is really running, so a
@@ -685,11 +870,14 @@ function startPresenceLoop() {
  clearInterval(presenceLoop);
  presenceLoop = setInterval(() => {
   if (!gatewayReady) return;
-  // A bridge turn (this bot replying here) sets its own status while it works.
+  // A bridge turn (this bot replying here) sets its own status while it works — the exact
+  // phrase, on DND, and it has priority over everything else.
   if (busy || currentRun) return;
   const working = appBusy();
-  const line = working ? "🤔 working in the app…" : IDLE;
-  const status = working ? "dnd" : "online";
+  // Work in the app or on the website is shown as an idle status with its own line: the bot
+  // itself is free, but the machine is not.
+  const line = working ? "🛠️ Working in app…" : IDLE;
+  const status = working ? "idle" : "online";
   if (`${status}|${line}` === lastPresence) return;
   setPresence(line, status);
  }, 5000);
@@ -761,6 +949,33 @@ async function pumpQueue() {
  busy = false;
 }
 
+// --------------------------------------------------------------- stop requests
+// The website's Stop button drops an abort request into userData/delegate. The desktop app
+// consumes those for the turns it runs; turns THIS bot runs (a Discord conversation, or an
+// app chat answered from Discord) were left running — this watcher ends them too, so Stop
+// works whichever surface started the work.
+function watchAborts() {
+ const dir = join(USER_DATA, "delegate");
+ try { mkdirSync(dir, { recursive: true }); } catch {}
+ const take = () => {
+  let names = [];
+  try { names = readdirSync(dir).filter(name => name.endsWith(".json")); } catch { return; }
+  for (const name of names) {
+   const file = join(dir, name);
+   let request = null;
+   try { request = JSON.parse(readFileSync(file, "utf8")); } catch {}
+   if (!request || request.type !== "abort") continue;
+   try { rmSync(file, { force: true }); } catch {}
+   if (String(request.chatId || "") !== String(state.chatId || "")) continue;
+   if (!currentRun) continue;
+   log("stop requested from the website — aborting this turn");
+   state.stopped = true;
+   try { host.emit("llm:abort", currentRun); } catch {}
+  }
+ };
+ try { watch(dir, () => setTimeout(take, 120)); take(); } catch {}
+}
+
 // --------------------------------------------------------------- commands
 const HELP = [
  "**Prism V2 bridge** — I run on your PC and answer here.",
@@ -802,16 +1017,28 @@ async function clearBotMessages(channel) {
 
 async function handle(channel, message, opts = {}) {
  let text = String(message.content || "").trim();
+ let source = message;
  // If the gateway cannot see message content (Message Content Intent off in the developer
  // portal), fetch the message over REST before giving up on it.
  if (!text && gatewayReady && message.id) {
   try {
    const fresh = await api(`/channels/${channel}/messages/${message.id}`).then(res => (res.ok ? res.json() : null));
+   if (fresh) source = fresh;
    text = String(fresh?.content || "").trim();
   } catch {}
  }
- if (!text) return;
- log("dm:", text.slice(0, 80));
+ // Files the user attached (photos, logs, zips) are downloaded before anything else: the
+ // turn gets their paths so the model can read them, and the chat line carries them so the
+ // app and the website show what was sent. An attachment-only DM is a real message.
+ const attached = await downloadAttachments(source);
+ if (!text && !attached.length) return;
+ const userText = text;
+ let promptText = text;
+ if (attached.length) {
+  const lines = attached.map(file => `- ${file.path}${/^image\//.test(file.type || "") ? " (a picture — read_file shows it as an image)" : ""}`);
+  promptText = [text, "The user attached these files; read them with read_file when they matter:", ...lines].filter(Boolean).join("\n\n");
+ }
+ log("dm:", (text || `${attached.length} attached file(s)`).slice(0, 80));
  // Commands use "!" (a leading "/" is accepted too, so older muscle memory still works).
  const command = text.replace(/^\//, "!");
  if (command === "!help") return void await post(channel, HELP);
@@ -938,7 +1165,10 @@ async function handle(channel, message, opts = {}) {
 
  // The conversation this turn belongs to (a fresh one is made if none is chosen).
  const conversation = activeChat();
- await runTurn(channel, text, conversation, saveConversation);
+ // The user's line lands in the app and on the website the moment it arrives — not only
+ // when the answer does — and the run is mirrored live while the bot works on it.
+ appendUserMessage(conversation, userText, attached);
+ await runTurn(channel, promptText, conversation, (record, userLine, answer) => saveConversation(record, userLine, answer, { userWritten: true }));
 }
 
 // One turn's Discord face: a "working…" placeholder that follows the status, thoughts and
@@ -988,7 +1218,14 @@ async function runTurn(channel, text, conversation, save) {
    const sent = list.length ? await postFiles(channel, list, text) : 0;
    if (String(text || "").trim() && !sent) await post(channel, text);
   },
+  // The live mirror every other surface reads: this turn appears in the app and on the
+  // website while it runs, and goes away when it ends.
+  mirrorThought: words => mirror?.thought(words),
+  mirrorTool: item => mirror?.toolStart(item),
+  mirrorToolEnd: (part, info) => mirror?.toolEnd(part, info),
+  mirrorText: value => mirror?.text(value),
  };
+ const mirror = createMirror(conversation);
  setPresence("🤔 thinking…", "dnd");
  try {
   const answer = await turn(text, display);
@@ -1011,6 +1248,9 @@ async function runTurn(channel, text, conversation, save) {
   if (placeholderId) await replyTo(channel, placeholderId, note);
   else await post(channel, note);
   log("failed:", error.message);
+ } finally {
+  // The live card disappears with the turn; the saved conversation takes over.
+  mirror?.done();
  }
 }
 
@@ -1045,7 +1285,9 @@ async function replyInChat(channel, text, chatId) {
  state.chatId = record.id;
  state.folder = record.folder || saved.folder;
  try {
-  await runTurn(channel, text, record, appendToChat);
+  // The reply lands in the app conversation right away, and the run mirrors live there too.
+  appendUserMessage(record, text, []);
+  await runTurn(channel, text, record, (target, userLine, answer) => appendToChat(target, userLine, answer, { userWritten: true }));
  } finally {
   state.messages = saved.messages;
   state.chatId = saved.chatId;
@@ -1057,10 +1299,10 @@ async function replyInChat(channel, text, chatId) {
 
 // The reply turn, written the way the app writes a chat: renderable messages with the
 // Discord origin on the user's line. No botContext here — the app's own history is the truth.
-function appendToChat(record, userText, answer) {
+function appendToChat(record, userText, answer, { userWritten = false } = {}) {
  const body = readJson(chatFile(record.id), { version: 1 });
  const messages = Array.isArray(body.messages) ? body.messages : [];
- if (userText) messages.push({ role: "user", text: userText, content: userText, origin: "discord" });
+ if (userText && !userWritten) messages.push({ role: "user", text: userText, content: userText, origin: "discord" });
  if (answer) messages.push({ role: "assistant", content: answer });
  const index = readIndex();
  const chat = index.chats.find(item => item.id === record.id);
@@ -1099,6 +1341,7 @@ if (ONCE) {
    return channel;
   };
   await ensureChannel();
+  watchAborts();
   console.log(`\n  Prism V2 on Discord  ->  model ${state.model}`);
   console.log(`  folder            ->  ${state.folder}`);
   console.log(`  tools             ->  ${state.tools ? "on (full access to this computer)" : "off"}`);
@@ -1134,6 +1377,7 @@ if (ONCE) {
   const shutdown = () => {
    shuttingDown = true;
    clearInterval(heartbeat);
+   try { instance.stop(); } catch {}
    try { gateway?.close(); } catch {}
    process.exit(0);
   };

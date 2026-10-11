@@ -33,6 +33,10 @@ function plainTables(text) {
  };
  // The app draws these as pictures; Discord would show the raw source. One line stands in.
  const APP_ONLY = /^(mermaid|wireframe)\b/i;
+ // Callout markers ([!TIP], [!WARNING], …) are the app's own formatting: Discord would show
+ // the raw marker, so each becomes a bold label with an icon, the way the app draws it.
+ const CALLOUTS = { note: '📝 NOTE', tip: 'ℹ️ TIP', important: '❗ IMPORTANT', warning: '⚠️ WARNING', caution: '🚨 CAUTION' };
+ const CALLOUT_LINE = /^\s*(?:>\s*)?\[!(note|tip|important|warning|caution)\]\s*(.*)$/i;
  for (const line of lines) {
   if (/^\s*```/.test(line)) {
    flush();
@@ -47,6 +51,15 @@ function plainTables(text) {
     out.push(line);
    }
    continue;
+  }
+  if (!fenced) {
+   const callout = CALLOUT_LINE.exec(line);
+   if (callout) {
+    flush();
+    const rest = callout[2].trim();
+    out.push(`**${CALLOUTS[callout[1].toLowerCase()]}**${rest ? ` ${rest}` : ''}`);
+    continue;
+   }
   }
   if (!fenced && isRow(line)) { block.push(line); continue; }
   flush();
