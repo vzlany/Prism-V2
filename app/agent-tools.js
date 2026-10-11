@@ -15,6 +15,7 @@ let mcpSchemas = [];
 // MCP servers run in the main process; their tools are refreshed at boot, at the start of
 // every turn and when the settings reload the servers.
 async function refreshMcp() {
+ refreshDiscord();
  if (!mcpBridge) return;
  try {
   const list = (await mcpBridge.tools()) || [];
@@ -38,8 +39,20 @@ async function refreshMcp() {
  }
 }
 
-function mcpSummary() {
- if (!mcpTools.length) return '';
+// Whether Discord DMs are switched on right now — the send_discord_message tool is only
+// offered while they are. Optimistic until the first answer arrives, so a headless engine
+// that answers late never hides the tool from a turn.
+let discordReady = true;
+async function refreshDiscord() {
+ try {
+  const state = await window.openghost?.discord?.get?.();
+  if (state && typeof state.hasToken === 'boolean') {
+   discordReady = Boolean(state.enabled && state.hasToken && String(state.userId || '').trim());
+  }
+ } catch {}
+}
+
+function mcpSummary() { if (!mcpTools.length) return '';
  const byServer = new Map();
  for (const tool of mcpTools) {
   if (!byServer.has(tool.server)) byServer.set(tool.server, []);
@@ -112,6 +125,8 @@ const SCHEMAS = [
   description: { type: 'string', description: 'Short label for the task, shown to the user' },
   prompt: { type: 'string', description: 'The complete instructions for the subagent' },
   wait: { type: 'boolean', description: 'Block here until this subagent reports back — only set it when you have nothing else to do meanwhile. Default false: it works in the background and agents list/read/wait bring its report.' },
+  model: { type: 'string', description: 'Optional: the model the subagent answers with, as provider:id from the catalog. Pick a fast, cheap model (for example GLM-5.3-Flash) for mechanical non-coding work — scanning files, checking mods for malware footprints, bulk extraction — and leave it out for coding, where the chat\'s own model is right.' },
+  effort: { type: 'string', description: 'Optional thinking effort for the subagent, one of the model\'s own levels (e.g. none, low, medium, high).' },
  }, ['description', 'prompt']),
  fn('todo', 'Keep the to-do list of a non-trivial task on screen so you (and the user) never lose the thread. Create it once with the steps in order when the work has more than a couple of moves; mark the step you are on with doing, the ones that finished with done and the ones that failed with failed; add or reword steps with edit as you learn more, and view reads it back. The box stays with the conversation and moves to the newest position every time you change it. Small jobs do not need it.', {
   action: { type: 'string', enum: ['create', 'view', 'edit', 'done'], description: 'create: set the whole list; edit: add, reword or drop steps; done: mark steps doing/done/failed; view: read it back' },
@@ -228,6 +243,10 @@ const SCHEMAS = [
  fn('notify', 'Show a desktop notification on the user\'s computer, for when they asked to be told something or a long job is done.', {
   title: { type: 'string', description: 'Notification title' },
   text: { type: 'string', description: 'Notification body' },
+ }, ['text']),
+ fn('send_discord_message', 'Send the user a short message on Discord right away (text and optionally files). Available while Discord DMs are switched on in Settings → Discord. Use it sparingly: when the user wrote from Discord, send one short acknowledgement right after your first thoughts and a one-line update whenever a phase finishes; the finished summary is sent automatically, so never repeat it with this tool and never narrate every step.', {
+  text: { type: 'string', description: 'The message; short and plain, Discord markdown works, tables do not' },
+  files: { type: 'array', items: { type: 'string' }, description: 'Optional file paths to attach (pictures or documents)' },
  }, ['text']),
  fn('wait', 'Wait a number of seconds, 60 at most, before checking something again: a build, a download, a server that is starting.', {
   seconds: { type: 'integer', description: 'Seconds to wait' },
@@ -596,7 +615,11 @@ let env = null;
 
 window.AgentTools = {
  available: !!bridge,
- get schemas() { return mcpSchemas.length ? [...SCHEMAS, ...mcpSchemas] : SCHEMAS; },
+ get schemas() {
+  // The Discord tool only exists while DMs are switched on.
+  const list = SCHEMAS.filter(schema => schema.function.name !== 'send_discord_message' || discordReady);
+  return mcpSchemas.length ? [...list, ...mcpSchemas] : list;
+ },
  modes: MODES,
  refreshMcp,
  mcpSummary,
@@ -612,7 +635,7 @@ window.AgentTools = {
   if (!bridge) return 'Error: tools are only available in the desktop app';
   if (name.startsWith('browser_')) return browser(name, args, id, cwd);
   if (name === 'subagent') {
-   const report = await window.__prismSubagent?.(String(args.description ?? ''), String(args.prompt ?? ''), id, args.wait === true);
+   const report = await window.__prismSubagent?.(String(args.description ?? ''), String(args.prompt ?? ''), id, args.wait === true, { model: typeof args.model === 'string' ? args.model : '', effort: typeof args.effort === 'string' ? args.effort : '' });
    if (!report) return 'The subagent could not be started.';
    return `Subagent "${String(args.description ?? 'task')}" finished. Its report:\n${report}`;
   }
@@ -627,6 +650,18 @@ window.AgentTools = {
   if (name === 'update_prism') {
    const reply = await window.openghost?.update?.run?.(args);
    return reply?.message || 'Updating is only available in the desktop app or the server build.';
+  }
+  if (name === 'send_discord_message') {
+   const text = String(args.text ?? '').trim();
+   const files = Array.isArray(args.files) ? args.files.map(file => String(file || '')).filter(Boolean) : [];
+   if (!text && !files.length) return 'Nothing to send — give the message text or a file path.';
+   if (!discordReady) return 'Discord DMs are switched off (Settings → Discord) — nothing was sent.';
+   const send = window.openghost?.discord?.message;
+   if (!send) return 'Discord is only reachable from the app or the server build.';
+   const result = await send({ text, files });
+   if (result?.ok) return `Sent to the user on Discord${result.attached?.length ? ` (attached: ${result.attached.join(', ')})` : ''}.`;
+   if (result?.error === 'not configured') return 'Discord DMs are switched off (Settings → Discord) — nothing was sent.';
+   return `Could not send the Discord message: ${result?.error || 'unknown error'}.`;
   }
   if (name === 'ask_user') {
    if (!window.QuestionCard) return 'The question card is not available in this build.';

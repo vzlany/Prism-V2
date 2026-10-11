@@ -80,6 +80,7 @@ class SystemPanel {
     <span class="dash-logo">${Glyphs.terminal}</span>
     <span class="dash-title"><span class="dash-name" data-sys="host"></span><span class="dash-sub" data-sys="platform"></span></span>
     <span class="sys-live" aria-hidden="true"></span>
+    <button type="button" class="dash-close" aria-label="${I18n.t('dashboard.close')}">×</button>
    </div>
    <div class="sys-grid">
     <section class="sys-card is-wide">
@@ -120,6 +121,8 @@ class SystemPanel {
   this.logEl = this.panel.querySelector('[data-sys="log"]');
   this.get = name => this.panel.querySelector(`[data-sys="${name}"]`);
   this.bar = name => this.panel.querySelector(`[data-bar="${name}"]`);
+  // The X closes the panel, the same way the Dashboard's does.
+  this.panel.querySelector('.dash-close')?.addEventListener('click', () => this.panel.hidePopover?.());
  }
 
  set(name, text) {

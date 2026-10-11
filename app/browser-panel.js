@@ -98,6 +98,7 @@ class BrowserPanel {
     <div class="browser-tabs">
      <div class="browser-tab-list" role="tablist"></div>
      <button type="button" class="browser-icon browser-new" aria-label="${I18n.t('browser.newTab')}">${ICONS.plus}</button>
+     <button type="button" class="browser-icon browser-close" aria-label="${I18n.t('browser.hide')}">${ICONS.close || '×'}</button>
     </div>
     <div class="browser-bar">
      <button type="button" class="browser-icon browser-back" aria-label="${I18n.t('browser.back')}">${ICONS.back}</button>
@@ -137,6 +138,9 @@ class BrowserPanel {
   this.cursor = $('.browser-cursor');
   this.toast = $('.browser-toast');
   $('.browser-new').addEventListener('click', () => this.newTab());
+  // The X in the panel's corner closes the whole sidebar — the globe in the chat works too,
+  // but the way out should be where the eye is.
+  $('.browser-close').addEventListener('click', () => this.setOpen(false));
   this.backButton.addEventListener('click', () => this.active?.view?.goBack());
   this.forwardButton.addEventListener('click', () => this.active?.view?.goForward());
   this.reloadButton.addEventListener('click', () => {

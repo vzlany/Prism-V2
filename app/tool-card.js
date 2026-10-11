@@ -16,6 +16,31 @@ function element(tag, className, text) {
  return el;
 }
 
+// URLs in tool output become real links: addresses a tool printed are one click away — in
+// the app and on the web alike — and they open in the system browser, never in the window.
+const URL_RE = /(?:https?:\/\/|www\.)[^\s<>"'`)\]]+/g;
+window.Linkify = {
+ text(value) {
+  const source = String(value ?? '');
+  const out = document.createDocumentFragment();
+  let at = 0;
+  for (const match of source.matchAll(URL_RE)) {
+   if (match.index > at) out.append(document.createTextNode(source.slice(at, match.index)));
+   const raw = match[0].replace(/[.,;:!?]+$/, '');
+   const href = raw.startsWith('www.') ? `https://${raw}` : raw;
+   const a = document.createElement('a');
+   a.href = href;
+   a.textContent = raw;
+   a.target = '_blank';
+   a.rel = 'noopener noreferrer';
+   out.append(a);
+   at = match.index + raw.length;
+  }
+  if (at < source.length) out.append(document.createTextNode(source.slice(at)));
+  return out;
+ },
+};
+
 function lines(text, sign, className) {
  const all = String(text).replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
  const shown = all.slice(0, PREVIEW_LINES).map(line => {
@@ -123,9 +148,34 @@ class ToolCard {
   this.el.classList.add(error ? 'is-error' : 'is-done');
   const text = String(output ?? '');
   const shown = text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n… (${text.length - OUTPUT_CHARS} more characters)` : text;
-  if (shown.trim()) this.inner.append(element('pre', `tool-output${error ? ' is-error' : ''}`, shown));
+  if (shown.trim()) {
+   const pre = element('pre', `tool-output${error ? ' is-error' : ''}`);
+   pre.append(window.Linkify ? window.Linkify.text(shown) : document.createTextNode(shown));
+   this.inner.append(pre);
+  }
   if (!this.touched) this.open = Boolean(error) || (!this.plain && window.Effects?.toolsMode === 'open');
   this.sync();
+ }
+
+ // A photo the agent read: small previews under the box itself, always visible (no need to
+ // open the card), and a press opens the picture with zoom in the lightbox.
+ showPhotos(images) {
+  if (!Array.isArray(images) || !images.length) return;
+  this.photos ||= element('div', 'tool-photos');
+  images.forEach((image, index) => {
+   if (!image?.url) return;
+   const button = element('button', 'tool-photo');
+   button.type = 'button';
+   button.setAttribute('aria-label', String(image.name || I18n.t('lightbox.label')));
+   const img = document.createElement('img');
+   img.src = image.url;
+   img.alt = '';
+   img.draggable = false;
+   button.append(img);
+   button.addEventListener('click', () => window.Lightbox?.open(images, index));
+   this.photos.append(button);
+  });
+  if (this.photos.childElementCount && this.photos.parentElement !== this.el) this.el.append(this.photos);
  }
 
  // How long the step took, shown beside a Simple visuals line.

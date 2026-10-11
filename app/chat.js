@@ -527,7 +527,7 @@ class Chat {
  // Deploy a subagent on one focused task. By default it works in the background and the call
  // returns at once — the caller keeps going and checks it with the agents tool; with wait it
  // blocks until this one's report (only for when the caller has nothing else to do).
- async deploySubagent(promptText, label = '', toolId = '', wait = false) {
+ async deploySubagent(promptText, label = '', toolId = '', wait = false, options = {}) {
   // The parent is the run that asked for it, looked up by tool-call id, not whichever chat
   // happens to be on screen: a subagent a parallel run deploys belongs under that run.
   const caller = toolId && this.toolConvs?.get(toolId);
@@ -535,10 +535,14 @@ class Chat {
   if (!parent?.record) return null;
   const path = parent.record.folder;
   const folder = this.library.folders.find(item => samePath(item.path, path)) || { path, name: path.split(/[\\/]/).pop() || path };
+  // A subagent may run on a model of its own (a fast one for mechanical, non-coding work)
+  // with its own thinking effort — chosen by the main agent when it deploys the task.
+  const wanted = options && typeof options.model === 'string' && options.model.trim() ? this.settings.resolve(options.model.trim()) : '';
+  const subModel = wanted && this.settings.find(wanted) ? wanted : this.modelOf(parent);
   const record = this.library.create({ folder, text: label || promptText, attachments: [] });
   // The card that started it can open it: the tool run's id leads back to this conversation.
   if (toolId) (this.subagents ||= new Map()).set(toolId, record.id);
-  this.library.update(record.id, { model: this.modelOf(parent), subagent: true, named: true, title: String(label || 'Subagent task').slice(0, 80), parent: parent.record.id, task: String(promptText || '').replace(/\s+/g, ' ').trim().slice(0, 300) });
+  this.library.update(record.id, { model: subModel, subagent: true, named: true, title: String(label || 'Subagent task').slice(0, 80), parent: parent.record.id, task: String(promptText || '').replace(/\s+/g, ' ').trim().slice(0, 300) });
   const conv = new Conversation(record);
   conv.subagent = true;
   conv.folder = { path: folder.path, name: folder.name };
@@ -555,7 +559,11 @@ class Chat {
   const prompt = { text: promptText, attachments: [], origin: 'agent', from: parent.record.id };
   const bubble = this.userMessage(prompt);
   conv.list.append(bubble);
-  this.run(conv, prompt, this.config(parent), bubble);
+  const subConfig = this.settings.configFor(subModel);
+  // A thinking effort the main agent asked for, when the model offers that level.
+  const effort = options && typeof options.effort === 'string' ? options.effort.trim() : '';
+  if (effort && Array.isArray(subConfig.efforts) && subConfig.efforts.includes(effort)) subConfig.effort = effort;
+  this.run(conv, prompt, subConfig, bubble);
   this.onChange();
   // Background by default: the caller is told the id and keeps working, then checks with
   // agents list/read. Only wait:true blocks here (this one's report, 20 minutes at most).
@@ -800,6 +808,7 @@ class Chat {
 
  newDraft(list) {
   const draft = this.draft = new Conversation(null, list);
+  draft.incognito = false;
   const last = this.library.lastFolder?.();
   if (last) draft.folder = { path: last.path, name: last.name };
   return draft;
@@ -809,10 +818,24 @@ class Chat {
   const draft = this.draft || this.newDraft();
   draft.folder = folder || this.library.lastFolder?.() || null;
   draft.model = '';
+  // A fresh conversation starts normal; the glass button turns the next one incognito.
+  draft.incognito = false;
   this.opening++;
   localStorage.removeItem(LAST_CHAT);
   this.activate(draft);
   this.onChange();
+ }
+
+ // The glass button: incognito on or off for the conversation on screen. A draft carries the
+ // flag into its record when it is first sent; a real conversation flips it on the record,
+ // which hides it from the chat list and keeps the model from saving memories about it.
+ toggleIncognito() {
+  const conv = this.active;
+  if (!conv) return false;
+  conv.incognito = !conv.incognito;
+  if (conv.record) this.library.update(conv.id, { incognito: conv.incognito });
+  this.onChange();
+  return conv.incognito;
  }
 
  open(id) {
@@ -823,6 +846,7 @@ class Chat {
    const record = this.library.chat(id);
    if (!record) return Promise.resolve();
    conv = new Conversation(record);
+   conv.incognito = Boolean(record.incognito);
    this.conversations.set(id, conv);
    // A locked chat opens onto its lock screen; its messages are read only once the password is in.
    if (this.library.isLocked(id)) conv.locked = true;
@@ -839,9 +863,27 @@ class Chat {
    localStorage.setItem(LAST_CHAT, id);
    this.onChange();
   }).catch(error => {
-   if (token === this.opening) this.loading(false);
-   throw error;
+   if (token === this.opening) {
+    this.loading(false);
+    this.loadError(conv, error);
+   }
+   // The reason is on screen now; callers continue instead of dying on an unhandled rejection.
+   return null;
   });
+ }
+
+ // A conversation that fails to load says why, instead of a spinner that never ends. The
+ // thread stays usable (the sidebar toggle is still there) and a later click tries the disk
+ // again — the half-loaded conversation is forgotten here.
+ loadError(conv, error) {
+  if (conv?.list) {
+   const reason = String(error?.message || error || 'unknown error');
+   const note = document.createElement('div');
+   note.className = 'message-note is-error';
+   note.textContent = I18n.t('chat.loadFailed', { reason });
+   conv.list.replaceChildren(note);
+  }
+  if (conv?.id) this.conversations.delete(conv.id);
  }
 
  // A conversation read from disk can take a moment. The spinner waits a beat before covering
@@ -1042,7 +1084,7 @@ class Chat {
   }
   if (!conv.record) {
    if (!conv.folder) return false;
-   conv.record = this.library.create({ folder: conv.folder, text, attachments });
+   conv.record = this.library.create({ folder: conv.folder, text, attachments, incognito: Boolean(conv.incognito) });
    this.library.update(conv.id, { model: this.modelOf(conv), ...(conv.mode === 'plan' ? { mode: 'plan' } : {}) });
    this.conversations.set(conv.id, conv);
    this.draft = null;
@@ -1067,7 +1109,8 @@ class Chat {
    this.main.classList.remove('is-empty');
    this.run(conv, prompt, config, bubble);
   }
-  this.followBottom();
+  // Sending is an explicit move: show the message that was just sent, even from further up.
+  this.scrollToBottom();
   return true;
  }
 
@@ -1293,6 +1336,11 @@ class Chat {
 
  followBottom() {
   if (!this.follow || this.jumpFrame) return;
+  // Never yank a reader who is not at the bottom. If the viewport drifted away — a momentum
+  // scroll the intent events missed, a drag of the scrollbar, an overscroll bounce — the
+  // follow ends here instead of dragging the page down while new thoughts arrive.
+  const distance = this.thread.scrollHeight - this.thread.scrollTop - this.thread.clientHeight;
+  if (distance > FOLLOW_DISTANCE) { this.leaveBottom(); return; }
   // A frame that was scheduled but never ran (the window went hidden before it fired) is
   // stale: it is replaced instead of blocking the follow forever.
   if (this.followFrame && performance.now() - this.followAt < 250) return;
@@ -1718,7 +1766,14 @@ class Chat {
   if (bubble) this.nodes.set(entry, bubble);
   this.openPart(conv, turn);
   this.onChange();
-  return this.drive(conv, turn, async () => { entry.content = await userContent(prompt); });
+  // The user's line reaches the disk at once: a page refreshed (or another device looking)
+  // mid-turn sees the message and what has been written so far, not an empty conversation.
+  if (conv.record) this.save(conv).catch(() => {});
+  return this.drive(conv, turn, async () => {
+   entry.content = await userContent(prompt);
+   // The full content (photos and file blocks) is on disk too, as soon as it is built.
+   if (conv.record) this.save(conv).catch(() => {});
+  });
  }
 
  resume(conv, config) {
@@ -1841,6 +1896,9 @@ class Chat {
   let custom = '';
   try { custom = (await window.Prompts?.textFor?.(this.modelOf(conv))) || ''; } catch {}
   const extra = conv.extraSystem ? `\n\n${conv.extraSystem}` : '';
+  // Incognito: the conversation stays out of the chat list and out of memory, unless the
+  // user explicitly asks for something to be remembered.
+  const incognito = conv.incognito ? '\n\n# Incognito conversation\nThis conversation is incognito: it does not appear in the chat list. Do not save anything about it with memory_save unless the user explicitly asks you to remember something — then save exactly what they asked for, nothing more.' : '';
   if (!this.agent(conv)) return [FORMAT_GUIDE, custom, note].filter(Boolean).join('\n\n');
   const env = await AgentTools.environment();
   const browser = window.browserPanel?.context() || '';
@@ -1851,7 +1909,7 @@ class Chat {
    const items = (await window.openghost?.memory?.list?.()) || [];
    if (items.length) memory = ['# Memory', 'Short facts you saved earlier (with memory_save). They are meant for every chat, not just the one they were written in: keep only durable things another conversation would need, and never save details that belong to one task.', ...items.map(item => `- [${item.id}] ${item.text}`)].join('\n');
   } catch {}
-  return `${AgentPrompt.build({ folder: conv.record.folder, mode: this.settings.mode, env, browser, mcp, memory, plan: this.agentMode === 'plan' ? PLAN_SECTION : '', instructions, skills, serverNote: await this.serverNote(conv) })}${custom ? `\n\n${custom}` : ''}${extra}\n\n# Formatting\n${FORMAT_GUIDE}${note}`;
+  return `${AgentPrompt.build({ folder: conv.record.folder, mode: this.settings.mode, env, browser, mcp, memory, plan: this.agentMode === 'plan' ? PLAN_SECTION : '', instructions, skills, serverNote: await this.serverNote(conv) })}${custom ? `\n\n${custom}` : ''}${extra}${incognito}\n\n# Formatting\n${FORMAT_GUIDE}${note}`;
  }
 
  // When this install is the home server, the prompt says so — and who is writing right now:
@@ -1892,21 +1950,30 @@ class Chat {
  // message, a message from another device over the network, the website, a subagent asking
  // its main agent, the main answering one of its own runs, or an unrelated agent.
  addressOf(conv, entry) {
-  const text = entry.content ?? entry.text ?? '';
-  if (entry.origin === 'discord') return `[sent from Discord] ${text}`;
-  if (entry.device) return `[sent from ${entry.device} over the network — answer on this machine] ${text}`;
-  if (entry.origin === 'web') return `[sent from the website] ${text}`;
-  if (entry.origin !== 'agent') return text;
+  const content = entry.content ?? entry.text ?? '';
+  const prefix = this.addressPrefix(conv, entry);
+  // A message with photos carries structured parts (image_url blocks), not a string: the
+  // address becomes its own text part so the pictures survive instead of turning into
+  // "[object Object]" on the way to the model.
+  if (Array.isArray(content)) return prefix ? [{ type: 'text', text: prefix.trimEnd() }, ...content] : content;
+  const text = typeof content === 'string' ? content : String(content || '');
+  return prefix ? `${prefix}${text}` : text;
+ }
+
+ addressPrefix(conv, entry) {
+  if (entry.origin === 'discord') return '[sent from Discord] ';
+  if (entry.device) return `[sent from ${entry.device} over the network — answer on this machine] `;
+  if (entry.origin === 'web') return '[sent from the website] ';
+  if (entry.origin !== 'agent') return '';
   const source = entry.from ? this.library.chat(entry.from) : null;
   const name = source ? String(source.title || source.id) : 'another agent';
   if (source && source.parent === conv.id) {
    const task = source.task ? `, its task was: ${source.task}` : '';
-   return `[from your launched sub-agent "${name}"${task}] ${text}`;
+   return `[from your launched sub-agent "${name}"${task}] `;
   }
-  if (source && conv.record?.parent === source.id) return `[from main agent] ${text}`;
-  return `[from agent "${name}"] ${text}`;
+  if (source && conv.record?.parent === source.id) return '[from main agent] ';
+  return `[from agent "${name}"] `;
  }
-
  history(conv) {
   const out = [], messages = conv.messages;
   let start = 0;
@@ -2136,13 +2203,19 @@ class Chat {
      name: picture.label || `Picture ${n + 1}`,
      note: '',
     }));
-    const slider = new MediaSlider(pictures);
-    if (simple && card) {
-     // The picture belongs to the step: opening its line shows the image itself.
-     card.inner.append(slider.el);
-     if (!card.touched) { card.open = true; card.sync(); }
+    if (name === 'read_file' && card) {
+     // A photo the agent read stays visible right under its box — no expanding needed —
+     // and a press opens it with pinch, wheel or double-tap zoom.
+     card.showPhotos(pictures);
     } else {
-     view.el.append(slider.el);
+     const slider = new MediaSlider(pictures);
+     if (simple && card) {
+      // The picture belongs to the step: opening its line shows the image itself.
+      card.inner.append(slider.el);
+      if (!card.touched) { card.open = true; card.sync(); }
+     } else {
+      view.el.append(slider.el);
+     }
     }
     if (conv === this.active) this.followBottom();
    }

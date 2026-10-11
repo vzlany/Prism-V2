@@ -415,7 +415,7 @@ class ChatList {
 
  // Newest first by default; once a folder has been sorted by hand, its order stands.
  sorterFor(path) {
-  const list = this.library.chats.filter(chat => key(chat.folder) === key(path));
+  const list = this.library.chats.filter(chat => key(chat.folder) === key(path) && !chat.incognito);
   const manual = list.some(chat => Number.isFinite(chat.order));
   if (!manual) return (a, b) => (b.created || b.updated || 0) - (a.created || a.updated || 0);
   // A folder sorted by hand keeps that order — but a chat made after the last drag has no
@@ -514,7 +514,7 @@ class ChatList {
   const lib = this.library, query = this.query.trim().toLowerCase(), seen = new Set();
   // A locked chat's title is sealed, so a search never finds it.
   const match = chat => !query || (this.library.titleOf(chat) || '').toLowerCase().includes(query);
-  const live = lib.chats.filter(chat => (!chat.subagent || chat.parent) && match(chat));
+  const live = lib.chats.filter(chat => (!chat.subagent || chat.parent) && !chat.incognito && match(chat));
   const byCreated = (a, b) => (b.created || b.updated || 0) - (a.created || a.updated || 0);
   const pinned = this.withChildren(live.filter(chat => chat.pinned).sort(byCreated));
   const manualFolders = lib.folders.some(folder => Number.isFinite(folder.order));
@@ -757,11 +757,23 @@ class ChatList {
 
  askDeleteFolder(group) {
   if (!group || group.section.__removing) return;
+  const count = this.library.chats.filter(chat => key(chat.folder) === key(group.path) && !chat.incognito).length;
+  // A category that still holds conversations is never deleted — move them out first.
+  // The trash flashes red and says how many are in the way.
+  if (count) {
+   label(group.remove, I18n.t('folder.notEmpty', { count }));
+   group.section.classList.add('is-refusing');
+   clearTimeout(group.refuseTimer);
+   group.refuseTimer = setTimeout(() => {
+    group.section.classList.remove('is-refusing');
+    label(group.remove, I18n.t('folder.delete'));
+   }, 2600);
+   return;
+  }
   if (group.confirm) { this.removeFolder(group); return; }
-  const count = this.library.chats.filter(chat => key(chat.folder) === key(group.path)).length;
   group.confirm = true;
   group.section.classList.add('is-confirming');
-  label(group.remove, I18n.t(count ? 'folder.deleteConfirm' : 'folder.deleteEmpty', { count }));
+  label(group.remove, I18n.t('folder.deleteEmpty'));
   clearTimeout(group.timer);
   group.timer = setTimeout(() => this.keepFolder(group), CONFIRM_TIME);
  }

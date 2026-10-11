@@ -236,9 +236,9 @@ class Library {
   return this.chats.filter(chat => samePath(chat.folder, folder.path));
  }
 
- create({ folder, text, attachments }) {
+ create({ folder, text, attachments, incognito = false }) {
   const now = Date.now(), known = this.folder(folder);
-  const chat = { id: uid(), title: titleFrom(text, attachments), folder: known.path, created: now, updated: now, pinned: false, named: false };
+  const chat = { id: uid(), title: titleFrom(text, attachments), folder: known.path, created: now, updated: now, pinned: false, named: false, ...(incognito ? { incognito: true } : {}) };
   this.chats.push(chat);
   this.touched.set(chat.id, now);
   this.folderTouched.set(key(known.path), now);

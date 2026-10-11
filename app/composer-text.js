@@ -122,6 +122,8 @@ class ComposerText {
  }
 
  onPaste(e) {
+  // Any paste marks the moment: an Enter that rides along with it must not send the message.
+  window.__prismPastedAt = Date.now();
   const text = e.clipboardData?.getData('text/plain');
   if (!text || !LinkChip.find(text).length) return;
   e.preventDefault();

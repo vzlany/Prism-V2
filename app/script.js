@@ -83,7 +83,7 @@ folderPill = new FolderPill({ button: document.querySelector('.composer-folder')
 instructionsPill = new InstructionsPill({ button: document.querySelector('.composer-instructions'), menu: document.querySelector('.instructions-menu'), chat, library });
 planButton?.addEventListener('click', () => chat.setAgentMode(chat.agentMode === 'plan' ? 'build' : 'plan'));
 window.PrismPlan = { approve: () => chat.setAgentMode('build') };
-window.__prismSubagent = (label, prompt, toolId, wait) => chat.deploySubagent(prompt, label, toolId, wait);
+window.__prismSubagent = (label, prompt, toolId, wait, options) => chat.deploySubagent(prompt, label, toolId, wait, options);
 // The 'agents' tool: list the other agents, read one, or send one a message.
 window.__prismAgents = (args, toolId) => chat.agents(args, toolId);
 // The 'todo' tool: one live to-do box per conversation.
@@ -104,6 +104,13 @@ new ParallelPanel({
  },
 });
 const parallelMeter = new ParallelMeter({ button: document.querySelector('.composer-parallels') });
+// On the website (a server's web UI) the parallel button is gone: the AI launches its own
+// parallel agents with the subagent tool — with a model and thinking effort of its choosing
+// — so a second way to start runs from here is only noise. The desktop app keeps the panel.
+if (window.openghost?.web) {
+ document.querySelector('.composer-parallel')?.setAttribute('hidden', '');
+ document.querySelector('.composer-parallels')?.setAttribute('hidden', '');
+}
 // Other devices on the network: the DEVICES row in the sidebar, and the launch picker that
 // asks which device this window should use when another answers. A remote window (the
 // server's UI inside the app) carries ?from=; this page is then a client.
@@ -307,11 +314,28 @@ window.openghost?.store?.onChatChange?.(id => {
  const conv = chat.conversations.get(id);
  if (!conv || conv.turn || conv.waiting) return;
  clearTimeout(chatSync.get(id));
- chatSync.set(id, setTimeout(() => {
+ const busy = Boolean(window.Presence?.isBusy?.(id));
+ chatSync.set(id, setTimeout(async () => {
   chatSync.delete(id);
   const current = chat.conversations.get(id);
-  if (!current || current.turn || current.waiting || window.Presence?.isBusy?.(id)) return;
+  if (!current || current.turn || current.waiting) return;
   if (Date.now() - (current.savedAt || 0) < 1500) return;
+  if (busy) {
+   // A run is going on elsewhere (the app, the Discord bot). The live card shows the work,
+   // but a message the other surface just wrote — the user's own line — must not wait for
+   // the end: read the file quietly and rebuild the thread only when it holds something new.
+   if (window.Presence?.isBusy?.(id)) {
+    try {
+     const { messages } = await library.conversation(id);
+     const seen = current.messages || [];
+     const textOf = entry => String(entry?.content ?? entry?.text ?? '');
+     const grew = messages.length !== seen.length
+      || textOf(messages[messages.length - 1]) !== textOf(seen[seen.length - 1]);
+     if (grew) chat.refresh(id).catch(() => {});
+    } catch {}
+   }
+   return;
+  }
   chat.refresh(id).catch(() => {});
  }, 200));
 });
@@ -389,6 +413,23 @@ new ContextCircle({
 });
 const modeButton = document.querySelector('.composer-mode');
 const browserToggle = document.querySelector('.browser-toggle');
+// The glass button: incognito for a new conversation — it stays out of the chat list and
+// nothing goes to memory unless the user asks. Pressing it again turns the conversation
+// back into a normal one, even after it has started.
+const incognitoToggle = document.querySelector('.incognito-toggle');
+function syncIncognito() {
+ const conv = chat.active;
+ const on = Boolean(conv && conv.incognito);
+ incognitoToggle.hidden = !(on || (conv && !conv.record && !conv.locked));
+ incognitoToggle.classList.toggle('is-on', on);
+ incognitoToggle.setAttribute('aria-pressed', String(on));
+ const text = I18n.t(on ? 'incognito.on' : 'incognito.off');
+ incognitoToggle.title = text;
+ incognitoToggle.setAttribute('aria-label', text);
+}
+incognitoToggle.addEventListener('click', () => { chat.toggleIncognito(); syncIncognito(); });
+window.__prismIncognitoReady = true;
+syncIncognito();
 let browserPanel = null;
 let modePicker = null;
 if (AgentTools.available) {
@@ -608,6 +649,7 @@ function syncAll() {
   if (!chatList) return;
   switchDraft();
   syncComposer();
+  if (window.__prismIncognitoReady) syncIncognito();
   folderPill.sync();
   chatList.render();
   lockScreen.sync();
@@ -661,6 +703,11 @@ composerInput.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
+  // On the website Enter makes a new line — the Send button sends. A phone keyboard's Enter
+  // is far too easy to hit while pasting or writing; in the desktop app Enter still sends.
+  if (window.openghost?.web) return;
+  // A paste can carry a trailing Enter on some keyboards: never let it fire a send.
+  if (Date.now() - (window.__prismPastedAt || 0) < 400) return;
   event.preventDefault();
   send();
 });

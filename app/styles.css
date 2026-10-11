@@ -484,8 +484,7 @@ body {
 .chats-folder-action:hover,
 .chats-folder-action:focus-visible {
   background: rgba(var(--fg-rgb), 0.08);
-  color: rgba(var(--fg-rgb), 0.92);
-}
+  color: rgba(var(--fg-rgb), 0.92);}
 
 .chats-folder-action .glyph {
   width: 15px;
@@ -496,6 +495,54 @@ body {
 .chats-folder.is-confirming .chats-folder-action.is-delete {
   background: rgba(var(--danger-rgb), 0.16);
   color: rgb(var(--danger-rgb));
+}
+
+/* A category that still holds conversations: the trash flashes red instead of arming. */
+.chats-folder-head.is-refusing .chats-folder-action.is-delete {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  background: rgba(var(--danger-rgb), 0.18);
+  color: rgb(255, 170, 170);
+}
+
+/* A photo the agent read sits under its tool box, always visible; a press zooms it. */
+.tool-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.tool-photo {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  overflow: hidden;
+  background: rgba(var(--fg-rgb), 0.05);
+  cursor: zoom-in;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.tool-photo:hover,
+.tool-photo:focus-visible {
+  box-shadow: 0 0 0 1px rgba(var(--fg-rgb), 0.22);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.tool-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .tool-photo { width: 76px; height: 76px; }
 }
 
 .chats-folder.is-confirming .trash-lid {
@@ -1183,7 +1230,9 @@ body.is-resizing-sidebar .main {
 .thread-loading {
   position: absolute;
   inset: 0;
-  z-index: 4;
+  /* Below the sidebar and browser toggles (z-index 3): a conversation that is slow — or
+     stuck — to load must never take away the button that opens the conversation list. */
+  z-index: 2;
   display: grid;
   place-content: center;
   justify-items: center;
@@ -7597,6 +7646,38 @@ a.settings-button {
   right: var(--toggle-inset);
 }
 
+/* The glass button: the next conversation (or this one) runs incognito — out of the chat
+   list and out of memory. It sits beside the globe, and stays while incognito is on so it
+   can be turned back into a normal conversation. */
+.incognito-toggle {
+  position: absolute;
+  z-index: 3;
+  top: var(--toggle-inset);
+  right: calc(var(--toggle-inset) + var(--icon-button-size, 32px) + 8px);
+  display: grid;
+  place-items: center;
+  width: var(--icon-button-size, 32px);
+  height: var(--icon-button-size, 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(var(--fg-rgb), 0.05);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  filter: grayscale(1) opacity(0.55);
+  transition: background-color 0.2s ease, filter 0.2s ease, transform 0.2s ease;
+}
+
+.incognito-toggle[hidden] { display: none; }
+.incognito-toggle:hover { background: rgba(var(--fg-rgb), 0.1); filter: none; }
+.incognito-toggle:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); outline: none; }
+.incognito-toggle.is-on {
+  background: rgba(var(--fg-rgb), 0.14);
+  filter: none;
+  box-shadow: inset 0 0 0 1px rgba(var(--fg-rgb), 0.28);
+}
+
 .browser-toggle[hidden] {
   display: none;
 }
@@ -8834,6 +8915,7 @@ body.has-lightbox{overflow:hidden}
 /* Prism V2: how many runs are working, left of the composer toolbar */
 .composer-parallels{display:flex;align-items:center;gap:7px;height:var(--icon-button-size,32px);padding:0 11px 0 9px;border:0;border-radius:calc(var(--icon-button-size,32px)/2);outline:none;background:rgba(var(--fg-rgb),.05);color:rgba(var(--fg-rgb),.72);font:inherit;font-size:12px;line-height:1;cursor:pointer;white-space:nowrap;transition:background-color .2s ease,color .2s ease}
 .composer-parallels[hidden]{display:none}
+parallel-button[hidden]{display:none}
 .composer-parallels:hover{background:rgba(var(--fg-rgb),.09);color:rgba(var(--fg-rgb),.92)}
 .composer-parallels:focus-visible{box-shadow:0 0 0 2px var(--focus-ring)}
 .parallels-dots{display:inline-flex;align-items:center;gap:3px}
@@ -9198,6 +9280,15 @@ html.is-simple .thread-list > .message{content-visibility:visible}
 .instructions-x:hover,.instructions-x:focus-visible{background:rgba(var(--danger-rgb),.16);color:rgb(255,170,170);outline:none}
 .instructions-file-input{display:none}
 
+/* Prism V2: a touch screen has no hover — the row and folder actions stay visible there, so
+   deleting a conversation or a category never waits for a hover that cannot happen. */
+@media (hover: none), (pointer: coarse) {
+ .chat-actions { pointer-events: auto; }
+ .chat-action,
+ .chats-folder-action { opacity: 1; transform: none; pointer-events: auto; }
+ .chat-row .chat-time { display: none; }
+}
+
 /* Prism V2: on a phone the conversation breathes smaller — tighter bubbles, lighter type */
 @media (max-width: 640px){
  html{--composer-font-size:13.5px;--message-line-height:1.5}
@@ -9403,6 +9494,9 @@ html.is-simple .thread-list > .message{content-visibility:visible}
 .chats-heading + .chats-dashboard{margin-top:2px}
 
 .dashboard-panel{position:fixed;inset:0;margin:auto;width:min(720px, calc(100vw - 26px));height:fit-content;max-height:min(84vh, 880px);overflow-y:auto;padding:16px 18px 18px;border:0;border-radius:22px;background:linear-gradient(180deg, rgba(32,33,38,.98), rgba(22,23,27,.98));box-shadow:inset 0 0 0 1px rgba(var(--fg-rgb),.09),0 30px 90px rgba(0,0,0,.65);color:rgba(var(--fg-rgb),.88);scrollbar-width:thin;scrollbar-color:rgba(var(--fg-rgb),.15) transparent}
+/* The System panel scrolls as one piece, with the head (and its X) staying in reach. */
+.system-panel{overscroll-behavior:contain;scrollbar-gutter:stable}
+.system-panel .dash-head{position:sticky;top:-16px;z-index:2;margin:-8px -6px 8px;padding:10px 6px 8px;background:linear-gradient(180deg, rgba(30,31,36,.99) 72%, rgba(30,31,36,0))}
 .dashboard-panel::backdrop{background:rgba(4,5,8,.72)}
 .dash-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
 .dash-logo{display:grid;place-items:center;flex:none;width:38px;height:38px;border-radius:12px;background:rgba(var(--fg-rgb),.06);box-shadow:inset 0 0 0 1px rgba(var(--fg-rgb),.08)}
@@ -9441,6 +9535,9 @@ html.is-simple .thread-list > .message{content-visibility:visible}
 .dash-foot{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:16px;padding-top:11px;border-top:1px solid rgba(var(--fg-rgb),.07);font-size:11px;color:var(--fg-tertiary)}
 @media (max-width: 820px){
  .dashboard-panel{width:calc(100vw - 12px);max-height:calc(100vh - 12px);margin:auto;border-radius:16px;padding:13px 12px 14px}
+ /* A definite height on a phone, or a long console has nowhere to scroll inside. */
+ .system-panel{height:calc(100dvh - 24px);max-height:calc(100dvh - 24px)}
+ .system-panel .dash-head{top:-13px;margin:-6px -4px 8px;padding:9px 4px 7px}
  .dash-bar{display:none}
 }
 
