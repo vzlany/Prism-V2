@@ -222,8 +222,20 @@ function pushLiveSoon() {
 function flushPresence() {
  presenceTimer = 0;
  const file = path.join(app.getPath('userData'), 'presence.json');
+ // Merge, never overwrite: the Discord bot (and any other engine) publishes its own runs
+ // into the same file, and its live card must survive this heartbeat.
+ let runs = [...presenceRuns.values()];
+ try {
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const mine = new Set(presenceRuns.keys());
+  for (const run of Array.isArray(data?.runs) ? data.runs : []) {
+   if (!run?.id || mine.has(run.id)) continue;
+   if (Date.now() - (Number(run.at) || 0) > 60000) continue;
+   runs.push(run);
+  }
+ } catch {}
  const tmp = `${file}.tmp`;
- fs.promises.writeFile(tmp, JSON.stringify({ at: Date.now(), runs: [...presenceRuns.values()] }))
+ fs.promises.writeFile(tmp, JSON.stringify({ at: Date.now(), runs }))
   .then(() => fs.promises.rename(tmp, file))
   .catch(() => {});
 }

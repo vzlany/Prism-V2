@@ -112,7 +112,13 @@ const server = createServer((req, res) => {
    try {
     const data = JSON.parse(body);
     if (Array.isArray(data?.runs)) {
-     desktopPresence = data.runs.filter(run => run?.id);
+     // The app pushes only its own runs; runs published by other engines (the Discord bot's
+     // live mirror lands in presence.json) stay, or they would blink out of every page on
+     // each push.
+     const incoming = data.runs.filter(run => run?.id);
+     const ids = new Set(incoming.map(run => run.id));
+     const keep = desktopPresence.filter(run => run?.id && !ids.has(run.id) && Date.now() - (Number(run.at) || 0) < PRESENCE_STALE);
+     desktopPresence = [...incoming, ...keep];
      broadcastPresence();
     }
    } catch {}

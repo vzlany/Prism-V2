@@ -51,6 +51,21 @@ here is in this repository; nothing else was removed.
   works on the web and from Discord by asking the agent — "update Prism V2" runs the
   `update_prism` tool, which downloads, applies and restarts it. Releases are public, so no
   token is needed; a GitHub token can be set anyway for rate limits or a private fork.
+- **One Prism per machine** — every engine (the app, the headless server, its web server and
+  the Discord bot) announces itself in a small instance registry together with its build.
+  When an update lands, the new build stops whatever still runs from the old one before it
+  takes over — a hand-started web server, an app a stale autostart launched, an old-era bot —
+  clears the old install trees, and rewrites the Linux autostart entry to the current install
+  (on Windows the Setup kills leftover `Prism V2.exe` processes and drops startup shortcuts
+  whose target is gone; the app rewrites its own shortcut at every start). A web server that
+  finds its port taken no longer gives up and leaves the machine without a UI: an older build
+  holding the port is stopped and the port is taken over, while a build of the same version
+  keeps it and the newcomer stands by, retrying until the port frees up. This is the cure for
+  "three Prisms fought over port 8787 after an update".
+- **Incognito conversations** — the glass button beside the globe (in the app and on the
+  web) turns the next conversation — or the one on screen — incognito: it stays out of the
+  chat list everywhere, and the model is told not to save anything to memory unless you ask.
+  Pressing the glass again turns it back into a normal conversation, even after it started.
 - **The website runs its turns in the app.** When the desktop app is running, a message sent
   from `prism web` (the phone) is handed to the app through a small file bridge: the app runs
   the turn with its tools, browser, skills and keys, streams it in its own window, and the
@@ -98,7 +113,14 @@ here is in this repository; nothing else was removed.
   offers every model and every thinking effort the app has, even though it holds no keys.
 - **Run in parallel from the phone too** — the parallel button works on the web, hands each
   run to the app, and the Runs tab marks them completed as they finish. The panel shows the
-  message about to be sent, and the button wears OpenCode's breathing-dots indicator.
+  message about to be sent, and the button wears OpenCode's breathing-dots indicator. On a
+  server's web UI the button is gone: there the AI starts its own parallel agents with the
+  `subagent` tool — including the model and thinking effort they run on (a fast, cheap model
+  for mechanical, non-coding checks like scanning mods for malware footprints; the chat's own
+  model for code) — so the second way to start runs from the wrong side was removed.
+- **Subagents choose their own model and effort** — the `subagent` tool takes optional
+  `model` (provider:id) and `effort` arguments; the Runs tab and the subagent's own chat show
+  which model answered it.
 - **Parallel runs are children in the list** — every run (and subagent) started from a
   conversation is drawn under it in the sidebar, indented, with its own busy ghost.
 
@@ -141,6 +163,19 @@ here is in this repository; nothing else was removed.
   constant speed, half a loop apart; the `screenshot` tool captures the whole screen or one
   window through Electron itself, so it works without ffmpeg and antivirus has no script to
   flag.
+- **Photos the agent read, one press away** — when a tool reads a picture, small previews sit
+  right under its box (no expanding needed) and a press opens them in the lightbox with
+  pinch, wheel or double-tap zoom; URLs a tool printed are real links, in the app and on the
+  web alike.
+- **A phone that does not fight back** — on the website Enter makes a new line (the Send
+  button sends) and a pasted multi-line block can never fire a send; the thread stops
+  following the moment you scroll up, so new thoughts and tool cards never drag the page down
+  under your finger; a conversation that fails to load says why, with a retry; the loading
+  veil no longer covers the button that opens the conversation list; on touch screens the
+  row actions (pin, lock, delete) are always visible, and a category that still holds
+  conversations flashes red instead of deleting.
+- **The System panel** (on a server) scrolls as one piece with its head pinned, and wears an
+  X like the Dashboard's.
 - **Copy that works everywhere** — including a phone on plain http, where the browser
   clipboard is unavailable; the fallback still copies and the buttons answer.
 - **New Folder menu** — the last five workspaces, each forgettable with an ×, and a last entry
@@ -161,6 +196,10 @@ here is in this repository; nothing else was removed.
 
 ### Under the hood
 
+- **Photos from any surface reach the model** — a message that carries pictures keeps its
+  image parts all the way to the model, whichever surface wrote it (the phone, another
+  device, Discord); relayed messages used to flatten them into `[object Object]`, so an
+  attached photo quietly never arrived.
 - **Prism V2 naming and data** — the product, installer, About page and prompts say Prism V2;
   data lives in `%APPDATA%\Prism V2` with a one-time copy of an existing Prism folder; the
   updater points at this repository; the old `prism` command may still point at an older
@@ -311,6 +350,16 @@ without asking — that is the point (you are the only allowed user), so keep th
 private and use `--no-tools` if you want chat only. Settings → **Discord** holds the token,
 the bot autostart, the "DM me when done" switch and the conversation list; the app's
 agent-mode menu also ends with a **DM me on Discord** switch for the same thing.
+
+Files sent in the DM are downloaded into the store and handed to the turn — photos arrive as
+pictures the model can see — and the bot's run shows up live in the app and on the website
+the moment the message lands: your line appears at once, then the Thought box and the tool
+cards, and the website's Stop reaches the bot's turn too. While the bot itself is idle but
+the app (or the website) is working, its status reads **idle** with `🛠️ Working in app…`;
+its own turns take priority, with **dnd** and the exact phrase. The agent can also message
+you on its own with the **send_discord_message** tool — a short "on it" right after its
+first thoughts and one-line updates while it works — and `[!TIP]` / `[!WARNING]` markers in
+its answers arrive as **ℹ️ TIP** / **⚠️ WARNING**.
 
 ## The full UI on your phone, across networks
 
