@@ -713,9 +713,10 @@ class Chat {
  }
 
  // ---- The todo tool ----------------------------------------------------------------------
- // One live list per conversation, drawn as a single box that stays where it first appeared:
- // updates redraw it in place instead of moving it down the thread. A step is idle (gray
- // circle), doing (spinning white circle), done (green check) or failed (red cross).
+ // One live list per conversation, drawn as a single box that follows the work: every update
+ // moves it to the newest point of the thread (where the todo tool was just called) instead
+ // of leaving it behind where it first appeared. A step is idle (gray circle), doing
+ // (spinning white circle), done (green check) or failed (red cross).
  async todo(args = {}, toolId = '') {
   const selfId = this.toolConvs?.get(toolId) || this.active?.id || '';
   const conv = this.conversations.get(selfId) || this.active;
@@ -753,9 +754,10 @@ class Chat {
   return `Todo (${done}/${list.length} done):\n${list.map(item => `${sign[item.state] || '[ ]'} ${item.text}`).join('\n')}`;
  }
 
- // The one todo box: it stays where it first appeared; a change redraws it in place, and a
- // stale box from an older position (after a reload, a store refresh) is removed so only one
- // ever shows.
+ // The one todo box: every update relocates it to the newest point of the thread — the place
+ // the todo tool was just called — so the checklist always sits next to what it describes.
+ // The old box is removed rather than left behind, and a stale box from an older render (a
+ // reload, a store refresh) is cleaned up so only one ever shows.
  renderTodos(conv) {
   if (!conv) return;
   for (const stale of conv.list.querySelectorAll(':scope > .todo-card')) {
@@ -767,8 +769,10 @@ class Chat {
    return;
   }
   const fresh = new TodoCard(conv.todos);
-  if (conv.todoCard?.el.parentElement === conv.list) conv.todoCard.el.replaceWith(fresh.el);
-  else conv.list.append(fresh.el);
+  // Detach the old box first, then append the fresh one at the end: nothing is injected
+  // mid-thread, so scrolling through history stays undisturbed apart from the box itself.
+  conv.todoCard?.el.remove();
+  conv.list.append(fresh.el);
   conv.todoCard = fresh;
   if (conv === this.active) this.followBottom();
  }
