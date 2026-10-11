@@ -1076,22 +1076,57 @@ class Chat {
   conv.messages.push(entry);
   this.nodes.set(entry, bubble);
   conv.waiting = Date.now();
-  clearTimeout(conv.waitingTimer);
-  conv.waitingTimer = setTimeout(() => {
-   if (conv.waiting && window.Presence?.isBusy?.(conv.id)) return;
+  const requestId = `d-${Date.now().toString(36)}`;
+  // The handoff can fail — the app is not running after all, or it died before reading the
+  // request. Rather than leaving the message hanging, the turn falls back to this page: the
+  // engine behind it is right here, so the reply still comes.
+  let settled = false;
+  const runHere = refused => {
+   if (settled) return;
+   settled = true;
+   clearTimeout(conv.waitingTimer);
    conv.waiting = 0;
-   const note = document.createElement('div');
-   note.className = 'message-note';
-   note.textContent = I18n.t('chat.delegateTimeout');
-   conv.list.append(note);
-   this.onChange();
+   if (window.Presence?.isBusy?.(conv.id)) return;
+   const config = this.config(conv);
+   if (!config.ready) {
+    this.settings.open(I18n.t('settings.key.needed'), config.provider);
+    this.onChange();
+    return;
+   }
+   if (refused) {
+    const note = document.createElement('div');
+    note.className = 'message-note';
+    note.textContent = I18n.t('chat.delegateFallback');
+    conv.list.append(note);
+   }
+   this.resume(conv, config);
+   if (conv === this.active) this.followBottom();
+  };
+  clearTimeout(conv.waitingTimer);
+  conv.waitingTimer = setTimeout(async () => {
+   if (settled) return;
+   // Still working somewhere? Give it more room before deciding anything.
+   if (window.Presence?.isBusy?.(conv.id)) {
+    conv.waitingTimer = setTimeout(() => runHere(true), 60000);
+    return;
+   }
+   // Ask the server whether the app ever took the request: a file still waiting there means
+   // it never ran. A file already gone means it was picked up — its own turn gets the time.
+   const state = await window.openghost?.delegate?.check?.(requestId).catch(() => null);
+   if (state && state.exists === false) {
+    conv.waitingTimer = setTimeout(() => { if (!settled && !window.Presence?.isBusy?.(conv.id)) runHere(true); }, 60000);
+    return;
+   }
+   runHere(true);
   }, 25000);
   this.onChange();
   userContent(prompt).then(content => {
    entry.content = content;
    this.library.saveMessages(conv.id, conv.messages, conv.tokens, conv.spend || null);
-   window.openghost.delegate.send({ id: `d-${Date.now().toString(36)}`, chatId: conv.id, at: Date.now(), model: conv.record?.model || this.modelOf(conv) });
+   window.openghost.delegate.send({ id: requestId, chatId: conv.id, at: Date.now(), model: conv.record?.model || this.modelOf(conv) });
   }).catch(() => {});
+  // The server answers whether the app actually took it: a refusal falls back right away.
+  try { window.openghost.delegate.onStatus?.(status => { if (status?.id === requestId && !status.ok) runHere(true); }); } catch {}
  }
 
  // Whether this chat is working anywhere: here, waiting for the app to pick it up, or on
@@ -1442,14 +1477,18 @@ class Chat {
    if (!prev.classList?.contains('message') || !prev.classList?.contains('is-assistant')) return null;
    const prevEntry = prev.__entry;
    if (!entry?.turn || !prevEntry?.turn || entry.turn !== prevEntry.turn) return null;
-   const last = prev.lastElementChild;
-   if (last?.classList?.contains('tool-group')) return last;
+   // The line may sit above the working dots at the end of the message. A line only absorbs
+   // more calls while nothing happened between them: written text or a real Thought closes
+   // the stretch (the older line stays as it is), and the next call starts a fresh one.
+   let found = null;
    for (const child of prev.children) {
+    if (child.classList.contains('tool-group')) { found = child; continue; }
     if (child.classList.contains('message-status')) continue;
-    if (child.classList.contains('message-thinking')) continue;
-    if (child.classList.contains('message-content')) continue;
+    if (child.classList.contains('message-thinking')) { if (child.hidden) continue; return null; }
+    if (child.classList.contains('message-content')) { if (child.childElementCount || child.textContent.trim()) return null; continue; }
     return null;
    }
+   if (found) return found;
    prev = prev.previousElementSibling;
   }
   return null;
@@ -1535,7 +1574,9 @@ class Chat {
    parts.push(latest.state === 'running' ? latest.label.running : latest.label.done);
   }
   const failed = items.filter(item => item.state === 'error').length;
-  const text = parts.join(', ') || (working ? 'Working' : 'Done');
+  // "Ran 1 commands" reads wrong: a count of one takes the singular noun.
+  const text = (parts.join(', ') || (working ? 'Working' : 'Done'))
+   .replace(/\b1 (files|commands|screenshots|steps|folders|messages|searches|images|links|pages)\b/gi, (_, word) => `1 ${word.replace(/s$/i, '')}`);
   const label = group.querySelector('.tool-group-label');
   if (label) label.textContent = failed ? `${text} · ${failed} failed` : text;
   group.classList.toggle('is-working', working);
@@ -1895,7 +1936,10 @@ class Chat {
        if (!stream.content.trim()) return;
        turn.text = true;
        part.entry.content = join(base, stream.content);
-       this.dismissGhost(view);
+       // The server's quiet dots stay pinned at the end of the message while words stream;
+       // the app's ghost keeps its behavior and steps aside once the reply starts.
+       if (document.documentElement.classList.contains('is-server-mode')) this.showGhost(view);
+       else this.dismissGhost(view);
        // A completed <send_discord_message> block goes to the user's Discord right away and
        // leaves the reply; only its own DMs carry it, never the chat text.
        this.flushDiscord(conv, part);

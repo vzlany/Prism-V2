@@ -603,7 +603,7 @@ ipcMain.handle('devices:prompt', async event => {
  if (HIDDEN || serverMode() || deviceChoice) return { show: false };
  // Give the network a moment: the picker only appears when another device answers.
  const started = Date.now();
- while (Date.now() - started < 4000 && deviceBeacon && deviceBeacon.list().devices.length === 0) {
+ while (Date.now() - started < 8000 && deviceBeacon && deviceBeacon.list().devices.length === 0) {
   await new Promise(resolve => setTimeout(resolve, 250));
  }
  const list = deviceBeacon ? deviceBeacon.list() : { devices: [] };

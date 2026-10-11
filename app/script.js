@@ -109,8 +109,20 @@ const parallelMeter = new ParallelMeter({ button: document.querySelector('.compo
 // server's UI inside the app) carries ?from=; this page is then a client.
 const FROM_DEVICE = (() => { try { return new URLSearchParams(location.search).get('from') || ''; } catch { return ''; } })();
 const deviceMenu = new DeviceMenu({ menu: document.querySelector('.device-menu') });
-const devicePicker = new DevicePicker({ root: main });
-devicePicker.maybeShow();
+ const devicePicker = new DevicePicker({ root: main });
+// The launch question: the app waits for another device to answer (the prompt already waits
+// a few seconds); when none showed up in time, one more quiet attempt later covers a device
+// that booted slowly — skipped once the user has started a conversation.
+const askDevices = async retry => {
+ const shown = await devicePicker.maybeShow();
+ if (shown || !retry) return;
+ setTimeout(async () => {
+  if (chat.activeId) return;
+  if (chatList?.list?.querySelector('.chat-row.is-active')) return;
+  await askDevices(false);
+ }, 25000);
+};
+askDevices(true);
 // A browser (a phone, another computer) arriving with more than one device online gets the
 // same question the app asks at launch — once per tab, so a reload does not nag.
 const webDeviceAsk = async () => {
@@ -358,7 +370,10 @@ if (AgentTools.available) {
   const ownDesktop = window.openghost?.desktop === true;
   const applyDeviceRow = () => window.openghost?.devices?.list?.().then(data => {
    const remotes = (data?.devices || []).length;
-   chatList?.setDevices(remotes > 0 && !(data?.server === true && ownDesktop && !FROM_DEVICE));
+   // The row belongs to the app's home screen and to plain browsers. Inside a remote window
+   // (the app already connected to another device) the banner is the way back, and the
+   // switcher stays out of the way. Never on the server's own desktop screen either.
+   chatList?.setDevices(remotes > 0 && !FROM_DEVICE && !(data?.server === true && ownDesktop));
   }).catch(() => {});
   applyDeviceRow();
   setInterval(applyDeviceRow, 10000);

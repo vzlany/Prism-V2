@@ -38,6 +38,9 @@ class Library {
   // such an entry alive briefly (its own save may still be on the way) and drops the rest.
   this.touched = new Map();
   this.folderTouched = new Map();
+  // Deletions this window made: a reload that reads the index before our own write landed
+  // must not resurrect them. The tombstones clear once the disk agrees they are gone.
+  this.removed = new Set();
   this.ready = this.load();
  }
 
@@ -193,11 +196,13 @@ class Library {
    else if ((folder.added || 0) > (mine.added || 0) && !Number.isFinite(mine.order)) { Object.assign(mine, folder); changes++; }
   }
   const disk = new Map(chats.map(chat => [chat.id, chat]));
+  for (const id of [...this.removed]) if (!disk.has(id)) this.removed.delete(id);
   for (const chat of this.chats) {
    const fresh = disk.get(chat.id);
    if (fresh && (fresh.updated || 0) > (chat.updated || 0)) { Object.assign(chat, fresh); changes++; }
   }
   for (const chat of chats) {
+   if (this.removed.has(chat.id)) continue;
    if (this.chats.some(mine => mine.id === chat.id)) continue;
    this.chats.push(chat);
    changes++;
@@ -283,8 +288,12 @@ class Library {
   this.chats.splice(index, 1);
   this.touched.delete(id);
   this.forget(id);
+  this.removed.add(id);
   this.emptied = true; // an explicit removal may legitimately leave no chats at all
   this.changed();
+  // The index is written at once, not on the debounce: the file watcher may fire before the
+  // delayed write lands, and a reload reading the old index used to bring the chat back.
+  this.flush();
   this.store.remove(`chats/${id}`).catch(() => {});
  }
 
@@ -301,9 +310,10 @@ class Library {
   const gone = this.chats.filter(chat => samePath(chat.folder, path));
   this.chats = this.chats.filter(chat => !samePath(chat.folder, path));
   this.folders = this.folders.filter(folder => !samePath(folder.path, path));
-  for (const chat of gone) { this.touched.delete(chat.id); this.forget(chat.id); }
+  for (const chat of gone) { this.touched.delete(chat.id); this.forget(chat.id); this.removed.add(chat.id); }
   this.folderTouched.delete(key(path));
   this.changed();
+  this.flush();
   for (const chat of gone) this.store.remove(`chats/${chat.id}`).catch(() => {});
   return gone.map(chat => chat.id);
  }

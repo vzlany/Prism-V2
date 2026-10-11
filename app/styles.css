@@ -9169,6 +9169,28 @@ html.is-server-mode .welcome ghost-thinking{display:none}
    to win over the attribute, so the desktop-only Server and Auto pages leaked into browsers) */
 .settings-tab[hidden]{display:none}
 
+/* Prism V2: Simple visuals — the expanded line reads as one open stretch: the ⚡ belongs to
+   the summary line only, the steps under it are plain rows, and the open state shows. */
+html.is-simple .tool-group-body .tool:not(.is-parallel) .tool-reason::before{content:none}
+html.is-simple .tool-group.is-open > .tool-group-head{background:rgba(var(--fg-rgb),.045)}
+html.is-simple .tool-group.is-open > .tool-group-head .tool-group-label{color:rgba(var(--fg-rgb),.72)}
+html.is-simple .tool-group.is-open > .tool-group-body{margin:2px 0 4px 8px;padding-left:8px;border-left:1px solid rgba(var(--fg-rgb),.14)}
+html.is-simple .tool-group-body .tool:not(.is-parallel) + .tool:not(.is-parallel){margin-top:3px;padding-top:3px;border-top:1px solid rgba(var(--fg-rgb),.05)}
+
+/* Simple visuals on a phone (and for long chats) — the scroll position used to jump while
+   items below the fold rendered with content-visibility; the quiet lines make it cheap. */
+html.is-simple .thread-list > .message{content-visibility:visible}
+@media (max-width: 820px){
+ .thread-list > .message{content-visibility:visible}
+}
+
+/* Prism V2: instruction files in the pill — each row can be removed, the web can add one */
+.instructions-row{display:flex;align-items:center;gap:4px}
+.instructions-row .instructions-item{flex:1;min-width:0}
+.instructions-x{flex:none;display:grid;place-items:center;width:22px;height:22px;border:0;border-radius:7px;background:none;color:var(--fg-tertiary);font-size:13px;line-height:1;cursor:pointer}
+.instructions-x:hover,.instructions-x:focus-visible{background:rgba(var(--danger-rgb),.16);color:rgb(255,170,170);outline:none}
+.instructions-file-input{display:none}
+
 /* Prism V2: on a phone the conversation breathes smaller — tighter bubbles, lighter type */
 @media (max-width: 640px){
  html{--composer-font-size:13.5px;--message-line-height:1.5}

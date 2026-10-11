@@ -183,6 +183,8 @@ window.openghost = {
   list: directory => invoke('instructions:list', directory),
   read: (directory, file) => invoke('instructions:read', directory, file),
   open: directory => invoke('instructions:open', directory),
+  upload: (directory, name, base64) => invoke('instructions:write', directory, name, base64),
+  remove: (directory, file) => invoke('instructions:remove', directory, file),
  },
  skills: {
   list: directory => invoke('skills:list', directory),

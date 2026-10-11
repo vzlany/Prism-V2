@@ -202,17 +202,25 @@ function broadcastApp() {
  }
 }
 // A turn started on the website: a small request per chat, picked up and deleted by the app.
+// The file is named after the page's own request id, so the page can ask (delegate:check)
+// whether the app ever took it — a request still sitting here never ran.
 function delegate(request) {
  if (!request?.chatId) return false;
  try {
   mkdirSync(join(USER_DATA, "delegate"), { recursive: true });
-  const id = `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const id = String(request.id || "").replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 60) || `d-${Date.now().toString(36)}`;
   writeFileSync(join(USER_DATA, "delegate", `${id}.json`), JSON.stringify({ id, at: Date.now(), ...request }));
   return true;
  } catch {
   return false;
  }
 }
+// Whether the request file is still waiting (exists) or was taken and deleted by the app.
+host.handlers.set("delegate:check", (event, id) => {
+ const clean = String(id || "").replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 60);
+ if (!clean) return { exists: false };
+ return { exists: existsSync(join(USER_DATA, "delegate", `${clean}.json`)) };
+});
 try {
  const file = appFile();
  if (!existsSync(file)) writeFileSync(file, JSON.stringify({ at: 0, version: "" }));
@@ -299,12 +307,26 @@ wss.on("connection", (ws, req) => {
  data.send = (channel, ...eventArgs) => { try { ws.send(JSON.stringify({ t: "event", channel, args: eventArgs })); } catch {} };
  // Who is connected, for the Auto page: the address is shown (blurred) next to the port.
  const ip = String(req?.socket?.remoteAddress || "").replace(/^::ffff:/, "") || "local";
+ // The console says which device this is, not just an address: the LAN list knows the name,
+ // system and version behind the ip (a phone that never beacons stays "unknown device").
+ const describe = () => {
+  try {
+   const list = host.deviceList();
+   const device = (list?.devices || []).find(item => item.host === ip);
+   if (device) {
+    const system = device.platform === "win32" ? "Windows" : device.platform === "linux" ? "Linux" : (device.platform || "");
+    return [device.name, system, device.version ? `v${device.version}` : "", ip].filter(Boolean).join(" · ");
+   }
+  } catch {}
+  return `unknown device · ${ip}`;
+ };
+ data.who = describe();
  const seen = clients.get(ip) || { ip, count: 0, first: Date.now(), at: Date.now() };
  seen.count += 1;
  seen.at = Date.now();
  clients.set(ip, seen);
  writeClients();
- console.log(`[${stamp()}] connection ${data.id} opened (${ip})`);
+ console.log(`[${stamp()}] connection ${data.id} opened (${data.who})`);
  // A page that just opened asks for a snapshot right away.
  const mine = new Set();
  data.send("presence:event", presenceList());
@@ -319,7 +341,7 @@ wss.on("connection", (ws, req) => {
    if (entry.count <= 0) clients.delete(ip);
    writeClients();
   }
-  console.log(`[${stamp()}] connection ${data.id} closed`);
+  console.log(`[${stamp()}] connection ${data.id} closed (${data.who || `unknown device · ${ip}`})`);
  });
  ws.on("message", async raw => {
   let msg;
@@ -334,7 +356,12 @@ wss.on("connection", (ws, req) => {
     if (String(msg.channel).startsWith("tool:")) console.log(`[${stamp()}] ${msg.channel} ok`);
    } else if (msg.t === "send") {
     if (msg.channel === "log:page") {
-     logLine(`[page ${data.id}] ${String((msg.args || [])[0] || "").slice(0, 400)}`);
+     const text = String((msg.args || [])[0] || "");
+     // Browser-extension noise ("Script error." with no source, wallet injections) is not
+     // this app's problem and used to bury the real lines.
+     if (!/^Script error\./.test(text) && !text.includes("window.ethereum")) {
+      logLine(`[page ${data.id}] ${text.slice(0, 400)}`);
+     }
      return;
     }
     if (msg.channel === "presence:set") {

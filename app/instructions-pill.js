@@ -25,8 +25,22 @@ class InstructionsPill {
   button.addEventListener('click', () => this.open());
   menu.addEventListener('click', event => {
    if (event.target.closest('[data-open-folder]')) { this.openFolder(); return; }
+   if (event.target.closest('[data-add-file]')) { this.menu.querySelector('.instructions-file-input')?.click(); return; }
+   const drop = event.target.closest('[data-remove]');
+   if (drop) { this.remove(drop.dataset.removeFolder || '', drop.dataset.remove || ''); return; }
    const item = event.target.closest('[data-file]');
    if (item) this.choose(item.dataset.folder || '', item.dataset.file || '');
+  });
+  // On the web (a remote window, a phone) there is no file manager to open: a dropped or
+  // picked file is uploaded into the workspace's .prism/instructions instead.
+  menu.addEventListener('dragover', event => { if (window.openghost?.instructions?.upload) event.preventDefault(); });
+  menu.addEventListener('drop', event => {
+   if (!window.openghost?.instructions?.upload) return;
+   event.preventDefault();
+   this.upload(event.dataTransfer?.files);
+  });
+  menu.addEventListener('change', event => {
+   if (event.target.classList?.contains('instructions-file-input')) this.upload(event.target.files);
   });
   this.sync();
  }
@@ -91,9 +105,11 @@ class InstructionsPill {
   const fileButton = (folder, file) => {
    const name = file.split(/[\\/]/).pop();
    const on = chosen && chosen.folder.toLowerCase() === folder.path.toLowerCase() && chosen.file === file;
-   return `<button type="button" class="instructions-item${on ? ' is-on' : ''}" data-folder="${escapeHtml(folder.path)}" data-file="${escapeHtml(file)}" title="${escapeHtml(`${folder.path} — ${file}`)}">${escapeHtml(name)}</button>`;
+   const removable = Boolean(window.openghost?.instructions?.remove);
+   return `<div class="instructions-row"><button type="button" class="instructions-item${on ? ' is-on' : ''}" data-folder="${escapeHtml(folder.path)}" data-file="${escapeHtml(file)}" title="${escapeHtml(`${folder.path} — ${file}`)}">${escapeHtml(name)}</button>${removable ? `<button type="button" class="instructions-x" data-remove="${escapeHtml(file)}" data-remove-folder="${escapeHtml(folder.path)}" title="${escapeHtml(I18n.t('instructions.remove'))}" aria-label="${escapeHtml(I18n.t('instructions.remove'))}">×</button>` : ''}</div>`;
   };
-  const canOpen = Boolean(window.openghost?.instructions?.open);
+  const canUpload = Boolean(window.openghost?.instructions?.upload);
+  const canOpen = Boolean(window.openghost?.desktop && window.openghost?.instructions?.open);
   this.menu.innerHTML = [
    `<div class="instructions-head">${escapeHtml(I18n.t('instructions.titleGlobal'))}</div>`,
    `<button type="button" class="instructions-item${chosen ? '' : ' is-on'}" data-folder="" data-file="">${escapeHtml(I18n.t('instructions.none'))}</button>`,
@@ -102,7 +118,8 @@ class InstructionsPill {
     ...group.files.map(file => fileButton(group.folder, file)),
     group.files.length ? '' : `<div class="instructions-empty">${escapeHtml(I18n.t('instructions.empty'))}</div>`,
    ].join('')),
-   canOpen ? `<div class="instructions-sep" aria-hidden="true"></div><button type="button" class="instructions-open" data-open-folder>${Glyphs.folder}<span>${escapeHtml(I18n.t('instructions.open'))}</span></button>` : '',
+   canUpload ? `<div class="instructions-sep" aria-hidden="true"></div><button type="button" class="instructions-open" data-add-file>${Glyphs.file}<span>${escapeHtml(I18n.t('instructions.add'))}</span></button><input type="file" class="instructions-file-input" accept=".md,.txt,text/markdown,text/plain" multiple hidden>` : '',
+   canOpen ? `<button type="button" class="instructions-open" data-open-folder>${Glyphs.folder}<span>${escapeHtml(I18n.t('instructions.open'))}</span></button>` : '',
   ].join('');
   this.menu.showPopover?.();
  }
@@ -124,6 +141,41 @@ class InstructionsPill {
   try { Promise.resolve(window.openghost?.store?.write?.('instructions', file ? { folder, file } : {})).catch(() => {}); } catch {}
   this.menu.hidePopover?.();
   this.sync();
+ }
+
+ // The X beside a file removes it from the workspace (shared by app, web and the bot on
+ // this machine). A removed file that was the chosen one clears the choice with it.
+ async remove(folder, file) {
+  if (!folder || !file) return;
+  const ok = await window.openghost?.instructions?.remove?.(folder, file).catch(() => false);
+  if (!ok) return;
+  const chosen = this.chosen();
+  if (chosen && chosen.folder.toLowerCase() === folder.toLowerCase() && chosen.file === file) {
+   localStorage.removeItem(GLOBAL_KEY);
+   try { Promise.resolve(window.openghost?.store?.write?.('instructions', {})).catch(() => {}); } catch {}
+   this.sync();
+  }
+  await this.open();
+ }
+
+ // A picked or dropped file lands in the workspace's .prism/instructions and becomes the
+ // chosen one right away, so it is in effect from the next turn on.
+ async upload(files) {
+  const list = [...(files || [])].slice(0, 5);
+  if (!list.length) return;
+  const folder = this.folder();
+  if (!folder) return;
+  let last = null;
+  for (const file of list) {
+   try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+    last = await window.openghost?.instructions?.upload?.(folder, file.name, btoa(binary));
+   } catch { last = null; }
+  }
+  if (last?.path) this.choose(folder, last.path);
+  await this.open();
  }
 }
 

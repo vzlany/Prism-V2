@@ -12,6 +12,7 @@
 import { createEngineHost } from "./engine-host.mjs";
 import { existsSync, mkdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { hostname } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { WebSocket } from "ws";
 
@@ -43,6 +44,104 @@ const writeJson = (file, value) => {
  try { writeFileSync(file, JSON.stringify(value, null, 2)); } catch (error) { log("could not save", file, String(error.message)); }
 };
 
+// --------------------------------------------------------------- devices + routing
+// The same token can run on several devices. Every message is answered by exactly one of
+// them: a per-machine lock keeps two sessions on one box from double-answering, and when
+// several bots are online the first message of a DM gets a "Where should Prism run?" question
+// with a button per device. The choice sticks for that DM until "!device" changes it. All
+// sessions see the same clicks, so no extra network between the devices is needed.
+const botAliveFile = join(USER_DATA, "bot-alive.json");
+const lockFile = join(USER_DATA, "bot-lock.json");
+const routesFile = join(USER_DATA, "bot-routes.json");
+const pendingByChannel = new Map();
+let standby = 0, lockBeat = 0, aliveBeat = 0;
+
+const pidAlive = pid => {
+ try { process.kill(pid, 0); return true; } catch (error) { return error?.code === "EPERM"; }
+};
+const lockOwn = () => {
+ const data = readJson(lockFile, {});
+ return Number(data.pid) === process.pid && Date.now() - (Number(data.at) || 0) < 15000;
+};
+const lockFree = () => {
+ const data = readJson(lockFile, {});
+ if (!data.pid || Number(data.pid) === process.pid) return true;
+ if (Date.now() - (Number(data.at) || 0) > 15000) return true;
+ return !pidAlive(Number(data.pid));
+};
+function takeLock() { writeJson(lockFile, { pid: process.pid, at: Date.now(), name: hostname() }); }
+
+// This machine plus every LAN device whose bot is actually online (the beacon carries the
+// flag; a device without one could never answer). A server sorts first, then by name.
+function deviceTable() {
+ const name = hostname();
+ const self = { name, server: Boolean(host.serverMode), bot: true, self: true };
+ const others = [];
+ try {
+  const list = host.deviceList();
+  for (const device of list?.devices || []) {
+   if (!device?.bot || !device.name || device.name === name) continue;
+   others.push({ name: device.name, server: Boolean(device.server), bot: true, self: false });
+  }
+ } catch {}
+ return [self, ...others].sort((a, b) => (Number(b.server) - Number(a.server)) || a.name.localeCompare(b.name));
+}
+const amPrimary = table => table[0]?.name === hostname();
+
+async function askDevice(channel, table, force = false) {
+ const last = state.lastAsk?.[channel];
+ if (!force && last && Date.now() - (Number(last.at) || 0) < 60000) return;
+ const me = hostname();
+ const buttons = table.slice(0, 5).map(device => ({
+  type: 2,
+  style: device.name === me ? 1 : 2,
+  label: String(device.name).slice(0, 60),
+  custom_id: `prism:dev:${device.name}`.slice(0, 95),
+ }));
+ const body = {
+  embeds: [{ title: "🤖 Where should Prism run?", description: "Pick the device that should answer here — the choice sticks for this DM (`!device` changes it).", color: 0x7a8bff }],
+  components: [{ type: 1, components: buttons }],
+ };
+ const res = await api(`/channels/${channel}/messages`, { method: "POST", body: JSON.stringify(body) }).catch(() => null);
+ const posted = res?.ok ? await res.json().catch(() => null) : null;
+ state.lastAsk = { ...(state.lastAsk || {}), [channel]: { at: Date.now(), id: posted?.id || "" } };
+}
+
+// Every session sees the same button clicks. The chosen device answers the message it had
+// buffered; one of the sessions folds the question into an answer line.
+async function handleInteraction(data) {
+ if (!data || data.type !== 3) return;
+ const userId = data.user?.id || data.member?.user?.id;
+ if (String(userId) !== String(config.userId)) return;
+ const custom = String(data.data?.custom_id || "");
+ if (!custom.startsWith("prism:dev:")) return;
+ const device = custom.slice("prism:dev:".length);
+ const channel = String(data.channel_id || "");
+ if (!device || !channel) return;
+ log("device chosen:", device);
+ state.routes = { ...(state.routes || {}), [channel]: device };
+ saveRoutes();
+ const table = await deviceTable();
+ const alive = table.some(entry => entry.name === device);
+ const line = alive ? `**${device}** will answer here.` : `**${device}** is offline — **${hostname()}** answers instead.`;
+ await api(`/interactions/${data.id}/${data.token}/callback`, {
+  method: "POST",
+  body: JSON.stringify({ type: 7, data: { embeds: [{ title: "🤖 Where should Prism run?", description: line, color: 0x7a8bff }], components: [] } }),
+ }).catch(() => null);
+ const pending = pendingByChannel.get(channel);
+ if (!pending) return;
+ if (device === hostname() && alive) {
+  pendingByChannel.delete(channel);
+  enqueue({ channel, message: pending, routed: true });
+  return;
+ }
+ // A selection never means silence: if the chosen bot is off, the primary takes the work.
+ if (!alive && amPrimary(table)) {
+  pendingByChannel.delete(channel);
+  enqueue({ channel, message: pending, routed: true });
+ }
+}
+
 const config = readJson(configFile);
 const state = Object.assign(
  { messages: [], folder: process.env.USERPROFILE || process.env.HOME || ".", model: "opencode-go:deepseek-v4.1-flash", lastId: "0", effort: "", seefull: false, chatId: "" },
@@ -54,6 +153,10 @@ if (flag("--folder")) state.folder = String(flag("--folder"));
 if (flag("--model")) state.model = String(flag("--model"));
 
 const savedState = () => writeJson(stateFile, { messages: state.messages, folder: state.folder, model: state.model, lastId: state.lastId, effort: state.effort, thinking: state.thinking, seefull: state.seefull, chatId: state.chatId });
+
+// The per-DM device choice ("Where should Prism run?"), remembered across restarts.
+state.routes = readJson(routesFile, {});
+const saveRoutes = () => writeJson(routesFile, state.routes || {});
 
 // --------------------------------------------------------------- Prism conversations
 // Each Discord conversation is a real Prism chat under a "-Discord" folder: the app and the
@@ -154,7 +257,10 @@ function saveConversation(record, userText, answer) {
   if (!chat.named && userText) { chat.title = String(userText).split("\n")[0].slice(0, 60) || chat.title; chat.named = true; }
   writeIndex(index);
  }
- writeJson(chatFile(record.id), { ...body, version: 1, messages, botContext: state.messages, tokens: Number(body.tokens) || 0 });
+ // The dashboard counts messages and tokens: without provider usage, the same rough
+ // characters/4 estimate the app falls back to keeps the numbers honest.
+ const used = Math.ceil(((userText || "").length + (answer || "").length) / 4);
+ writeJson(chatFile(record.id), { ...body, version: 1, messages, botContext: state.messages, tokens: (Number(body.tokens) || 0) + used });
 }
 
 // Pick the conversation this message belongs to: the chosen one, or a fresh chat.
@@ -617,6 +723,8 @@ function connectGateway() {
     if (data.guild_id) return; // DMs only
     if (typeof data.id === "string" && data.id > state.lastId) state.lastId = data.id;
     enqueue({ channel: data.channel_id, message: data });
+    } else if (msg.t === "INTERACTION_CREATE") {
+     handleInteraction(msg.d).catch(error => log("interaction failed:", String(error?.message || error)));
    }
   } else if (msg.op === 7 || msg.op === 9) {
    try { gateway.close(); } catch {}
@@ -643,7 +751,7 @@ async function pumpQueue() {
  busy = true;
  while (queue.length) {
   const item = queue.shift();
-  try { await handle(item.channel, item.message); } catch (error) { log("handle failed:", String(error?.message || error)); }
+  try { await handle(item.channel, item.message, item.routed ? { routed: true } : undefined); } catch (error) { log("handle failed:", String(error?.message || error)); }
  }
  busy = false;
 }
@@ -656,6 +764,7 @@ const HELP = [
  "`!chat` — list conversations (`!chat 2` switches, `!chat new [title]` starts one)",
  "`!clear` — delete every message I sent in this DM",
  "`!stop` — stop the reply being written",
+ "`!device` — choose which device (this machine, the server, …) answers this DM",
  "`!seefull` — toggle Full Display: every thought and every action is posted here",
  "`!effort <level>` — thinking effort (default, none, low, medium, high, xhigh, max)",
  "`!folder <path>` — the folder tools work in",
@@ -686,7 +795,7 @@ async function clearBotMessages(channel) {
  return deleted;
 }
 
-async function handle(channel, message) {
+async function handle(channel, message, opts = {}) {
  let text = String(message.content || "").trim();
  // If the gateway cannot see message content (Message Content Intent off in the developer
  // portal), fetch the message over REST before giving up on it.
@@ -769,6 +878,15 @@ async function handle(channel, message) {
   savedState();
   return void await post(channel, `⚙️ effort: \`${value}\``);
  }
+ if (command === "!device" || command === "!devices") {
+  const table = await deviceTable();
+  if (table.length < 2) return void await post(channel, `only **${hostname()}** is online right now — nothing to choose.`);
+  if (state.routes) delete state.routes[channel];
+  saveRoutes();
+  if (state.lastAsk) delete state.lastAsk[channel];
+  await askDevice(channel, table, true);
+  return;
+ }
  if (command.startsWith("!folder ")) {
   const folder = command.slice(8).trim();
   if (!existsSync(folder)) return void await post(channel, `no such folder: \`${folder}\``);
@@ -782,6 +900,25 @@ async function handle(channel, message) {
   savedState();
   return void await post(channel, `🧠 model: \`${state.model}\``);
  }
+
+ // Where should this turn run? With another device's bot online the message waits for the
+ // choice (the buttons on the question the primary posted), and every device answers only
+ // its own routed messages. Alone, the bot keeps answering directly.
+ if (!opts.routed) {
+  const table = await deviceTable();
+  const route = state.routes?.[channel] || "";
+  const chosen = table.find(device => device.name === route) || null;
+  if (table.length > 1 && !chosen) {
+   pendingByChannel.set(channel, message);
+   if (amPrimary(table)) await askDevice(channel, table);
+   return;
+  }
+  if (chosen && chosen.name !== hostname()) {
+   pendingByChannel.set(channel, message);
+   return;
+  }
+ }
+ pendingByChannel.delete(channel);
 
  // A reply to a finish DM continues the exact app conversation that notification came from.
  const target = replyTarget(message?.message_reference?.message_id || message?.referenced_message?.id);
@@ -920,7 +1057,10 @@ function appendToChat(record, userText, answer) {
   writeIndex(index);
  }
  const { botContext, ...rest } = body;
- writeJson(chatFile(record.id), { ...rest, version: 1, messages, tokens: Number(body.tokens) || 0 });
+ // The dashboard counts messages and tokens: without provider usage, the same rough
+ // characters/4 estimate the app falls back to keeps the numbers honest.
+ const used = Math.ceil(((userText || "").length + (answer || "").length) / 4);
+ writeJson(chatFile(record.id), { ...rest, version: 1, messages, tokens: (Number(body.tokens) || 0) + used });
 }
 
 // --------------------------------------------------------------- run
@@ -937,7 +1077,7 @@ if (ONCE) {
   }
  })();
 } else {
- const run = () => (async () => {
+ const start = () => (async () => {
   let channel = null;
   const ensureChannel = async () => {
    if (channel) return channel;
@@ -1008,6 +1148,31 @@ if (ONCE) {
    });
   } catch {}
  })().catch(error => log(`bot crashed: ${String(error?.message || error)}`));
+ // One bot per machine: the lock keeps a second session (the app's own child next to the
+ // service, say) from connecting at all — it stands by and takes over if the holder dies.
+ const boot = () => {
+  if (!lockFree() && !lockOwn()) {
+   if (!standby) log("another bot on this machine is online — standing by");
+   clearInterval(standby);
+   standby = setInterval(() => {
+    if (!lockFree() && !lockOwn()) return;
+    clearInterval(standby);
+    standby = 0;
+    boot();
+   }, 10000);
+   return;
+  }
+  takeLock();
+  clearInterval(lockBeat);
+  lockBeat = setInterval(takeLock, 5000);
+  // Only the acting bot marks this machine as bot-alive: the beacon carries the flag and
+  // the routing menus only offer devices whose bot is really there.
+  const alive = () => writeJson(botAliveFile, { at: Date.now(), name: hostname() });
+  alive();
+  clearInterval(aliveBeat);
+  aliveBeat = setInterval(alive, 5000);
+  start();
+ };
  if (!config.token || !config.userId) {
   console.error(`\n  The Discord bot is not set up yet — waiting for a token.\n  Add one in Prism V2: Settings -> Interface -> Discord notifications (the same bot is used here),\n  or edit ${configFile} by hand:\n\n  { "token": "…", "userId": "…", "enabled": true }\n\n  Create the bot at https://discord.com/developers (New Application -> Bot), enable\n  "Message Content Intent" on the Bot page, invite it to a private server of yours\n  (OAuth2 -> URL Generator -> scope "bot") so Discord lets it DM you, then DM it.\n`);
   // Stay alive instead of exiting: Settings writes discord.json, and the bot comes online by
@@ -1019,9 +1184,9 @@ if (ONCE) {
    Object.assign(config, fresh);
    state.tools = NO_TOOLS ? false : config.tools !== false;
    log("token found — starting the bot");
-   run();
+   boot();
   }, 4000);
  } else {
-  run();
+  boot();
  }
 }

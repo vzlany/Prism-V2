@@ -226,6 +226,13 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
    console.log("[beacon] could not start:", error.message);
   }
  }
+ // Everything else on this machine — the Discord bot, the app's own helpers — never binds the
+ // discovery port: the live list is mirrored to a file their devices:list fallback reads.
+ if (beacon) {
+  const mirror = () => { try { writeFileSync(join(USER_DATA, "beacon.json"), JSON.stringify({ at: Date.now(), ...beacon.list(), name: hostname(), server: serverMode })); } catch {} };
+  mirror();
+  setInterval(mirror, 10000).unref?.();
+ }
  handlers.set("engine:info", () => ({ server: serverMode, name: hostname(), platform: process.platform, version: appVersion() }));
  // Live system information for the server's System panel.
  const sysinfo = require(join(ROOT, "desktop", "sysinfo.js"));
@@ -383,6 +390,10 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   electron,
   handlers,
   listeners,
+  // The Discord bridge (a sibling of the web engine) reads these: the same live device list
+  // its own devices:list would serve, and whether this machine is a server.
+  deviceList,
+  serverMode,
   engines: { Tools, MCP, Memory, LLM, Discord, Skills },
   setSender(next) {
    const send = typeof next?.send === "function" ? next.send : noop;

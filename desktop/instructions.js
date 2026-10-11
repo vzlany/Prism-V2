@@ -53,6 +53,35 @@ const openFolder = async directory => {
  try { return !(await shell.openPath(base)); } catch { return false; }
 };
 
+// A dropped or picked instruction file: written into .prism/instructions so it is shared by
+// the app, the web UI and the Discord bot on this machine.
+const write = (directory, name, base64) => {
+ if (typeof directory !== 'string' || typeof name !== 'string' || typeof base64 !== 'string') return null;
+ let data;
+ try { data = Buffer.from(base64, 'base64'); } catch { return null; }
+ if (!data.length || data.length > 1024 * 1024) return null;
+ const base = path.resolve(directory);
+ const clean = path.basename(name).replace(/[^\w.\- ]+/g, '_').slice(0, 80) || 'instructions.md';
+ const file = /\.(md|txt)$/i.test(clean) ? clean : `${clean}.md`;
+ const dir = path.join(base, PRISM_DIR, 'instructions');
+ try {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, file), data);
+  return { path: `${PRISM_DIR}/instructions/${file}`, name: file };
+ } catch { return null; }
+};
+
+const remove = (directory, file) => {
+ if (typeof directory !== 'string' || typeof file !== 'string') return false;
+ const base = path.resolve(directory), target = path.resolve(base, file);
+ if (!target.startsWith(base)) return false;
+ try {
+  if (!fs.statSync(target).isFile()) return false;
+  fs.rmSync(target, { force: true });
+  return true;
+ } catch { return false; }
+};
+
 const readSkill = file => {
  try {
   const text = fs.readFileSync(file, 'utf8').slice(0, 4000);
@@ -89,7 +118,9 @@ function register(fromApp) {
  ipcMain.handle('instructions:list', (event, directory) => (fromApp(event) && typeof directory === 'string' ? list(directory) : []));
  ipcMain.handle('instructions:read', (event, directory, file) => (fromApp(event) ? read(directory, file) : null));
  ipcMain.handle('instructions:open', (event, directory) => (fromApp(event) && typeof directory === 'string' ? openFolder(directory) : false));
+ ipcMain.handle('instructions:write', (event, directory, name, base64) => (fromApp(event) ? write(directory, name, base64) : null));
+ ipcMain.handle('instructions:remove', (event, directory, file) => (fromApp(event) ? remove(directory, file) : false));
  ipcMain.handle('skills:list', (event, directory) => (fromApp(event) ? listSkills(directory) : []));
 }
 
-module.exports = { register, list, read, openFolder, listSkills };
+module.exports = { register, list, read, openFolder, write, remove, listSkills };

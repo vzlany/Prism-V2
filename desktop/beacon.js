@@ -52,8 +52,18 @@ class Beacon {
    version: this.version,
    port: this.port,
    server: this.server,
+   // Whether a Discord bot is answering on this machine right now: the bot leaves a small
+   // heartbeat file behind, and a device without one is never handed a Discord message.
+   bot: this.botAlive(),
    at: Date.now(),
   };
+ }
+
+ botAlive() {
+  try {
+   const alive = JSON.parse(fs.readFileSync(path.join(this.userData, 'bot-alive.json'), 'utf8'));
+   return Date.now() - (Number(alive?.at) || 0) < 15000;
+  } catch { return false; }
  }
 
  start() {
@@ -159,7 +169,7 @@ class Beacon {
  }
 
  list() {
-  const self = { id: this.id, name: this.name, platform: this.platform, version: this.version, port: this.port, server: this.server, self: true, url: '' };
+  const self = { id: this.id, name: this.name, platform: this.platform, version: this.version, port: this.port, server: this.server, self: true, bot: this.botAlive(), url: '' };
   const devices = [];
   for (const device of this.remotes.values()) {
    if (Date.now() - device.seen > STALE) continue;

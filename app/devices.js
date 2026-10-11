@@ -14,9 +14,9 @@ const deviceMeta = device => [
  device.manual ? I18n.t('devices.manual') : '',
 ].filter(Boolean).join(' · ');
 
-function rowHtml(device, { self = false, failed = '', chip = '', localPc = false } = {}) {
+function rowHtml(device, { self = false, failed = '', chip = '', localPc = false, noChip = false } = {}) {
  const name = escapeHtml(device.name || device.id || 'device');
- const chips = [
+ const chips = noChip ? '' : [
   chip ? `<span class="device-chip">${escapeHtml(chip)}</span>` : self ? `<span class="device-chip">${escapeHtml(I18n.t('devices.thisPc'))}</span>` : '',
   device.server && !self ? `<span class="device-chip is-server">${escapeHtml(I18n.t('devices.server'))}</span>` : '',
  ].join('');
@@ -166,18 +166,20 @@ class DevicePicker {
   const rows = [rowHtml({ ...data.self, self: true }, { self: true })];
   for (const device of data.devices || []) rows.push(rowHtml(device, { failed: this.kicked?.id === device.id ? this.kicked.reason : '' }));
   this.list.innerHTML = rows.join('');
-  if ((data.devices || []).length) this.show();
+  if ((data.devices || []).length) { this.show(); return true; }
+  return false;
  }
 
  // The web twin of maybeShow: a browser — a phone, another computer — asking the same
  // question once, with the devices the engine knows. Picking one hands the page over to
- // that device's web UI; picking this one just closes the screen.
+ // that device's web UI; picking this one just closes the screen. "This PC" would be a lie
+ // here — the browser may be anywhere — so the row that is this machine wears no chip.
  async webShow(data) {
   if (!data?.self) return;
   const banner = this.el.querySelector('.device-kicked');
   if (banner) banner.hidden = true;
   if (this.note) this.note.textContent = '';
-  const rows = [rowHtml({ ...data.self, self: true }, { self: true })];
+  const rows = [rowHtml({ ...data.self, self: true }, { self: true, noChip: true })];
   for (const device of data.devices || []) rows.push(rowHtml(device));
   this.list.innerHTML = rows.join('');
   this.show();
@@ -256,9 +258,11 @@ class DeviceMenu {
   if (!data) return;
   const kicked = data.kicked;
   const remote = IN_REMOTE();
+  const plainBrowser = !window.openghost?.desktop && !remote;
   // In a remote window the engine's "self" is the server being watched (it wears "This
   // server"); the PC this window came from (?from=name) wears "This PC" and leads back home.
-  const rows = [rowHtml(data.self, { self: true, ...(remote ? { chip: I18n.t('devices.thisServer') } : {}) })];
+  // In a plain browser neither label is true, so the row that is this machine stays bare.
+  const rows = [rowHtml(data.self, { self: true, ...(remote ? { chip: I18n.t('devices.thisServer') } : plainBrowser ? { noChip: true } : {}) })];
   for (const device of data.devices || []) {
    const localPc = remote && FROM_DEVICE && String(device.name || '').toLowerCase() === FROM_DEVICE.toLowerCase();
    rows.push(rowHtml(device, {
