@@ -1105,19 +1105,22 @@ class Chat {
   };
   clearTimeout(conv.waitingTimer);
   conv.waitingTimer = setTimeout(async () => {
-   if (settled) return;
-   // Still working somewhere? Give it more room before deciding anything.
+   // The wait may already be over: a refusal ran it here, or the app's run arrived and the
+   // presence handler cleared conv.waiting. Either way there is nothing left to decide.
+   if (settled || !conv.waiting) return;
+   // Presence says it is running somewhere (the app picked it up): it is not ours to run —
+   // the earlier code used to fire anyway once the run ended, stamping "did not pick it up"
+   // onto a turn that had actually worked.
    if (window.Presence?.isBusy?.(conv.id)) {
-    conv.waitingTimer = setTimeout(() => runHere(true), 60000);
+    clearTimeout(conv.waitingTimer);
+    conv.waiting = 0;
     return;
    }
-   // Ask the server whether the app ever took the request: a file still waiting there means
-   // it never ran. A file already gone means it was picked up — its own turn gets the time.
+   // Ask the server whether the app ever took the request: a file already gone means it was
+   // picked up and this page keeps its hands off; a file still waiting means nobody did, and
+   // the turn runs here instead.
    const state = await window.openghost?.delegate?.check?.(requestId).catch(() => null);
-   if (state && state.exists === false) {
-    conv.waitingTimer = setTimeout(() => { if (!settled && !window.Presence?.isBusy?.(conv.id)) runHere(true); }, 60000);
-    return;
-   }
+   if (state && state.exists === false) return;
    runHere(true);
   }, 25000);
   this.onChange();
