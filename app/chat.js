@@ -1683,7 +1683,10 @@ class Chat {
    budget -= size;
    kept.unshift(parts[i]);
   }
-  return { state: 'running', title: String(title).slice(0, 120), model: this.modelOf(conv), started: turn.started, status, parallel: Boolean(conv.subagent || conv.record?.parent), subagent: Boolean(conv.subagent || conv.record?.parent), parts: kept };
+  // The todo list rides along — the checklist is the best "where is it now" a watching device
+  // can get, so it must update live, not only when the conversation is saved.
+  const todos = Array.isArray(conv.todos) ? conv.todos.slice(0, 40).map(item => ({ text: String(item?.text || '').slice(0, 200), state: String(item?.state || 'idle') })) : [];
+  return { state: 'running', title: String(title).slice(0, 120), model: this.modelOf(conv), started: turn.started, status, parallel: Boolean(conv.subagent || conv.record?.parent), subagent: Boolean(conv.subagent || conv.record?.parent), todos, parts: kept };
  }
 
  // At most one publish every ~700ms; the tail timer keeps the last change from being lost.

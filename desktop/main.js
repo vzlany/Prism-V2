@@ -196,10 +196,15 @@ function watchStore(win) {
 // so a reader can tell a live run from one left behind by a closed app.
 const presenceRuns = new Map();
 let presenceTimer = 0;
+// Atomic write: the web server watches this file, and a reader that catches a just-truncated
+// file would parse "" and believe every run stopped for a moment.
 function flushPresence() {
  presenceTimer = 0;
  const file = path.join(app.getPath('userData'), 'presence.json');
- fs.promises.writeFile(file, JSON.stringify({ at: Date.now(), runs: [...presenceRuns.values()] })).catch(() => {});
+ const tmp = `${file}.tmp`;
+ fs.promises.writeFile(tmp, JSON.stringify({ at: Date.now(), runs: [...presenceRuns.values()] }))
+  .then(() => fs.promises.rename(tmp, file))
+  .catch(() => {});
 }
 function touchPresence() {
  clearTimeout(presenceTimer);
@@ -227,7 +232,11 @@ function webClientsOpen() {
 function beatApp() {
  if (!webClientsOpen()) return;
  const file = path.join(app.getPath('userData'), 'app.json');
- fs.promises.writeFile(file, JSON.stringify({ at: Date.now(), version: app.getVersion(), pid: process.pid })).catch(() => {});
+ const tmp = `${file}.tmp`;
+ // Atomic like presence.json: a half-written file made the server think the app was gone.
+ fs.promises.writeFile(tmp, JSON.stringify({ at: Date.now(), version: app.getVersion(), pid: process.pid }))
+  .then(() => fs.promises.rename(tmp, file))
+  .catch(() => {});
 }
 beatApp();
 setInterval(beatApp, 10000);

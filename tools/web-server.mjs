@@ -163,7 +163,9 @@ function readDesktopPresence() {
   const now = Date.now();
   return (Array.isArray(data?.runs) ? data.runs : []).filter(run => run?.id && now - (Number(run.at) || 0) < PRESENCE_STALE);
  } catch {
-  return [];
+  // Unreadable (mid-write) or missing: null keeps the last good list instead of flashing
+  // "nothing is running" at every page.
+  return null;
  }
 }
 const presenceList = () => {
@@ -186,12 +188,15 @@ function broadcastPresence(except = null) {
 // running them in the browser, and the app streams them like any other turn.
 const APP_STALE = 25000;
 const appFile = () => join(USER_DATA, "app.json");
+let lastAppStatus = { connected: false, at: 0, version: "" };
 function appStatus() {
  try {
   const data = JSON.parse(readFileSync(appFile(), "utf8").replace(/^\uFEFF/, ""));
-  return { connected: Date.now() - (Number(data?.at) || 0) < APP_STALE, at: Number(data?.at) || 0, version: data?.version || "" };
+  lastAppStatus = { connected: Date.now() - (Number(data?.at) || 0) < APP_STALE, at: Number(data?.at) || 0, version: data?.version || "" };
+  return lastAppStatus;
  } catch {
-  return { connected: false, at: 0, version: "" };
+  // A mid-write read used to look like "the app is gone" for a moment: keep the last answer.
+  return lastAppStatus;
  }
 }
 function broadcastApp() {
@@ -284,10 +289,20 @@ try {
   watch(file, () => {
    clearTimeout(presenceTimer);
    presenceTimer = setTimeout(() => {
-    desktopPresence = readDesktopPresence();
+    const next = readDesktopPresence();
+    if (next) desktopPresence = next;
     broadcastPresence();
    }, 250);
   });
+  // The watcher can miss changes (a replaced file, a rename) and used to leave pages with an
+  // empty picture while a run was going: a slow poll keeps the list honest either way.
+  setInterval(() => {
+   const before = JSON.stringify(desktopPresence);
+   const next = readDesktopPresence();
+   if (!next) return;
+   desktopPresence = next;
+   if (JSON.stringify(next) !== before) broadcastPresence();
+  }, 4000);
  } catch {}
 } catch {}
 // Who is connected right now, so the app's Auto page can list the devices and the port.
@@ -345,8 +360,13 @@ wss.on("connection", (ws, req) => {
  clients.set(ip, seen);
  writeClients();
  console.log(`[${stamp()}] connection ${data.id} opened (${data.who})`);
- // A page that just opened asks for a snapshot right away.
+ // A page that just opened asks for a snapshot right away — with the app's runs read fresh,
+ // so connecting in the middle of a turn shows the live card at once.
  const mine = new Set();
+ {
+  const next = readDesktopPresence();
+  if (next) desktopPresence = next;
+ }
  data.send("presence:event", presenceList());
  data.send("app:status", [appStatus()]);
  data.send("update:state", readUpdateStateFile());

@@ -42,6 +42,27 @@ class LiveView {
   }
   for (let k = parts.length; k < this.nodes.length; k++) this.nodes[k].el.remove();
   if (this.nodes.length > parts.length) this.nodes.length = parts.length;
+  this.todos(info.todos);
+ }
+
+ // The device's todo checklist, drawn from the live mirror: checkmarks move while it works,
+ // instead of freezing at whatever the last saved conversation happened to hold.
+ todos(items) {
+  const list = Array.isArray(items) ? items.filter(item => item?.text) : [];
+  if (!list.length) {
+   this.todoCard?.el.remove();
+   this.todoCard = null;
+   this.todoKey = '';
+   return;
+  }
+  const key = JSON.stringify(list);
+  if (key === this.todoKey) return;
+  this.todoKey = key;
+  if (!window.TodoCard) return;
+  const fresh = new window.TodoCard(list);
+  if (this.todoCard?.el?.parentElement === this.body) this.todoCard.el.replaceWith(fresh.el);
+  else this.body.append(fresh.el);
+  this.todoCard = fresh;
  }
 
  build(part) {
