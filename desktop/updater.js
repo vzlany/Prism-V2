@@ -18,8 +18,14 @@ const RETRY = 10 * 60 * 1000;     // an automatic install waits for idle and tri
 
 let lastInfo = null;
 
-// Tell every window what the updater is doing: the titlebar pill follows these.
+// Tell every window what the updater is doing: the titlebar pill follows these. The same
+// state is written to update-state.json, which the web server mirrors to pages, so a remote
+// window (or a phone) can also say that this machine is updating.
 function announce(payload) {
+ try {
+  const phase = payload?.state === "none" ? "idle" : String(payload?.state || "idle");
+  fs.writeFileSync(path.join(userData(), "update-state.json"), JSON.stringify({ at: Date.now(), phase, version: payload?.version || "", progress: payload?.progress ?? null }));
+ } catch {}
  for (const win of require('electron').BrowserWindow.getAllWindows()) {
   try { win.webContents.send('update:event', payload); } catch {}
  }

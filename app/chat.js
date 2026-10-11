@@ -189,14 +189,15 @@ const SIMPLE_BUCKET = {
  read_file: 'explore', list_files: 'explore', video_frames: 'explore',
  write_file: 'write', edit_file: 'write', patch: 'write',
  run_powershell: 'run', git: 'run', http_request: 'run',
+ memory_save: 'memory', memory_forget: 'memory',
  web_search: 'search',
  screenshot: 'shot',
 };
 const SIMPLE_LABEL = {
- running: { explore: 'Exploring {n} files', write: 'Writing {n} files', run: 'Running {n} commands', search: 'Searching the web', shot: 'Taking {n} screenshots' },
- done: { explore: 'Explored {n} files', write: 'Wrote {n} files', run: 'Ran {n} commands', search: 'Searched the web', shot: 'Took {n} screenshots' },
+ running: { explore: 'Exploring {n} files', write: 'Writing {n} files', run: 'Running {n} commands', memory: 'Updating memory', search: 'Searching the web', shot: 'Taking {n} screenshots' },
+ done: { explore: 'Explored {n} files', write: 'Wrote {n} files', run: 'Ran {n} commands', memory: 'Memory updated', search: 'Searched the web', shot: 'Took {n} screenshots' },
 };
-const SIMPLE_ORDER = ['explore', 'write', 'run', 'search', 'shot'];
+const SIMPLE_ORDER = ['explore', 'write', 'run', 'memory', 'search', 'shot'];
 // The ⚡ before a tool line, gray like the 🧠 of a Thought row.
 const SIMPLE_ICON = '\u26A1';
 function splitQuotes(text) {
@@ -1396,8 +1397,15 @@ class Chat {
   DISCORD_BLOCK.lastIndex = 0;
   while ((match = DISCORD_BLOCK.exec(content))) pending.push(parseDiscordBlock(match[1]));
   if (!pending.length) return;
+  // The stream rebuilds the entry text on every delta, so a finished block reappears in it:
+  // remembering what was sent keeps one block from going out again and again while the reply
+  // is still being written (a screenshot used to arrive seven times for this reason).
+  part.sentDiscord ||= new Set();
   const folder = conv.record?.folder || '';
   for (const block of pending) {
+   const key = `${block.text}\u0000${block.files.join('\u0000')}`;
+   if (part.sentDiscord.has(key)) continue;
+   part.sentDiscord.add(key);
    window.openghost?.discord?.message?.({
     text: block.text,
     files: block.files.map(file => withFolder(file, folder)),
@@ -1431,8 +1439,13 @@ class Chat {
   AGENT_BLOCK.lastIndex = 0;
   while ((match = AGENT_BLOCK.exec(content))) pending.push({ id: match[1], text: String(match[2] || '').trim() });
   if (!pending.length) return;
+  // Same guard as the Discord blocks: the rebuilt stream text must not deliver twice.
+  part.sentAgents ||= new Set();
   for (const message of pending) {
    if (!message.text || !this.library.chat(message.id)) continue;
+   const key = `${message.id}\u0000${message.text}`;
+   if (part.sentAgents.has(key)) continue;
+   part.sentAgents.add(key);
    this.sendAgentMessage(message.id, message.text, conv.record?.id || conv.id, { wait: false }).catch(() => {});
   }
   part.entry.content = content.replace(AGENT_BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
@@ -1484,7 +1497,13 @@ class Chat {
    for (const child of prev.children) {
     if (child.classList.contains('tool-group')) { found = child; continue; }
     if (child.classList.contains('message-status')) continue;
-    if (child.classList.contains('message-thinking')) { if (child.hidden) continue; return null; }
+    if (child.classList.contains('message-thinking')) {
+     // What matters is whether a thought was really written — the box can be visible but
+     // empty (extended thinking mode), which must not break the stretch.
+     const inner = child.querySelector('.message-thinking-inner');
+     if (!inner || !inner.textContent.trim()) continue;
+     return null;
+    }
     if (child.classList.contains('message-content')) { if (child.childElementCount || child.textContent.trim()) return null; continue; }
     return null;
    }
@@ -1838,11 +1857,18 @@ class Chat {
   if (!server) return '';
   const latest = [...(conv.messages || [])].reverse().find(entry => entry.role === 'user' && entry.device);
   const from = latest?.device || 'another device';
-  return [
-   '# This machine is a server',
-   `- This Prism runs on the user's server${name ? ` (${name})` : ''}; the user is talking to you from ${from}, over the network.`,
-   '- Every tool acts on THIS server — files, commands, installs, long-running jobs — never on the user\'s personal computer. Say which machine a path or program lives on when it could be ambiguous.',
-  ].join('\n');
+  // The server section is what Settings -> Prompt writes; the built-in lines stand in when
+  // that field is empty. The machine belongs to the user alone, and the prompt says so.
+  let custom = '';
+  try { custom = String(window.Prompts?.data?.server || '').trim(); } catch {}
+  const lines = custom
+   ? custom.split('\n')
+   : [
+    `- This Prism runs on the user's server${name ? ` (${name})` : ''}; the user is talking to you from ${from}, over the network.`,
+    '- Every tool acts on THIS server — files, commands, installs, long-running jobs — never on the user\'s personal computer. Say which machine a path or program lives on when it could be ambiguous.',
+    '- This server belongs to the user alone — nobody else uses it. You may create, install, change and run whatever the task needs.',
+   ];
+  return ['# This machine is a server', ...lines, ...(custom ? [`- The user is talking to you from ${from}, over the network.`] : [])].join('\n');
  }
 
  context() {

@@ -11,7 +11,7 @@ const KEY = 'openghost.prompts';
 // The store only allows [a-z0-9_-] (and one slash) in a key; the local copy keeps the
 // dotted name so nothing else that reads localStorage is surprised.
 const STORE = 'prompts';
-const DEFAULTS = { version: 1, enabled: true, global: '', models: {} };
+const DEFAULTS = { version: 1, enabled: true, global: '', models: {}, server: '' };
 
 let cache = null;
 let loading = null;
@@ -26,6 +26,8 @@ function normalize(data) {
   enabled: data?.enabled !== false,
   global: typeof data?.global === 'string' ? data.global : '',
   models: data?.models && typeof data.models === 'object' ? { ...data.models } : {},
+  // The server-only text: used instead of the built-in lines when this machine is a server.
+  server: typeof data?.server === 'string' ? data.server : '',
  };
 }
 

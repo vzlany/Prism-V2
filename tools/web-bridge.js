@@ -218,6 +218,17 @@ window.openghost = {
   set: patch => invoke('update:set', patch),
   check: () => invoke('update:check'),
   install: () => invoke('update:install'),
+  // The updater's live state (available / downloading / restarting / done) for this device,
+  // streamed by the web server so a page can say the device it is looking at is updating.
+  state: () => invoke('update:state'),
+  onState: callback => {
+   on('update:state', callback);
+   return () => {
+    const list = state.listeners.get('update:state') || [];
+    const at = list.indexOf(callback);
+    if (at >= 0) list.splice(at, 1);
+   };
+  },
  },
  devices: {
   // The other Prism apps on this network. The page can only navigate: open() hands back the

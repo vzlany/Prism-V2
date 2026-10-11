@@ -208,6 +208,18 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   return versionMemo.value || "";
  };
  const startedVersion = appVersion();
+ // The updater's live state, mirrored to every page: available → downloading → restarting →
+ // done. A page (a remote window, a phone) shows which device is updating.
+ const updateStateFile = join(USER_DATA, "update-state.json");
+ const readUpdateState = () => { try { return JSON.parse(readFileSync(updateStateFile, "utf8")); } catch { return null; } };
+ const writeUpdateState = patch => { try { writeFileSync(updateStateFile, JSON.stringify({ at: Date.now(), ...patch })); } catch {} };
+ // A boot that follows an update means the new build is running: say so for the pages.
+ {
+  const prior = readUpdateState();
+  if (prior?.phase === "restarting") writeUpdateState({ phase: "done", version: prior.version || startedVersion });
+  else if (prior?.phase === "downloading" || prior?.phase === "installing") writeUpdateState({ phase: "idle", version: prior.version || "" });
+ }
+ handlers.set("update:state", () => readUpdateState());
  const readAutoJson = () => { try { return JSON.parse(readFileSync(join(USER_DATA, "auto.json"), "utf8")) || {}; } catch { return {}; } };
  const serverMode = (() => {
   const auto = readAutoJson();
@@ -333,14 +345,17 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   const asset = updateCore.pickAsset(release, "linux");
   if (!asset) return { error: `v${release.version} has no Linux build` };
   const file = join(paths.temp, "prism-update", asset.name);
-  try { await updateCore.download({ url: asset.url, file, token }); } catch (error) { return { error: error.message }; }
+  writeUpdateState({ phase: "downloading", version: release.version });
+  try { await updateCore.download({ url: asset.url, file, token, onProgress: value => { const pct = Math.round((Number(value) || 0) * 100); if (pct % 5 === 0) writeUpdateState({ phase: "downloading", version: release.version, progress: Number(value) || 0 }); } }); } catch (error) { writeUpdateState({ phase: "idle", version: release.version }); return { error: error.message }; }
+  writeUpdateState({ phase: "installing", version: release.version });
   let applied = null;
-  try { applied = updateCore.applyLinux({ root: installRoot, tarFile: file }); } catch (error) { return { error: error.message }; }
+  try { applied = updateCore.applyLinux({ root: installRoot, tarFile: file }); } catch (error) { writeUpdateState({ phase: "idle", version: release.version }); return { error: error.message }; }
   try {
    const Server = require(join(ROOT, "desktop", "server.js"));
    await updateCore.fixSandbox(installRoot, Server.sudoEnv());
   } catch {}
   const up = supervised();
+  writeUpdateState({ phase: up ? "restarting" : "done", version: applied.version || release.version });
   if (up) setTimeout(() => process.exit(75), 2500);
   return { ok: true, version: applied.version || release.version, restart: up };
  }
@@ -372,7 +387,15 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
  if (process.platform === "linux" && webPort > 0) {
   const tick = async () => {
    try {
-    if (!updateCore.readSettings(USER_DATA).install || llmActive > 0) return;
+    const auto = updateCore.readSettings(USER_DATA);
+    if (llmActive > 0) return;
+    if (!auto.install) {
+     // Auto-install off: still say that an update exists, so a watching page can show it.
+     const release = await updateCore.latest({ token: updateCore.tokenOf(auto) }).catch(() => null);
+     const current = updateCore.currentVersion(ROOT);
+     if (release?.version && updateCore.isNewer(release.version, current)) writeUpdateState({ phase: "available", version: release.version });
+     return;
+    }
     const result = await runUpdate({ force: false });
     if (result.ok) console.log(`[update] ${updateCore.message(result)}`);
     else if (result.error && !result.latest) console.log(`[update] auto-update skipped: ${result.error}`);

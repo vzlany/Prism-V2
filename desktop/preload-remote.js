@@ -7,4 +7,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('openghostRemote', {
  back: () => ipcRenderer.invoke('devices:back'),
+ // What the device this window is watching is doing with updates: the PC shows Windows
+ // notifications for "downloading" and "updated and running again".
+ updateNotify: payload => ipcRenderer.send('devices:update-toast', payload || {}),
 });

@@ -9165,6 +9165,13 @@ html.is-server-mode .welcome ghost-thinking{display:none}
 .sys-bar.is-thin{height:3px;margin-top:4px}
 .sys-bar.is-thin span{background:linear-gradient(90deg,#8fb3ff,#c6d6ff)}
 
+/* Prism V2: the "this device is updating" chip — a remote window or phone sees the state
+   of the machine it is looking at while its updater works */
+.update-notice{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:70;max-width:calc(100vw - 24px);padding:6px 14px;border-radius:999px;background:rgba(88,131,255,.16);box-shadow:inset 0 0 0 1px rgba(88,131,255,.35);color:#cfe0ff;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.update-notice[hidden]{display:none}
+.update-notice.is-busy{animation:update-notice-pulse 1.6s ease-in-out infinite}
+@keyframes update-notice-pulse{0%,100%{opacity:.78}50%{opacity:1}}
+
 /* Prism V2: settings tabs marked hidden must really disappear (the display:flex above used
    to win over the attribute, so the desktop-only Server and Auto pages leaked into browsers) */
 .settings-tab[hidden]{display:none}

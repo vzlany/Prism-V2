@@ -848,6 +848,15 @@ class Settings {
    </div>
    <div class="settings-row is-wide">
     <div class="settings-text">
+     <span class="settings-label">${escapeHtml(I18n.t('settings.prompt.server'))}</span>
+     <p class="settings-hint">${escapeHtml(I18n.t('settings.prompt.serverHint'))}</p>
+    </div>
+    <div class="settings-control">
+     <textarea class="settings-key prompt-server" rows="4" spellcheck="true" placeholder="${escapeHtml(I18n.t('settings.prompt.serverPlaceholder'))}">${escapeHtml(data.server || '')}</textarea>
+    </div>
+   </div>
+   <div class="settings-row is-wide">
+    <div class="settings-text">
      <span class="settings-label">${escapeHtml(I18n.t('settings.prompt.module'))}</span>
      <p class="settings-hint">${escapeHtml(I18n.t('settings.prompt.moduleHint'))}</p>
     </div>
@@ -886,6 +895,8 @@ class Settings {
   };
   const enabled = node.querySelector('.prompt-enabled');
   const global = node.querySelector('.prompt-global');
+  const serverText = node.querySelector('.prompt-server');
+  serverText?.addEventListener('change', () => save({ server: serverText.value.trim() }));
   const select = node.querySelector('.prompt-model');
   const modelText = node.querySelector('.prompt-model-text');
   let timer = 0;

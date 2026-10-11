@@ -385,6 +385,7 @@ async function openRemoteWindow(device) {
    const text = event?.message || '';
    if (text) console.log(`[remote] ${text}`);
   });
+  attachContextMenu(win.webContents);
   win.on('closed', () => { stopRemoteWatch(); if (remoteWin === win) remoteWin = null; });
   remoteWin = win;
  }
@@ -610,6 +611,22 @@ ipcMain.handle('devices:prompt', async event => {
  return { show: list.devices.length > 0, ...list, name: os.hostname(), server: serverMode() };
 });
 ipcMain.handle('devices:pick', async (event, id) => (fromApp(event) ? await pickDevice(id) : null));
+// The remote page reports the device's updater state; the PC (a Windows client, never a
+// server) shows a toast while the other machine downloads an update and when it is back.
+ipcMain.on('devices:update-toast', (event, payload) => {
+ if (!remoteWin || remoteWin.isDestroyed() || event.sender !== remoteWin.webContents) return;
+ if (process.platform !== 'win32' || serverMode()) return;
+ const name = remoteWin.__deviceName || 'the device';
+ const version = payload?.version ? `v${String(payload.version).replace(/^v/, '')}` : '';
+ const kind = payload?.kind === 'done' ? 'done' : payload?.kind === 'downloading' ? 'downloading' : '';
+ if (!kind) return;
+ try {
+  const notification = new Notification(kind === 'done'
+   ? { title: `${name} updated`, body: `Prism V2${version ? ` ${version}` : ''} is installed and running there.` }
+   : { title: `${name} is updating`, body: `An update${version ? ` (${version})` : ''} is downloading on ${name}.` });
+  notification.show();
+ } catch {}
+});
 // "This PC" pressed inside a remote window: close it and bring the local app back.
 ipcMain.handle('devices:back', event => {
  if (!remoteWin || remoteWin.isDestroyed() || event.sender !== remoteWin.webContents) return false;
@@ -727,6 +744,35 @@ function startAttention(win, bad = true) {
  try { win.flashFrame(true); } catch {}
 }
 
+// Right-click support: on a misspelled word the menu offers the spellchecker's suggestions
+// (click one and the word is replaced in place); on any editable field the usual cut/copy/
+// paste; on selected text a plain Copy.
+function attachContextMenu(contents) {
+ contents.on('context-menu', (event, params) => {
+  const template = [];
+  if (params.misspelledWord) {
+   for (const suggestion of (params.dictionarySuggestions || []).slice(0, 6)) {
+    template.push({ label: suggestion, click: () => contents.replaceMisspelling(suggestion) });
+   }
+   if (!template.length) template.push({ label: 'No spelling suggestions', enabled: false });
+   template.push({ type: 'separator' });
+   template.push({ label: `Add “${params.misspelledWord}” to dictionary`, click: () => { try { contents.session.addWordToSpellCheckerDictionary(params.misspelledWord); } catch {} } });
+   template.push({ type: 'separator' });
+  }
+  if (params.isEditable) {
+   template.push({ label: 'Cut', enabled: Boolean(params.editFlags?.canCut), click: () => contents.cut() });
+   template.push({ label: 'Copy', enabled: Boolean(params.editFlags?.canCopy), click: () => contents.copy() });
+   template.push({ label: 'Paste', enabled: Boolean(params.editFlags?.canPaste), click: () => contents.paste() });
+   template.push({ type: 'separator' });
+   template.push({ label: 'Select All', enabled: Boolean(params.editFlags?.canSelectAll), click: () => contents.selectAll() });
+  } else if (params.selectionText) {
+   template.push({ label: 'Copy', click: () => contents.copy() });
+  }
+  if (!template.length) return;
+  Menu.buildFromTemplate(template).popup({ window: BrowserWindow.fromWebContents(contents) });
+ });
+}
+
 function createWindow() {
  // The window follows the monitor: a little wider and taller than the old fixed 1280×840,
  // with sensible bounds for very small and very large screens.
@@ -781,6 +827,7 @@ function createWindow() {
   const where = event?.sourceId ? ` (${event.sourceId}:${event.lineNumber})` : '';
   if (text) console.log(`[renderer] ${text}${where}`);
  });
+ attachContextMenu(win.webContents);
  win.webContents.on('will-attach-webview', (event, prefs, params) => {
   if (!Browser.guard(win.webContents, prefs, params)) event.preventDefault();
  });

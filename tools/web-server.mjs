@@ -302,6 +302,24 @@ function writeClients() {
  }, 300);
 }
 
+// The updater's own state (available → downloading → installing → restarting → done):
+// mirrored to every page, so a remote window or a phone can say that the device it is
+// looking at is updating.
+const updateStateFile = join(USER_DATA, "update-state.json");
+let lastUpdateState = "";
+const readUpdateStateFile = () => { try { return JSON.parse(readFileSync(updateStateFile, "utf8")); } catch { return null; } };
+function broadcastUpdateState(force = false) {
+ const state = readUpdateStateFile();
+ const key = JSON.stringify(state || null);
+ if (!force && key === lastUpdateState) return;
+ lastUpdateState = key;
+ for (const client of wss.clients) {
+  if (client.readyState !== 1) continue;
+  try { client.send(JSON.stringify({ t: "event", channel: "update:state", args: [state] })); } catch {}
+ }
+}
+setInterval(() => broadcastUpdateState(), 2000);
+
 wss.on("connection", (ws, req) => {
  const data = { id: ++connections };
  data.send = (channel, ...eventArgs) => { try { ws.send(JSON.stringify({ t: "event", channel, args: eventArgs })); } catch {} };
@@ -331,6 +349,7 @@ wss.on("connection", (ws, req) => {
  const mine = new Set();
  data.send("presence:event", presenceList());
  data.send("app:status", [appStatus()]);
+ data.send("update:state", readUpdateStateFile());
  ws.on("close", () => {
   for (const id of mine) presence.delete(id);
   if (mine.size) broadcastPresence();

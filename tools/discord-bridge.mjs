@@ -71,8 +71,10 @@ const lockFree = () => {
 };
 function takeLock() { writeJson(lockFile, { pid: process.pid, at: Date.now(), name: hostname() }); }
 
-// This machine plus every LAN device whose bot is actually online (the beacon carries the
-// flag; a device without one could never answer). A server sorts first, then by name.
+// This machine plus every LAN device that is online. The bot flag says whether that device's
+// bot is really answering; devices without one are still offered, and the asker answers for
+// them when they are chosen. Every session sees the same table, so they all agree on who
+// asks and who stays quiet. A server sorts first, then by name.
 function deviceTable() {
  const name = hostname();
  const self = { name, server: Boolean(host.serverMode), bot: true, self: true };
@@ -80,13 +82,15 @@ function deviceTable() {
  try {
   const list = host.deviceList();
   for (const device of list?.devices || []) {
-   if (!device?.bot || !device.name || device.name === name) continue;
-   others.push({ name: device.name, server: Boolean(device.server), bot: true, self: false });
+   if (!device?.name || device.name === name) continue;
+   others.push({ name: device.name, server: Boolean(device.server), bot: Boolean(device.bot), self: false });
   }
  } catch {}
  return [self, ...others].sort((a, b) => (Number(b.server) - Number(a.server)) || a.name.localeCompare(b.name));
 }
-const amPrimary = table => table[0]?.name === hostname();
+// Who may ask / answer when others are offline: the first device whose bot is alive.
+const askerOf = table => table.find(device => device.bot) || null;
+const amAsker = table => askerOf(table)?.name === hostname();
 
 async function askDevice(channel, table, force = false) {
  const last = state.lastAsk?.[channel];
@@ -122,8 +126,9 @@ async function handleInteraction(data) {
  state.routes = { ...(state.routes || {}), [channel]: device };
  saveRoutes();
  const table = await deviceTable();
- const alive = table.some(entry => entry.name === device);
- const line = alive ? `**${device}** will answer here.` : `**${device}** is offline — **${hostname()}** answers instead.`;
+ const target = table.find(entry => entry.name === device) || null;
+ const alive = Boolean(target?.bot);
+ const line = alive ? `**${device}** will answer here.` : `**${device}** has no bot online — **${hostname()}** answers instead.`;
  await api(`/interactions/${data.id}/${data.token}/callback`, {
   method: "POST",
   body: JSON.stringify({ type: 7, data: { embeds: [{ title: "🤖 Where should Prism run?", description: line, color: 0x7a8bff }], components: [] } }),
@@ -135,8 +140,8 @@ async function handleInteraction(data) {
   enqueue({ channel, message: pending, routed: true });
   return;
  }
- // A selection never means silence: if the chosen bot is off, the primary takes the work.
- if (!alive && amPrimary(table)) {
+ // A selection never means silence: if the chosen bot is off, the asker takes the work.
+ if (!alive && amAsker(table)) {
   pendingByChannel.delete(channel);
   enqueue({ channel, message: pending, routed: true });
  }
@@ -910,10 +915,15 @@ async function handle(channel, message, opts = {}) {
   const chosen = table.find(device => device.name === route) || null;
   if (table.length > 1 && !chosen) {
    pendingByChannel.set(channel, message);
-   if (amPrimary(table)) await askDevice(channel, table);
+   if (amAsker(table)) await askDevice(channel, table);
    return;
   }
-  if (chosen && chosen.name !== hostname()) {
+  if (chosen && chosen.bot && chosen.name !== hostname()) {
+   pendingByChannel.set(channel, message);
+   return;
+  }
+  // Chosen, but that device has no bot online: the asker answers for it.
+  if (chosen && !chosen.bot && !amAsker(table)) {
    pendingByChannel.set(channel, message);
    return;
   }

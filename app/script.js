@@ -138,6 +138,47 @@ const webDeviceAsk = async () => {
 if (window.openghost?.web) setTimeout(webDeviceAsk, 1500);
 // The server's System panel: live machine statistics and the console stream.
 const systemPanel = new SystemPanel({ panel: document.querySelector('.system-panel') });
+// A device that is updating says so right in the page: the web server mirrors the updater's
+// state of the device this page runs on — a remote window or a phone sees it too. Inside the
+// app's remote window the PC also gets a Windows notification for start and finish.
+if (window.openghost?.update?.onState) {
+ const notice = document.createElement('div');
+ notice.className = 'update-notice';
+ notice.hidden = true;
+ document.body.append(notice);
+ let device = '';
+ let notified = new Set();
+ let hideTimer = 0;
+ window.openghost?.engine?.info?.().then(info => { device = String(info?.name || ''); }).catch(() => {});
+ const maybeToast = state => {
+  if (!window.openghostRemote?.updateNotify) return;
+  if (state?.phase !== 'downloading' && state?.phase !== 'done') return;
+  const key = `${state.phase}:${state.version || ''}`;
+  if (notified.has(key)) return;
+  notified.add(key);
+  try { window.openghostRemote.updateNotify({ kind: state.phase, version: state.version || '', name: device }); } catch {}
+ };
+ window.openghost.update.onState(state => {
+  clearTimeout(hideTimer);
+  const version = state?.version ? `v${String(state.version).replace(/^v/, '')}` : '';
+  const name = device || I18n.t('update.noticeDevice');
+  const phase = state?.phase || 'idle';
+  const show = (text, busy) => {
+   notice.textContent = text;
+   notice.hidden = false;
+   notice.classList.toggle('is-busy', Boolean(busy));
+  };
+  if (phase === 'available') show(I18n.t('update.noticeAvailable', { device: name, version: version || I18n.t('update.noticeLatest') }));
+  else if (phase === 'downloading') show(I18n.t('update.noticeDownloading', { device: name, version: version ? ` ${version}` : '' }), true);
+  else if (phase === 'installing') show(I18n.t('update.noticeInstalling', { device: name }), true);
+  else if (phase === 'restarting') show(I18n.t('update.noticeRestarting', { device: name }), true);
+  else if (phase === 'done') {
+   show(I18n.t('update.noticeDone', { device: name, version }));
+   hideTimer = setTimeout(() => { notice.hidden = true; }, 60000);
+  } else notice.hidden = true;
+  maybeToast(state);
+ });
+}
 // On the web, everything the server logs is visible here; the page's own errors are mirrored
 // into that stream too, so a remote window never hides a failure.
 if (!window.openghost?.desktop && window.openghost?.logs?.page) {
