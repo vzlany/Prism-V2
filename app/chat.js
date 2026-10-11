@@ -1661,16 +1661,18 @@ class Chat {
   for (const part of turn.parts) {
    const { entry, view } = part;
    if (entry.thinking) parts.push({ kind: 'thinking', text: tail(entry.thinking, 2400), live: Boolean(view.thinking?.live) });
-   for (const card of view.el.querySelectorAll(':scope > .tool')) {
+   for (const card of view.el.querySelectorAll(':scope > .tool, :scope > .tool-group .tool-group-body > .tool')) {
     const state = card.classList.contains('is-error') ? 'error' : card.classList.contains('is-done') ? 'done' : 'running';
     parts.push({
      kind: 'tool',
      // The real tool, so the mirror draws the very same card (icon, title, kind).
      tool: card.dataset.toolName || '',
      toolKind: card.dataset.toolKind || 'command',
-     title: card.querySelector('.tool-title')?.textContent || '',
+     title: card.querySelector('.tool-title')?.textContent || card.querySelector('.tool-reason')?.textContent || '',
      summary: card.querySelector('.tool-summary')?.textContent || '',
      state,
+     // How long the step took, so the watching device shows the same "(1.3s)".
+     ms: Number(card.dataset.ms) || null,
      output: tail(card.querySelector('.tool-output')?.textContent || '', 1200),
     });
    }
@@ -1697,7 +1699,7 @@ class Chat {
  publishLive(conv, turn) {
   if (!window.Presence?.publish || !turn) return;
   clearTimeout(turn.liveTimer);
-  const wait = 700 - (performance.now() - (turn.liveAt || 0));
+  const wait = 35 - (performance.now() - (turn.liveAt || 0));
   if (wait > 0) {
    turn.liveTimer = setTimeout(() => this.publishLive(conv, turn), wait);
    return;
@@ -1780,7 +1782,7 @@ class Chat {
    for (let index = 0; index < calls.length; index++) if (outputs[index] === undefined) await runOne(index);
    for (let index = 0; index < calls.length; index++) {
     const output = outputs[index] ?? '';
-    part.entry.steps.push({ role: 'tool', tool_call_id: calls[index].id, content: output });
+    part.entry.steps.push({ role: 'tool', tool_call_id: calls[index].id, content: output, ...(Number.isFinite(calls[index].ms) ? { ms: calls[index].ms } : {}) });
     conv.tokens += Math.ceil(output.length / CONTEXT.chars);
    }
    if (images.length) {
@@ -1867,18 +1869,17 @@ class Chat {
   if (!server) return '';
   const latest = [...(conv.messages || [])].reverse().find(entry => entry.role === 'user' && entry.device);
   const from = latest?.device || 'another device';
-  // The server section is what Settings -> Prompt writes; the built-in lines stand in when
-  // that field is empty. The machine belongs to the user alone, and the prompt says so.
+  // The server section: what Settings -> Prompt writes, else the built-in default (which the
+  // field shows too, so it can be edited from there). The machine belongs to the user alone.
   let custom = '';
   try { custom = String(window.Prompts?.data?.server || '').trim(); } catch {}
-  const lines = custom
-   ? custom.split('\n')
-   : [
-    `- This Prism runs on the user's server${name ? ` (${name})` : ''}; the user is talking to you from ${from}, over the network.`,
-    '- Every tool acts on THIS server — files, commands, installs, long-running jobs — never on the user\'s personal computer. Say which machine a path or program lives on when it could be ambiguous.',
-    '- This server belongs to the user alone — nobody else uses it. You may create, install, change and run whatever the task needs.',
-   ];
-  return ['# This machine is a server', ...lines, ...(custom ? [`- The user is talking to you from ${from}, over the network.`] : [])].join('\n');
+  const fallback = String(window.Prompts?.defaultServer || '').trim();
+  const lines = custom ? custom.split('\n') : fallback ? fallback.split('\n') : [
+   `- This Prism runs on the user's server${name ? ` (${name})` : ''}; the user is talking to you from ${from}, over the network.`,
+   '- Every tool acts on THIS server — files, commands, installs, long-running jobs — never on the user\'s personal computer. Say which machine a path or program lives on when it could be ambiguous.',
+   '- This server belongs to the user alone — nobody else uses it. You may create, install, change and run whatever the task needs.',
+  ];
+  return ['# This machine is a server', ...lines, `- The user is talking to you from ${from}, over the network.`].join('\n');
  }
 
  context() {
@@ -2160,6 +2161,7 @@ class Chat {
   } catch (error) {
    card?.setResult(error.message, true);
    if (simple) this.simpleDone(simple, performance.now() - began, true);
+   call.ms = Math.round(performance.now() - began);
    this.publishLive(conv, turn);
    return `Error: ${error.message}`;
   } finally {
@@ -2581,6 +2583,7 @@ class Chat {
    else if (step.role === 'tool') {
     const call = calls.find(item => item.id === step.tool_call_id);
     if (call) call.__output = step.content;
+    if (call && Number.isFinite(step.ms)) call.__ms = step.ms;
    }
   }
   // Simple visuals draws a reloaded step as the same timeline line the live one wore: one
@@ -2597,6 +2600,7 @@ class Chat {
     card = new ToolCard({ kind: 'command', title: call.function?.name || '', code: call.function?.arguments || '' });
    }
    card.setResult(call.__output || '');
+   if (call.__ms) card.setDuration(call.__ms);
    if (simple && !card.parallel) {
     if (!group) {
      group = this.groupElement();

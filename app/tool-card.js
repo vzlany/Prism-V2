@@ -131,6 +131,7 @@ class ToolCard {
  // How long the step took, shown beside a Simple visuals line.
  setDuration(ms) {
   if (!this.timeEl || !Number.isFinite(ms)) return;
+  this.el.dataset.ms = String(Math.max(1, Math.round(ms)));
   this.timeEl.textContent = ms >= 1000 ? `(${(ms / 1000).toFixed(1)}s)` : `(${Math.max(1, Math.round(ms))}ms)`;
   this.timeEl.hidden = false;
  }

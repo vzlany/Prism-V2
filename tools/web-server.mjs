@@ -88,6 +88,23 @@ const server = createServer((req, res) => {
   res.end(body);
  };
  if (url.pathname === "/ws") { res.writeHead(426); res.end("websocket only"); return; }
+ if (url.pathname === "/live" && req.method === "POST") {
+  // The desktop app pushes its live runs here at typing speed (its presence.json path is
+  // slower): the page watching that machine gets the mirror about every 35 ms.
+  let body = "";
+  req.on("data", chunk => { body += chunk; if (body.length > 2 * 1024 * 1024) req.destroy(); });
+  req.on("end", () => {
+   try {
+    const data = JSON.parse(body);
+    if (Array.isArray(data?.runs)) {
+     desktopPresence = data.runs.filter(run => run?.id);
+     broadcastPresence();
+    }
+   } catch {}
+   send(200, "ok", "text/plain");
+  });
+  return;
+ }
  if (url.pathname === "/file") {
   // A file the agent attached, streamed as it is (any type) with its own name.
   const file = url.searchParams.get("path") || "";

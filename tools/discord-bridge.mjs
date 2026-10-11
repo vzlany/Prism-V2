@@ -906,6 +906,12 @@ async function handle(channel, message, opts = {}) {
   return void await post(channel, `🧠 model: \`${state.model}\``);
  }
 
+ // A reply to a finish DM continues the exact app conversation that notification came from —
+ // this runs before any routing: the conversation lives on the device whose map knows it,
+ // and the other devices fall through to the question below.
+ const target = replyTarget(message?.message_reference?.message_id || message?.referenced_message?.id);
+ if (target) return void await replyInChat(channel, text, target);
+
  // Where should this turn run? With another device's bot online the message waits for the
  // choice (the buttons on the question the primary posted), and every device answers only
  // its own routed messages. Alone, the bot keeps answering directly.
@@ -929,10 +935,6 @@ async function handle(channel, message, opts = {}) {
   }
  }
  pendingByChannel.delete(channel);
-
- // A reply to a finish DM continues the exact app conversation that notification came from.
- const target = replyTarget(message?.message_reference?.message_id || message?.referenced_message?.id);
- if (target) return void await replyInChat(channel, text, target);
 
  // The conversation this turn belongs to (a fresh one is made if none is chosen).
  const conversation = activeChat();

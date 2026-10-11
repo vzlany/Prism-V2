@@ -144,44 +144,63 @@ async function note(text, files = []) {
 async function send(title, outcome, summary, files = [], chatId = '') {
  const p = load();
  if (!p.enabled || !p.token || !p.userId) return { ok: false, error: 'not configured' };
- try {
-  const headers = { authorization: `Bot ${p.token}`, 'content-type': 'application/json' };
-  const dm = await fetch('https://discord.com/api/v10/users/@me/channels', {
-   method: 'POST',
-   headers,
-   body: JSON.stringify({ recipient_id: String(p.userId) }),
-  });
-  if (!dm.ok) return { ok: false, error: `dm channel ${dm.status}` };
-  const channel = (await dm.json()).id;
-  // Each posted message answers with its id: remembered so a reply to it can continue the
-  // app conversation it came from.
-  const post = content => fetch(`https://discord.com/api/v10/channels/${channel}/messages`, {
-   method: 'POST',
-   headers,
-   body: JSON.stringify({ content }),
-  }).then(async res => {
-   if (!res.ok) return '';
-   try { return (await res.json())?.id || ''; } catch { return ''; }
-  }, () => '');
-  // The header and the first piece of the reply share a message when they fit together.
-  const header = `**${String(title).slice(0, 120)}** — ${String(outcome || 'completed')}`;
-  const parts = chunks(summary);
-  let first = header;
-  if (parts.length && first.length + 2 + parts[0].length <= 2000) first += `\n${parts.shift()}`;
-  const ids = [];
-  const firstId = await post(first);
-  if (firstId) ids.push(firstId);
-  for (const part of parts) {
-   const id = await post(part);
-   if (id) ids.push(id);
+ // Discord hiccups (rate limits, 5xx, a dropped connection) used to lose the DM silently:
+ // one retry after a beat covers the transient cases.
+ for (let attempt = 1; attempt <= 2; attempt++) {
+  try {
+   const headers = { authorization: `Bot ${p.token}`, 'content-type': 'application/json' };
+   const dm = await fetch('https://discord.com/api/v10/users/@me/channels', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ recipient_id: String(p.userId) }),
+   });
+   if (!dm.ok) {
+    if (attempt < 2 && (dm.status === 429 || dm.status >= 500)) {
+     await new Promise(resolve => setTimeout(resolve, 1500));
+     continue;
+    }
+    return { ok: false, error: `dm channel ${dm.status}` };
+   }
+   const channel = (await dm.json()).id;
+   // Each posted message answers with its id: remembered so a reply to it can continue the
+   // app conversation it came from.
+   const post = content => fetch(`https://discord.com/api/v10/channels/${channel}/messages`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ content }),
+   }).then(async res => {
+    if (!res.ok) return '';
+    try { return (await res.json())?.id || ''; } catch { return ''; }
+   }, () => '');
+   // The header and the first piece of the reply share a message when they fit together.
+   const header = `**${String(title).slice(0, 120)}** — ${String(outcome || 'completed')}`;
+   const parts = chunks(summary);
+   let first = header;
+   if (parts.length && first.length + 2 + parts[0].length <= 2000) first += `\n${parts.shift()}`;
+   const ids = [];
+   const firstId = await post(first);
+   if (firstId) ids.push(firstId);
+   for (const part of parts) {
+    const id = await post(part);
+    if (id) ids.push(id);
+   }
+   const ok = ids.length > 0;
+   if (!ok && attempt < 2) {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    continue;
+   }
+   if (chatId && ids.length) remember(ids, chatId);
+   const attached = await upload(p.token, channel, files);
+   return { ok, ...(attached.length ? { attached } : {}) };
+  } catch (error) {
+   if (attempt < 2) {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    continue;
+   }
+   return { ok: false, error: String(error?.message || error).slice(0, 200) };
   }
-  const ok = ids.length > 0;
-  if (chatId && ids.length) remember(ids, chatId);
-  const attached = await upload(p.token, channel, files);
-  return { ok, ...(attached.length ? { attached } : {}) };
- } catch (error) {
-  return { ok: false, error: String(error?.message || error).slice(0, 200) };
  }
+ return { ok: false, error: 'send failed' };
 }
 
 function register(fromApp) {

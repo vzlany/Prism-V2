@@ -13,7 +13,7 @@ const core = require('./update-core');
 const Server = require('./server');
 
 const DELAY = 3500;               // let the window settle before the first check
-const PERIOD = 6 * 60 * 60 * 1000;
+const PERIOD = 10 * 60 * 1000;    // check every ten minutes, so an update is offered promptly
 const RETRY = 10 * 60 * 1000;     // an automatic install waits for idle and tries again
 
 let lastInfo = null;

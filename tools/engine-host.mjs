@@ -105,14 +105,15 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
  Discord.register(allow);
  // Watch LLM activity: an automatic update swaps the install only when nothing streams.
  let llmActive = 0;
+ let lastRunAt = Date.now();
  const llmStart = listeners.get("llm:start");
- if (llmStart) listeners.set("llm:start", (...args) => { llmActive++; writeBusy(); return llmStart(...args); });
+ if (llmStart) listeners.set("llm:start", (...args) => { llmActive++; lastRunAt = Date.now(); writeBusy(); return llmStart(...args); });
  // A busy mirror for this machine's updater: the app waits for quiet before installing, and
  // the turns of the web pages (this process) and the Discord bot (its own process) live
  // outside the app — each writes what it is doing into a small file the updater reads.
  const busyFile = join(USER_DATA, webPort > 0 ? "web-busy.json" : "bot-busy.json");
  function writeBusy() {
-  try { writeFileSync(busyFile, JSON.stringify({ at: Date.now(), busy: llmActive })); } catch {}
+  try { writeFileSync(busyFile, JSON.stringify({ at: Date.now(), busy: llmActive, lastAt: lastRunAt })); } catch {}
  }
  setInterval(writeBusy, 10000).unref?.();
  // The mode menu's "DM me on Discord when done" switch on a headless web run.
@@ -220,10 +221,17 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   else if (prior?.phase === "downloading" || prior?.phase === "installing") writeUpdateState({ phase: "idle", version: prior.version || "" });
  }
  handlers.set("update:state", () => readUpdateState());
- const readAutoJson = () => { try { return JSON.parse(readFileSync(join(USER_DATA, "auto.json"), "utf8")) || {}; } catch { return {}; } };
+ // The switches live in the store (the app writes store/auto.json — this used to read the
+ // parent folder, so an engine the app spawned never saw "server: true" at all).
+ const readAutoJson = () => {
+  for (const file of [join(USER_DATA, "store", "auto.json"), join(USER_DATA, "auto.json")]) {
+   try { return JSON.parse(readFileSync(file, "utf8")) || {}; } catch {}
+  }
+  return {};
+ };
  const serverMode = (() => {
   const auto = readAutoJson();
-  return auto.server === true || (process.platform === "linux" && Boolean(process.env.PRISM_SUPERVISED || process.env.INVOCATION_ID || process.env.JOURNAL_STREAM));
+  return auto.server === true || process.env.PRISM_SERVER === "1" || (process.platform === "linux" && Boolean(process.env.PRISM_SUPERVISED || process.env.INVOCATION_ID || process.env.JOURNAL_STREAM));
  })();
  let beacon = null;
  // Only an engine that actually serves the web UI (a port) advertises itself: the Discord
@@ -388,7 +396,7 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   const tick = async () => {
    try {
     const auto = updateCore.readSettings(USER_DATA);
-    if (llmActive > 0) return;
+    if (llmActive > 0 || Date.now() - lastRunAt < 10 * 60 * 1000) return;
     if (!auto.install) {
      // Auto-install off: still say that an update exists, so a watching page can show it.
      const release = await updateCore.latest({ token: updateCore.tokenOf(auto) }).catch(() => null);
@@ -404,7 +412,7 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
    }
   };
   setTimeout(tick, 90 * 1000);
-  setInterval(tick, 6 * 60 * 60 * 1000);
+  setInterval(tick, 10 * 60 * 1000);
  }
 
  return {

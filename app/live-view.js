@@ -96,6 +96,7 @@ class LiveView {
    if (part.state !== 'running' && !node.done) {
     node.done = true;
     node.card.setResult(part.output || '', part.state === 'error');
+    if (part.ms) node.card.setDuration(part.ms);
    }
    return;
   }

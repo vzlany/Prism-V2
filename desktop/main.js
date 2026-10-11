@@ -193,9 +193,30 @@ function watchStore(win) {
 
 // The turns this window is running are mirrored into presence.json; `prism web` reads it and
 // shows the phone the same busy chats the app shows. The file is kept fresh while runs live
-// so a reader can tell a live run from one left behind by a closed app.
+// so a reader can tell a live run from one left behind by a closed app. An extra, much
+// faster channel pushes the same runs straight to the local web server (its /live endpoint),
+// so a page watching this machine sees text arrive at typing speed instead of every second.
 const presenceRuns = new Map();
 let presenceTimer = 0;
+// When anything last worked here: an automatic update only installs after ten quiet minutes,
+// so it never lands between two steps of the same session.
+let lastPresenceAt = Date.now();
+let livePushAt = 0;
+let livePushTimer = 0;
+function pushLive() {
+ livePushTimer = 0;
+ livePushAt = performance.now();
+ const auto = readAuto();
+ if (!auto.web) return;
+ const port = webPort(auto);
+ const body = JSON.stringify({ at: Date.now(), runs: [...presenceRuns.values()] });
+ fetch(`http://127.0.0.1:${port}/live`, { method: 'POST', headers: { 'content-type': 'application/json' }, body }).catch(() => {});
+}
+function pushLiveSoon() {
+ const wait = 35 - (performance.now() - livePushAt);
+ if (wait > 0) { if (!livePushTimer) livePushTimer = setTimeout(pushLive, wait); return; }
+ pushLive();
+}
 // Atomic write: the web server watches this file, and a reader that catches a just-truncated
 // file would parse "" and believe every run stopped for a moment.
 function flushPresence() {
@@ -209,9 +230,11 @@ function flushPresence() {
 function touchPresence() {
  clearTimeout(presenceTimer);
  presenceTimer = setTimeout(flushPresence, 250);
+ pushLiveSoon();
 }
 ipcMain.on('presence:set', (event, id, info) => {
  if (!fromApp(event) || !id) return;
+ lastPresenceAt = Date.now();
  if (info) presenceRuns.set(id, { id, ...info, at: Date.now() });
  else presenceRuns.delete(id);
  touchPresence();
@@ -481,18 +504,21 @@ function watchRemote(device, win) {
  remoteWatch = setInterval(probe, 3000);
 }
 
-// True when nothing is working anywhere on this machine: the app's own turns (parallel runs
-// and subagents included) and the turns running inside its web child or the Discord bot —
-// both mirror their activity into small busy files while they work.
+// True when nothing has been working anywhere on this machine for ten minutes: the app's
+// own turns (parallel runs and subagents included) and the turns in its web child or the
+// Discord bot — each mirrors its activity into small busy files with a lastAt stamp.
 function updatesIdle() {
- if (presenceRuns.size) return false;
+ const now = Date.now();
+ if (presenceRuns.size) { lastPresenceAt = now; return false; }
  for (const name of ['web-busy', 'bot-busy']) {
   try {
    const data = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), `${name}.json`), 'utf8'));
-   if (Date.now() - (Number(data?.at) || 0) < 30000 && Number(data?.busy) > 0) return false;
+   if (Number(data?.busy) > 0 && now - (Number(data?.at) || 0) < 30000) { lastPresenceAt = now; return false; }
+   const last = Number(data?.lastAt) || 0;
+   if (last && now - last < 10 * 60 * 1000) return false;
   } catch {}
  }
- return true;
+ return now - lastPresenceAt >= 10 * 60 * 1000;
 }
 
 async function pickDevice(id) {
@@ -522,7 +548,7 @@ function startWeb(auto = readAuto()) {
  const script = path.join(ROOT, 'tools', 'web-server.mjs');
  try {
   webChild = spawn(process.execPath, [script, '--port', String(webPort(auto)), '--host', '0.0.0.0', '--no-open', ...(PROFILE ? ['--profile', PROFILE] : [])], {
-   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PRISM_NO_BEACON: '1' },
+   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PRISM_NO_BEACON: '1', ...(serverMode(auto) ? { PRISM_SERVER: '1' } : {}) },
    windowsHide: true,
    stdio: 'inherit',
   });
