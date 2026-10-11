@@ -86,6 +86,46 @@ function applyLinuxAutostart(enabled, args = []) {
  }
 }
 
+// --------------------------------------------------------------- autostart after updates
+// An update must never leave the autostart of an older install behind: at the end of every
+// update (and when a new build boots) every prism*.desktop in the autostart folder is
+// checked — this install's entry is rewritten to the current binary, entries that point to
+// a tree or binary that no longer exists are removed. When nothing is set up, nothing is
+// created (that stays the user's choice in Settings -> Auto).
+function ensureLinuxAutostart(installRoot = '') {
+ if (process.platform !== 'linux') return { fixed: 0, removed: 0 };
+ const dir = path.dirname(autostartFile());
+ const own = path.basename(autostartFile());
+ const binary = installRoot ? path.join(installRoot, 'prism-v2') : process.execPath;
+ let names = [];
+ try { names = fs.readdirSync(dir).filter(name => /^prism.*\.desktop$/i.test(name)); } catch { return { fixed: 0, removed: 0 }; }
+ if (!names.length) return { fixed: 0, removed: 0 };
+ const result = { fixed: 0, removed: 0 };
+ for (const name of names) {
+  const file = path.join(dir, name);
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
+  const exec = String(/^Exec=(.+)$/m.exec(text)?.[1] || '').trim();
+  const script = exec.split(/\s+/)[0].replace(/^"|"$/g, '');
+  const alive = Boolean(script && fs.existsSync(script));
+  if (name === own && fs.existsSync(binary)) {
+   if (script !== binary) {
+    const hidden = /--hidden/.test(exec) ? ' --hidden' : '';
+    try {
+     const next = /^Exec=/m.test(text) ? text.replace(/^Exec=.*$/m, `Exec=${quote(binary)}${hidden}`) : `${text.trimEnd()}\nExec=${quote(binary)}${hidden}\n`;
+     fs.writeFileSync(file, next);
+     result.fixed += 1;
+    } catch {}
+   }
+   continue;
+  }
+  if (!alive) {
+   try { fs.rmSync(file, { force: true }); result.removed += 1; } catch {}
+  }
+ }
+ return result;
+}
+
 // --------------------------------------------------------------- sudo (Linux)
 // sudo gets the password through an askpass helper: the helper file holds no secret, the
 // password rides in the environment for the one command being run.
@@ -163,4 +203,4 @@ function register(fromApp, ipcMain) {
  ipcMain.handle('server:sudo-test', async event => (fromApp(event) ? sudoTest() : null));
 }
 
-module.exports = { read, write, platform, info, register, applyLinuxAutostart, sudoEnv, hasSudo, sudoTest, autostartFile };
+module.exports = { read, write, platform, info, register, applyLinuxAutostart, ensureLinuxAutostart, sudoEnv, hasSudo, sudoTest, autostartFile };

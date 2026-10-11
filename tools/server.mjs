@@ -9,6 +9,7 @@
 //   node tools/server.mjs --no-web --no-bot     or either side alone
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,6 +35,23 @@ const version = () => {
 };
 const startedVersion = version();
 let watching = startedVersion;
+
+// The supervisor joins the shared instance registry and, before the children come up, stops
+// every Prism process that belongs to another build — an old web server or bridge from before
+// an update, an app started by a stale autostart, a second install. This is what keeps one
+// Prism in charge of port 8787 instead of three of them fighting over it.
+const requireModule = createRequire(import.meta.url);
+const Instances = requireModule(join(root, "desktop", "instances.js"));
+const USER_DATA = Instances.userDataFor(PROFILE);
+const instance = Instances.attach({ userData: USER_DATA, role: "server", port: Number(PORT) || 0, version: startedVersion, root });
+const sweepStrays = async why => {
+ const done = await Instances.sweep(USER_DATA, {
+  keepPid: process.pid,
+  test: entry => Instances.isForeignBuild(entry, { root, version: version() }),
+ }).catch(() => []);
+ if (done.length) log(`stopped ${done.length} leftover Prism process(es) from another build (${why})`);
+};
+sweepStrays("startup");
 
 const children = new Map();
 let stopping = false;
@@ -61,6 +79,7 @@ function start(name, script, scriptArgs) {
     if (other === name) continue;
     try { mate.kill("SIGTERM"); } catch {}
    }
+   sweepStrays("update");
   }
   log(`${name} stopped${code != null ? ` (${code})` : ""} — restarting in 5s`);
   setTimeout(() => start(name, script, scriptArgs), 5000);
@@ -83,6 +102,7 @@ setInterval(() => {
  if (!fresh || fresh === watching) return;
  log(`install changed to v${fresh} (this supervisor started v${startedVersion}) — rotating`);
  watching = fresh;
+ sweepStrays("update");
  const supervised = Boolean(process.env.PRISM_SUPERVISED || process.env.INVOCATION_ID || process.env.JOURNAL_STREAM);
  if (supervised) { shutdown("update"); process.exit(75); }
  for (const child of children.values()) { try { child.kill("SIGTERM"); } catch {} }
@@ -92,6 +112,7 @@ function shutdown(signal) {
  if (stopping) return;
  stopping = true;
  log(`${signal} — stopping`);
+ try { instance.stop(); } catch {}
  for (const child of children.values()) {
   try { child.kill("SIGTERM"); } catch {}
  }

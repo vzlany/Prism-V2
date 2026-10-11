@@ -48,7 +48,8 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Prism V2",
       "artifactName": "Prism-V2-${version}-Setup.exe",
-      "uninstallDisplayName": "Prism V2"
+      "uninstallDisplayName": "Prism V2",
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": "dmg",

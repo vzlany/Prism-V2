@@ -1130,6 +1130,21 @@ if (process.argv.includes('--create-shortcut')) {
   watchDelegate(win);
   createTray();
   applyAuto();
+  // One Prism per machine: this window announces itself in the instance registry, and any
+  // engine from another build — an app left by a stale autostart, an old web server or bot
+  // from before an update — is stopped here instead of fighting over the web port later.
+  try {
+   const Instances = require('./instances');
+   const auto = readAuto();
+   const version = app.getVersion();
+   Instances.attach({ userData: app.getPath('userData'), role: 'app', port: auto.web ? webPort(auto) : 0, version, root: ROOT });
+   Instances.sweep(app.getPath('userData'), {
+    keepPid: process.pid,
+    test: entry => entry.role !== 'server' && Instances.isForeignBuild(entry, { root: ROOT, version }),
+   }).then(done => { if (done.length) console.log('[instances] stopped', done.length, 'leftover Prism process(es) from another build'); }).catch(() => {});
+  } catch (error) {
+   console.log('[instances] registry unavailable:', error.message);
+  }
   startWeb();
   startBot();
   // Old trees from an earlier Linux self-update are cleared once nothing runs from them.

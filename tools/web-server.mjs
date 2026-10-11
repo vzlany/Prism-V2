@@ -8,6 +8,7 @@
 import { existsSync, createReadStream, mkdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
+import { createRequire } from "node:module";
 import { networkInterfaces } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +43,20 @@ const OPEN = !args.includes("--no-open");
 // --------------------------------------------------------------- the engine host
 const host = createEngineHost({ profile: PROFILE, webPort: PORT });
 const { USER_DATA } = host;
+
+// --------------------------------------------------------------- one engine per role
+// Announce this web server in the shared instance registry (desktop/instances.js), so an
+// update — or a fresh start next to a leftover — can tell which engines belong to which
+// build. A holder of our port that runs an older build is stopped; one that runs the same
+// build is left alone and this server waits its turn.
+const requireModule = createRequire(import.meta.url);
+const Instances = requireModule(join(ROOT, "desktop", "instances.js"));
+const UpdateCore = requireModule(join(ROOT, "desktop", "update-core.js"));
+const VERSION = UpdateCore.currentVersion(ROOT);
+const instance = Instances.attach({ userData: USER_DATA, role: "web", port: PORT, version: VERSION, root: ROOT });
+// Leave the registry on the way out (the exit codes keep the supervisor's restart logic).
+process.on("SIGTERM", () => { try { instance.stop(); } catch {} process.exit(143); });
+process.on("SIGINT", () => { try { instance.stop(); } catch {} process.exit(130); });
 
 // --------------------------------------------------------------- http + websocket
 const MIME = {
@@ -133,14 +148,38 @@ const server = createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server, path: "/ws" });
-// A busy port is a normal thing to hit: say so plainly instead of a stack trace.
-const busy = error => {
+// A busy port used to end this process ("web is not set up"), which could leave the machine
+// with no web UI until someone noticed. Now: a holder that runs an older build is stopped and
+// the port is taken over; a holder of the same build keeps it and this server stands by,
+// retrying until the port frees up.
+let retrying = false;
+let toldBusy = false;
+const busy = async error => {
  if (error?.code !== "EADDRINUSE") throw error;
- console.error(`\n  Port ${PORT} is already in use — another Prism V2 web is probably running.\n  Stop it, or start this one elsewhere:  prism web --port ${PORT + 1}\n`);
- process.exit(1);
+ let tookOver = false;
+ try {
+  const done = await Instances.sweep(USER_DATA, {
+   keepPid: process.pid,
+   test: entry => entry.role === "web" && Number(entry.port) === PORT
+    && (Instances.isForeignBuild(entry, { root: ROOT, version: VERSION }) || UpdateCore.isNewer(VERSION, entry.version)),
+   grace: 2500,
+  });
+  tookOver = done.some(item => item.killed);
+ } catch {}
+ if (tookOver) console.log(`  port ${PORT} was held by an older Prism build — stopped it, taking over`);
+ if (!toldBusy) {
+  toldBusy = !tookOver;
+  if (toldBusy) console.error(`\n  Port ${PORT} is already in use — another Prism V2 of this same build is serving it.\n  This one stands by and takes over the moment the port frees up.\n`);
+ }
+ if (retrying) return;
+ retrying = true;
+ setTimeout(() => {
+  retrying = false;
+  server.listen(PORT, HOST);
+ }, tookOver ? 1200 : 30000).unref?.();
 };
 server.on("error", busy);
-wss.on("error", busy);
+wss.on("error", error => { if (error?.code !== "EADDRINUSE") throw error; });
 
 // --------------------------------------------------------------- the console mirror
 // Every line this process logs is kept (the last 500) and streamed to the connected pages, so
@@ -448,6 +487,7 @@ wss.on("connection", (ws, req) => {
 server.listen(PORT, HOST, () => {
  const shown = HOST === "0.0.0.0" ? "localhost" : HOST;
  const port = server.address().port;
+ instance.update({ port });
  console.log(`\n  Prism V2 web  ->  http://${shown}:${port}`);
  console.log(`  store      ->  ${USER_DATA}`);
  const addresses = lanAddresses();

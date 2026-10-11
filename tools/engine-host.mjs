@@ -362,9 +362,38 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
    const Server = require(join(ROOT, "desktop", "server.js"));
    await updateCore.fixSandbox(installRoot, Server.sudoEnv());
   } catch {}
+  // The files on disk are the new build now — stop whatever still runs from the old one.
+  // This is the cure for "three Prisms fought over port 8787 after an update": leftovers from
+  // an earlier build (a hand-started web server, an app from a stale autostart, an old-era
+  // bridge) are stopped here, the autostart entry is put back on the current install, and
+  // the old trees are only then cleared. The supervisor itself is left alone: it cycles on
+  // its own watcher, and under systemd the whole unit comes back on the new build.
+  try {
+   const Instances = require(join(ROOT, "desktop", "instances.js"));
+   const fresh = updateCore.currentVersion(ROOT) || applied.version || release.version;
+   const stopped = await Instances.sweep(USER_DATA, {
+    keepPid: process.pid,
+    test: entry => entry.role !== "server" && Instances.isForeignBuild(entry, { root: ROOT, version: fresh }),
+   }).catch(() => []);
+   if (stopped.length) console.log(`[update] stopped ${stopped.length} leftover process(es) from the old build`);
+   updateCore.pruneOld(installRoot);
+  } catch {}
+  try {
+   const Server = require(join(ROOT, "desktop", "server.js"));
+   Server.ensureLinuxAutostart(installRoot);
+  } catch {}
   const up = supervised();
   writeUpdateState({ phase: up ? "restarting" : "done", version: applied.version || release.version });
-  if (up) setTimeout(() => process.exit(75), 2500);
+  if (up) {
+   // Let the answer that asked for the update go out first: step aside once this engine is
+   // idle again (at most two minutes), and the supervisor brings the new build right back.
+   const deadline = Date.now() + 120000;
+   const stepAside = () => {
+    if (llmActive === 0 || Date.now() > deadline) process.exit(75);
+    else setTimeout(stepAside, 1000);
+   };
+   setTimeout(stepAside, 2500);
+  }
   return { ok: true, version: applied.version || release.version, restart: up };
  }
  handlers.set("update:params", () => updateParams());
