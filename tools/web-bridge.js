@@ -36,6 +36,7 @@ function connect() {
    resolve();
    keepWarm();
    nudge();
+   watchVersion();
   };
   ws.onclose = () => {
    for (const pending of state.pending.values()) pending.reject(new Error('connection lost'));
@@ -61,7 +62,7 @@ function connect() {
  });
 }
 
-document.addEventListener('visibilitychange', () => { if (!document.hidden) nudge(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { nudge(); watchVersion(); } });
 window.addEventListener('online', () => nudge());
 
 const invoke = (channel, ...args) => {
@@ -82,6 +83,24 @@ const on = (channel, callback) => {
 // The server tells every page whether the desktop app is running; turns started here are
 // handed to it while it is.
 on('app:status', status => { state.appConnected = Boolean(status?.connected); });
+
+// A tab can outlive the build it was loaded from: an update restarts the server under an
+// open page, and the old script keeps running with the old behaviour — "nothing got fixed".
+// On every reconnect and every return to the tab, the version the server reports is compared
+// with the one this page loaded on; a different one reloads the page. A draft in the
+// composer is never thrown away: that waits until the box is empty.
+let seenVersion = '';
+async function watchVersion() {
+ try {
+  const version = await invoke('app:version');
+  if (typeof version !== 'string' || !version) return;
+  if (seenVersion && version !== seenVersion) {
+   const draft = document.querySelector('textarea.composer-input');
+   if (!draft || !String(draft.value || '').trim()) { location.reload(); return; }
+  }
+  seenVersion = version;
+ } catch {}
+}
 
 connect();
 

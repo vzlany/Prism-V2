@@ -528,7 +528,7 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
     clearTimeout(watchdog);
     watchdog = setTimeout(() => {
      try { host.emit('llm:abort', id); } catch {}
-     reject(Object.assign(new Error('the model stopped responding'), { empty: !content && !reasoning }));
+     reject(Object.assign(new Error('the model stopped responding'), { empty: !content && !reasoning, partial: content || reasoning ? { content, reasoning } : undefined }));
     }, WATCHDOG_MS);
    };
    const sender = {
@@ -570,6 +570,7 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
        aborted: Boolean(data.aborted),
        status: data.status || 0,
        empty: !content && !reasoning,
+       partial: content || reasoning ? { content, reasoning } : undefined,
       });
       reject(error);
      }
@@ -640,7 +641,15 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  // -------------------------------------------------- one model call, with calm retries
  async function request(run) {
   const messages = [{ role: 'system', content: run.system || '' }, ...historyOf(run)];
-  const tries = 3, pause = 5000;
+  const tries = 4, pause = 5000;
+  // Where the entry and its live parts stood before this step: a retry after half a
+  // streamed answer rewinds to exactly here, so the answer is written once, not twice.
+  const before = {
+   content: run.entry?.content || '',
+   thinking: run.entry?.thinking || '',
+   part: run.part?.text?.text || '',
+   partThinking: run.part?.thinking?.text || '',
+  };
   let result = null;
   for (let attempt = 1; ; attempt++) {
    try {
@@ -648,13 +657,24 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
     break;
    } catch (error) {
     const aborted = error?.aborted || error?.name === 'AbortError' || run.stopped;
-    // Once tokens have arrived a retry would double them; only empty failures are retried,
-    // and only the transient kind — a 400 (a malformed request, a rejected history) is the
-    // request's own fault and would fail the same three times over.
-    const transient = !error?.status || error.status >= 500;
-    if (aborted || attempt > tries || !error?.empty || !transient) throw error;
-    log(`model call for ${run.chatId} failed (${error.message}); retrying in ${pause / 1000}s (${attempt}/${tries})`);
-    await new Promise(resolve => setTimeout(resolve, pause));
+    // Transient means: a network drop, a 5xx from the gateway, a rate limit — the
+    // "upstream request error" from OpenCode Go is the usual one — not a 400, which is the
+    // malformed request or rejected history's own fault and would fail the same way again.
+    // An empty failure is retried as it is; one that had already written something is
+    // rewound first, so nothing doubles. The growing pauses ride out a gateway hiccup
+    // instead of ending the whole turn with an error the user has to fix by hand.
+    const transient = !error?.status || error.status >= 500 || error.status === 429;
+    const recoverable = Boolean(error?.empty) || Boolean(error?.partial?.content || error?.partial?.reasoning);
+    if (aborted || attempt > tries || !recoverable || !transient) throw error;
+    if (!error?.empty) {
+     if (run.entry) { run.entry.content = before.content; run.entry.thinking = before.thinking; }
+     if (run.part?.text) run.part.text.text = before.part;
+     if (run.part?.thinking) run.part.thinking.text = before.partThinking;
+     try { publishNow(run); } catch {}
+    }
+    const wait = pause * 2 ** (attempt - 1);
+    log(`model call for ${run.chatId} failed (${error.message}); retrying in ${wait / 1000}s (${attempt}/${tries})`);
+    await new Promise(resolve => setTimeout(resolve, wait));
     if (run.stopped) throw Object.assign(new Error('Aborted'), { aborted: true });
    }
   }

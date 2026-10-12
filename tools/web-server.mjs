@@ -5,7 +5,7 @@
 // all keep working. Close the terminal to stop the server.
 //
 //   node tools/web-server.mjs [--port 8787] [--host 127.0.0.1] [--profile work] [--no-open]
-import { existsSync, createReadStream, createWriteStream, mkdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { existsSync, createReadStream, createWriteStream, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
@@ -310,7 +310,15 @@ function continueAfterUpdate() {
   writeFileSync(temp, JSON.stringify(body));
   renameSync(temp, file);
  } catch (error) { console.log(`[keeper] could not note the restart in ${chatId}: ${error.message}`); markContinued(); return; }
- markContinued();
+ // Not marked done yet: this process may be the one the old supervisor started moments
+ // before stepping the whole unit aside for the new build (see the settling wait below).
+ // Only a carry-on that stays alive counts — otherwise the rebuild after the rotation
+ // would find it "done" and leave the conversation silent.
+ const stamp = String(state.version || "");
+ setTimeout(() => {
+  const now = readJsonSafe(updateStateFile) || {};
+  if (!now.continued && now.phase === "done" && String(now.version || "") === stamp) markContinued();
+ }, 30 * 1000);
  keeper.buildSystem({ folder: record.folder, mode: "full", model })
   .then(system => {
    const started = keeper.start({
@@ -347,8 +355,33 @@ const markContinued = () => {
   writeFileSync(updateStateFile, JSON.stringify({ ...state, continued: true }));
  } catch {}
 };
-// A moment for the engines (store watchers, the Discord bridge, the beacon) to settle first.
-setTimeout(continueAfterUpdate, 5000);
+// Carrying on after an update has a race to survive: the update leaves the chat id in
+// update-state, and the first process started on the new build is usually spawned by the
+// OLD supervisor — which notices the new install about twenty seconds later and steps the
+// whole unit aside (exit 75). A run started in that short-lived process is killed mid-step
+// (12 Oct, 11:29: the "I'm back" line arrived, the carried-on turn died four seconds later,
+// the chat stayed silent). So the carry-on waits until the stack has settled; and while
+// this process is the interim one — its own folder moved aside (…old-*), deleted under it,
+// or its parent still working in the moved-aside copy — it keeps waiting instead of burning
+// the one shot. The build that ends up serving is the one that carries the conversation on.
+const CARRY_WAIT_MS = 25 * 1000;
+const CARRY_RETRY_MS = 10 * 1000;
+const CARRY_GIVE_UP_MS = 6 * 60 * 1000;
+const carriesFrom = Date.now();
+const movedAside = () => {
+ try { if (/\.old-|\(deleted\)/.test(process.cwd())) return true; } catch {}
+ try { if (/\.old-|\(deleted\)/.test(readlinkSync(`/proc/${process.ppid}/cwd`))) return true; } catch {}
+ return false;
+};
+setTimeout(function carryOnWhenSettled() {
+ const state = readJsonSafe(updateStateFile);
+ if (!state || state.phase !== "done" || state.continued) return;
+ if (movedAside() && Date.now() - carriesFrom < CARRY_GIVE_UP_MS) {
+  setTimeout(carryOnWhenSettled, CARRY_RETRY_MS);
+  return;
+ }
+ continueAfterUpdate();
+}, CARRY_WAIT_MS);
 let desktopPresence = [];
 const PRESENCE_STALE = 20000;
 function readDesktopPresence() {
