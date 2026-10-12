@@ -139,6 +139,12 @@ here is in this repository; nothing else was removed.
 - **Several API keys per provider.** Each provider keeps a list of keys in Settings →
   Providers; add as many as you like, rename them, equip one, and every model call uses the
   equipped key. The old single key migrates into the list on first run.
+- **Web tools work on the server too.** `fetch_url` (and `web_search`, which rides on it) go
+  through Electron's net in the app and through Node's own fetch on a headless engine —
+  without the stand-in the phone saw "Cannot read properties of undefined (reading 'fetch')".
+- **A Discord message that could not be sent says so.** A `<send_discord_message>` block (or
+  the tool) used to leave the reply whether or not the DM went out; now the failure reason is
+  written into the conversation and the server log.
 - **Which model, and what it cost.** The context panel names the model (and provider) the
   numbers belong to, and a run the server kept writes its usage into the chat as well, so
   "no price for this model" no longer appears for a model the app prices perfectly well — the

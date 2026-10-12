@@ -278,7 +278,11 @@ function syncLive() {
   if (!liveView) liveView = new LiveView();
   if (liveView.el.parentElement !== conv.list) conv.list.append(liveView.el);
   // The card grows and folds as the run moves along; a reader up in the thread keeps their place.
+  liveView.showTodos = !chat.hasTodoBoxes(conv);
   chat.holdView(() => liveView.update(info));
+  // The checklist the run publishes lands in the box the thread already has (it stays under
+  // its todo call); only a chat without one gets the mirror's own.
+  chat.syncTodoStates(conv, info.todos);
   if (chat.follow) chat.followBottom();
  } else if (liveView) {
   liveView.el.remove();
@@ -479,6 +483,11 @@ if (AgentTools.available) {
   // machine's own business there.
   const serverOnly = info => {
    if (!info?.server) return;
+   // The server's own screen (the page opened on the machine itself) keeps the quiet working
+   // indicator; every connected app or browser gets the app's ghost. This page knows which
+   // one it is by where it was opened from.
+   const local = (() => { try { return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(location.hostname); } catch { return false; } })();
+   if (local) document.documentElement.classList.add('is-server-screen');
    modePicker.setServerOnly(true);
    // A server device wears only the Discord switch in the mode menu: Ask/Auto/Full are the
    // machine's own business there. Its chats still show the working ghost, like everywhere.

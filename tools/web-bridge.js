@@ -209,6 +209,9 @@ window.openghost = {
   start: request => invoke('run:start', request),
   stop: chatId => invoke('run:stop', chatId),
   state: chatId => invoke('run:state', chatId),
+  // A message for a turn already running: the server engine takes it into the run at the
+  // next step (this is what the composer's send does while the chat is working elsewhere).
+  message: (chatId, text) => invoke('run:message', chatId, text),
  },
  auth: {
   login: async () => ({ connected: false, error: 'sign-in works only in the desktop app' }),

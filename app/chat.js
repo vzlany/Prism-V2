@@ -12,7 +12,7 @@ const WINDOW_MIN = 45;
 const WINDOW_BATCH = 80;
 // How many extra entries are quietly drawn ahead of a scroll, and how close to the top a
 // scroll has to get before the next batch is asked for.
-const PRERENDER = 240;
+const PRERENDER = 4000;
 const LOAD_AHEAD = 1400;
 const COPIED_TIME = 1600;
 const FINISH_NOTES = ['length', 'content_filter', 'insufficient_system_resource'];
@@ -787,6 +787,26 @@ class Chat {
  // Boxes are static now: the "one box that steps aside for the live card" dance is gone.
  todoStandalone() {}
 
+ // While a run works elsewhere, the states the server engine publishes land in the newest box
+ // the thread already has — it stays glued under the todo call that made it, nothing jumps
+ // under the "Thinking…" head, and the checklist still ticks live.
+ hasTodoBoxes(conv) {
+  return Boolean(conv?.list?.querySelector('.todo-card'));
+ }
+
+ syncTodoStates(conv, todos) {
+  const list = (Array.isArray(todos) ? todos : []).filter(item => item?.text);
+  if (!list.length || !window.TodoCard) return;
+  const old = conv?.list?.querySelector('.todo-card:last-of-type');
+  if (!old) return;
+  const key = JSON.stringify(list.map(item => [item.text, item.state]));
+  if (old.__todoKey === key) return;
+  const fresh = new window.TodoCard(list);
+  fresh.el.__todoKey = key;
+  fresh.el.classList.add('is-snapshot');
+  old.replaceWith(fresh.el);
+ }
+
  // Sends the same prompt to several models at once: one chat per model, all running together.
  // With the desktop app running, every one of them is handed to the app instead.
  async runParallel(folder, models, text) {
@@ -1110,6 +1130,26 @@ class Chat {
   if (conv.turn) {
    this.interject(conv, prompt);
   } else if (busyElsewhere) {
+   // A turn is running here but belongs to the server engine (a keeper run): the message is
+   // handed to that run and joins it at the next step, exactly like typing during a turn in
+   // the app. Anything else (the app's run, another page) keeps the outbox path.
+   const info = window.Presence?.info?.(conv.id);
+   if (info?.keeper && window.openghost?.run?.message) {
+    const bubble = this.userMessage(prompt);
+    conv.list.append(bubble);
+    this.main.classList.remove('is-empty');
+    const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM, ...(prompt.device || FROM_DEVICE ? { device: prompt.device || FROM_DEVICE } : {}) };
+    conv.messages.push(entry);
+    this.nodes.set(entry, bubble);
+    this.library.update(conv.id, { updated: Date.now() });
+    this.follow = true;
+    window.openghost.run.message(conv.id, prompt.text).then(result => {
+     if (!result?.ok) this.queueWhileBusy(conv, prompt);
+    }).catch(() => this.queueWhileBusy(conv, prompt));
+    if (conv === this.active) this.followBottom();
+    this.onChange();
+    return true;
+   }
    this.queueWhileBusy(conv, prompt);
   } else if (delegating) {
    // The desktop app is running: the turn goes there, with its tools and keys, and this page
@@ -1814,11 +1854,20 @@ class Chat {
    const key = `${block.text}\u0000${block.files.join('\u0000')}`;
    if (part.sentDiscord.has(key)) continue;
    part.sentDiscord.add(key);
-   window.openghost?.discord?.message?.({
+   // The result is checked: a block that could not be sent stays visible as a note instead of
+   // disappearing (the agent "used the tool" and the user saw nothing arrive).
+   Promise.resolve(window.openghost?.discord?.message?.({
     text: block.text,
     files: block.files.map(file => withFolder(file, folder)),
     chatId: conv.record?.id || conv.id,
-   });
+   })).then(result => {
+    if (result && result.ok === false) {
+     const note = document.createElement('div');
+     note.className = 'message-note';
+     note.textContent = I18n.t('chat.discordFailed', { reason: result.error || 'unknown' });
+     part.view?.el?.append(note);
+    }
+   }).catch(() => {});
   }
   part.entry.content = content.replace(DISCORD_BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
  }
@@ -2091,8 +2140,11 @@ class Chat {
   const status = last?.kind === 'text' ? 'writing' : last?.kind === 'tool' && last.state === 'running' ? 'working' : 'thinking';
   const title = this.library.chat(conv.id)?.title || conv.record?.title || I18n.t('chat.new');
   const kept = [];
-  let budget = 20000;
-  for (let i = parts.length - 1; i >= 0 && kept.length < 20; i--) {
+  // A watching device gets the whole turn: with the old budget a run of twenty-odd tool
+  // calls started dropping its earliest parts from the live mirror ("old tools and texts
+  // unrender").
+  let budget = 60000;
+  for (let i = parts.length - 1; i >= 0 && kept.length < 80; i--) {
    const size = (parts[i].text || '').length + (parts[i].output || '').length + (parts[i].title || '').length + (parts[i].summary || '').length;
    if (budget - size < 0 && kept.length) break;
    budget -= size;
@@ -3275,9 +3327,12 @@ class Chat {
   }
   const status = document.createElement('div');
   status.className = 'message-status is-working';
-  // The working ghost, on a server too: it says "something is happening" far better than
-  // three quiet dots.
-  status.innerHTML = '<ghost-thinking></ghost-thinking>';
+  // The app's ghost for everyone connected (a phone, a remote window, another computer); the
+  // server's own screen keeps the quiet dots it always had.
+  const own = document.documentElement.classList.contains('is-server-screen');
+  status.innerHTML = own
+   ? '<span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span>'
+   : '<ghost-thinking></ghost-thinking>';
   view.el.append(status);
   view.status = status;
   this.pokeGhost(view);
@@ -3446,8 +3501,12 @@ class Chat {
  assistantMessage(conv) {
   const el = document.createElement('div');
   el.className = 'message is-assistant is-streaming';
-  // The same working ghost the local turn uses — servers used to show quiet dots here.
-  el.innerHTML = '<div class="message-status"><ghost-thinking></ghost-thinking></div><div class="message-content markdown"></div>';
+  // The same working ghost the local turn uses — the server's own screen keeps its dots.
+  const own = document.documentElement.classList.contains('is-server-screen');
+  const working = own
+   ? '<span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span>'
+   : '<ghost-thinking></ghost-thinking>';
+  el.innerHTML = `<div class="message-status">${working}</div><div class="message-content markdown"></div>`;
   const content = el.querySelector('.message-content');
   const thinking = new ThinkingView();
   el.insertBefore(thinking.el, content);

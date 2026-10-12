@@ -5,6 +5,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { net, clipboard, shell: electronShell, Notification, desktopCapturer, nativeImage, screen } = require('electron');
+// Electron hands tools net.fetch; a headless engine (prism web / prism server) has no
+// Electron at all, so the global fetch stands in. Without this the web tools died with
+// "Cannot read properties of undefined (reading 'fetch')".
+const netFetch = (input, init) => (net?.fetch ? net.fetch(input, init) : globalThis.fetch(input, init));
 const Media = require('./media');
 const Browser = require('./browser');
 const Server = require('./server');
@@ -347,7 +351,7 @@ async function fetchUrl(id, { url }) {
  const timer = setTimeout(() => controller.abort(), TIMEOUT.fetch * 1000);
  if (id) jobs.set(id, () => controller.abort());
  try {
-  const response = await net.fetch(address.href, {
+  const response = await netFetch(address.href, {
    headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.8', 'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8' },
    signal: controller.signal,
    redirect: 'follow',
@@ -489,7 +493,7 @@ async function httpRequest(id, { url, method = 'GET', headers, body, timeout }, 
  const timer = setTimeout(() => controller.abort(), seconds * 1000);
  if (id) jobs.set(id, () => controller.abort());
  try {
-  const response = await net.fetch(address.href, {
+  const response = await netFetch(address.href, {
    method: verb,
    headers: { 'User-Agent': UA, ...(headers && typeof headers === 'object' ? headers : {}) },
    body: body === undefined || body === null || verb === 'GET' || verb === 'HEAD' ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)),

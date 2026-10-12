@@ -76,6 +76,10 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   BrowserWindow: { fromWebContents: () => null, getAllWindows: () => [] },
   safeStorage: { isEncryptionAvailable: () => false, encryptString: text => Buffer.from(String(text)), decryptString: buffer => Buffer.from(buffer).toString() },
   clipboard: { writeText: noop, readText: () => "" },
+  // tools.js reaches the web through Electron's net.fetch; a headless engine has no Electron,
+  // so without this every fetch_url (and web_search, which rides on it) died with
+  // "Cannot read properties of undefined (reading 'fetch')".
+  net: { fetch: (input, init) => globalThis.fetch(input, init) },
   nativeTheme: { themeSource: "dark" },
   Menu: { setApplicationMenu: noop },
   dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },

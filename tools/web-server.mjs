@@ -301,6 +301,9 @@ const keeper = createKeeper({
 host.handlers.set("run:start", (event, request) => keeper.start(request));
 host.handlers.set("run:stop", (event, chatId) => keeper.stop(chatId));
 host.handlers.set("run:state", (event, chatId) => keeper.state(chatId));
+// A message written while the run works: it joins the turn at the next step (the app's own
+// interject), instead of waiting for the whole run to finish.
+host.handlers.set("run:message", (event, chatId, text) => keeper.message(chatId, text));
 
 // ----------------------------------------------------------- carrying on after an update
 // An update triggered from a conversation leaves its chat id in update-state.json: when the

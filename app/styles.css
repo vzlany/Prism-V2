@@ -5811,7 +5811,9 @@ h6.md-h {
   overscroll-behavior: contain;
   width: 100%;
   min-height: var(--composer-line-height);
-  max-height: 40vh;
+  /* Ten lines, then it scrolls: the box used to grow to 40vh — about thirteen lines on a
+     phone — and swallowed the conversation while typing. */
+  max-height: min(calc(var(--composer-line-height) * 10), 40vh);
   margin: 0;
   padding: 0 6px;
   border: 0;

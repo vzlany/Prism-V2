@@ -302,12 +302,12 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  // -------------------------------------------------- presence
  function snapshot(run) {
   const kept = [];
-  let budget = 20000;
-  for (let i = run.parts.length - 1; i >= 0 && kept.length < 20; i--) {
+  let budget = 60000;
+  for (let i = run.parts.length - 1; i >= 0 && kept.length < 80; i--) {
    const part = run.parts[i];
    const copy = part.kind === 'text'
-    ? { ...part, text: String(part.text || '').slice(0, 8000) }
-    : { ...part, text: part.kind === 'thinking' ? tail(part.text, 2400) : part.text, output: tail(part.output, 1200) };
+    ? { ...part, text: String(part.text || '').slice(0, 20000) }
+    : { ...part, text: part.kind === 'thinking' ? tail(part.text, 6000) : part.text, output: tail(part.output, 2000) };
    const size = (copy.text || '').length + (copy.output || '').length + (copy.title || '').length + (copy.summary || '').length;
    if (budget - size < 0 && kept.length) break;
    budget -= size;
@@ -387,7 +387,7 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  }
 
  // -------------------------------------------------- discord blocks in the reply
- function flushDiscordBlocks(run) {
+ async function flushDiscordBlocks(run) {
   const content = String(run.entry.content || '');
   if (!content.includes('<send_discord_message>')) return;
   const blocks = [];
@@ -400,7 +400,20 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
    const key = `${block.text}\u0000${block.files.join('\u0000')}`;
    if (run.sentDiscord.has(key)) continue;
    run.sentDiscord.add(key);
-   try { host.invoke('discord:message', { text: block.text, files: block.files.map(file => withFolder(file, run.folder)), chatId: run.chatId }).catch(() => {}); } catch {}
+   // Fire, but look at what came back: a block that could not be sent used to disappear with
+   // the text — the user saw the agent "use the tool" and nothing ever arrived.
+   Promise.resolve()
+    .then(() => host.invoke('discord:message', { text: block.text, files: block.files.map(file => withFolder(file, run.folder)), chatId: run.chatId }))
+    .then(result => {
+     if (result && result.ok === false) throw new Error(result.error || 'unknown');
+    })
+    .catch(error => {
+     log(`the Discord message could not be sent: ${error.message}`);
+     if (run.entry) {
+      run.entry.content = `${run.entry.content || ''}\n\n⚠️ The Discord message could not be sent: ${error.message}`;
+      if (run.part?.text) run.part.text.text = run.entry.content;
+     }
+    });
   }
   DISCORD_BLOCK.lastIndex = 0;
   run.entry.content = content.replace(DISCORD_BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
@@ -1017,7 +1030,11 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
     countUsage(run, step);
     await flushSave(run);
     publishNow(run);
-    if (!calls.length) { finishRun(run, null); return; }
+    if (!calls.length) {
+     if (run.queue?.length) { run.queue.length = 0; closePart(run); openPart(run); publishNow(run); continue; }
+     finishRun(run, null);
+     return;
+    }
     const images = [];
     const outputs = new Array(calls.length);
     const runOne = async index => {
@@ -1042,6 +1059,8 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
     if (images.length) run.entry.steps.push(imageStep(images));
     await flushSave(run);
     throwIfStopped(run);
+    // A message the user wrote while this ran: the next round is its answer.
+    if (run.queue?.length) run.queue.length = 0;
     closePart(run);
     openPart(run);
     publishNow(run);
@@ -1198,6 +1217,21 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
   return { ok: true };
  }
 
+ function message(chatId, text) {
+  const run = runs.get(String(chatId || ''));
+  if (!run) return { ok: false, error: 'nothing is running for this chat' };
+  const value = String(text || '').trim();
+  if (!value) return { ok: false, error: 'the message is empty' };
+  run.entries.push({ role: 'user', text: value, content: value, origin: 'web' });
+  run.queue ||= [];
+  run.queue.push(value);
+  run.dirty = true;
+  scheduleSave(run, true);
+  publishNow(run);
+  log(`a message written during the run for ${chatId} joins it at the next step`);
+  return { ok: true };
+ }
+
  function state(chatId) {
   const run = runs.get(String(chatId || ''));
   return run ? snapshot(run) : null;
@@ -1211,6 +1245,7 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
   start,
   stop,
   state,
+  message,
   stopAll,
   buildSystem,
   get schemas() { try { return AgentTools?.schemas || []; } catch { return []; } },

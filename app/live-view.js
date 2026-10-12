@@ -23,10 +23,15 @@ class LiveView {
   this.body.className = 'live-body';
   this.el.append(head, this.body);
   this.nodes = [];
+  // Set by the page: when the thread already carries checklist boxes, they are updated in
+  // place and the mirror must not draw a second one that jumps under the live head.
+  this.showTodos = true;
  }
 
  update(info) {
-  this.label.textContent = I18n.t(STATUS[info.status] || 'live.working');
+  // No words next to the ghost while it is thinking: the row is just the ghost, exactly like
+  // the app's own working indicator. "Working"/"Writing" still name what is happening.
+  this.label.textContent = info.status === 'thinking' ? '' : I18n.t(STATUS[info.status] || 'live.working');
   const parts = Array.isArray(info.parts) ? info.parts : [];
   for (let i = 0; i < parts.length; i++) {
    const part = parts[i];
@@ -51,6 +56,7 @@ class LiveView {
  // The device's todo checklist, drawn from the live mirror: checkmarks move while it works,
  // instead of freezing at whatever the last saved conversation happened to hold.
  todos(items) {
+  if (!this.showTodos) return;
   const list = Array.isArray(items) ? items.filter(item => item?.text) : [];
   if (!list.length) {
    this.todoCard?.el.remove();
