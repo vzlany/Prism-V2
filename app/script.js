@@ -193,7 +193,11 @@ if (!window.openghost?.desktop && window.openghost?.logs?.page) {
   try { window.openghost.logs.page(`${event.message} (${String(event.filename || '').split('/').pop()}:${event.lineno})`); } catch {}
  });
  window.addEventListener('unhandledrejection', event => {
-  try { window.openghost.logs.page(`unhandled rejection: ${event.reason?.message || event.reason}`); } catch {}
+  try {
+   // The stack, not just the message: a rejection that happens at load used to reach the
+   // server console as one bare line with no way to tell which module threw it.
+   window.openghost.logs.page(`unhandled rejection: ${event.reason?.stack || event.reason?.message || event.reason}`);
+  } catch {}
  });
 }
 // A newer release: a pill in the titlebar (next to the window buttons) offers it; while it
@@ -264,10 +268,13 @@ function syncLive() {
   if (liveView.el.parentElement !== conv.list) conv.list.append(liveView.el);
   // The card grows and folds as the run moves along; a reader up in the thread keeps their place.
   chat.holdView(() => liveView.update(info));
+  // One checklist at a time: the live card already draws it, so the standalone box steps aside.
+  chat.todoStandalone(conv, false);
   if (chat.follow) chat.followBottom();
  } else if (liveView) {
   liveView.el.remove();
   liveView = null;
+  chat.todoStandalone(chat.active, true);
  }
 }
 window.Presence?.on?.(() => {
@@ -507,6 +514,9 @@ const attachments = new Attachments({
   input: composerInput,
   onChange: syncComposer,
   isActive: () => !MiniChat.current && !chat.active?.locked,
+  // Which conversation an uploaded browser file belongs to: the server keeps it under
+  // uploads/<chat>/ so the agent's tools can open it by path.
+  chatId: () => chat.active?.id || '',
 });
 // Steer: rewind the chat to that message and put its words back into the composer.
 function steerMessage(message) {

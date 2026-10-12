@@ -24,8 +24,9 @@ function element(tag, className, text) {
 }
 
 class Attachments {
- constructor({ tray, picker, panel, main, zone, input, onChange, isActive = () => true }) {
+ constructor({ tray, picker, panel, main, zone, input, onChange, isActive = () => true, chatId = () => '' }) {
   this.isActive = isActive;
+  this.chatId = chatId;
   this.tray = tray;
   this.row = tray.querySelector('.attachments-row');
   this.picker = picker;
@@ -88,6 +89,18 @@ class Attachments {
    const item = { file, name: file.name || 'image.png', size: file.size, info, image: info.glyph === 'image', url: '', note: '', payload: null };
    if (item.image) item.url = URL.createObjectURL(file);
    item.ready = AttachmentReader.read(file, info).then(payload => this.loaded(item, payload));
+   // A file picked in a browser has no path the tools could open (the desktop does): the
+   // bytes go to the server right away and the message carries the real path, so an agent
+   // asked to scan a .jar finds a .jar instead of an empty name.
+   if (window.openghost?.upload && file.size) {
+    item.saved = Promise.race([
+     window.openghost.upload(file, this.chatId()).catch(() => null),
+     new Promise(resolve => setTimeout(() => resolve(null), 60000)),
+    ]).then(result => {
+     if (result?.path) { item.path = result.path; item.savedName = result.name; }
+     return result || null;
+    });
+   }
    item.el = this.chip(item);
    this.items.push(item);
    added.push(item.ready);

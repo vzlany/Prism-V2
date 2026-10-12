@@ -9321,20 +9321,25 @@ html.is-simple .thread-list > .message{content-visibility:visible}
 /* Prism V2: a touch screen has no hover — the row and folder actions stay visible there, so
    deleting a conversation or a category never waits for a hover that cannot happen. */
 @media (hover: none), (pointer: coarse) {
- /* A finger has no hover: the row buttons live on the list, but quietly. Showing every
-    action of every row at full strength turned the whole list into a toolbar — the row the
-    reader is in (or is touching right now) is the one that shows them bright. */
- .chat-actions { pointer-events: auto; }
+ /* A finger has no hover: every action of every row at full strength turned the whole list
+    into a toolbar. A row that is not the one the reader is in (and not the one being
+    touched — a tap sets :hover on the phone) shows no buttons at all, and none of them are
+    invisible click targets. Tapping a row opens it, and its buttons appear. */
+ .chat-actions { pointer-events: none; }
  .chat-action,
- .chats-folder-action { opacity: .5; transform: none; pointer-events: auto; }
- .chat-action + .chat-action,
- .chats-folder-action + .chats-folder-action { margin-left: 1px; }
+ .chats-folder-action { opacity: 0; transform: none; pointer-events: none; }
+ .chat-row.is-active .chat-actions,
+ .chat-row:active .chat-actions,
+ .chat-row.is-confirming .chat-actions { pointer-events: auto; }
  .chat-row.is-active .chat-action,
  .chat-row:active .chat-action,
  .chat-row.is-confirming .chat-action,
  .chats-folder-head:active .chats-folder-action,
- .chats-folder.is-confirming .chats-folder-action { opacity: 1; }
- .chat-row.is-active .chat-time { opacity: 0; }
+ .chats-folder-head:hover .chats-folder-action,
+ .chats-folder.is-confirming .chats-folder-action { opacity: 1; pointer-events: auto; }
+ .chat-row.is-active .chat-time,
+ .chat-row:active .chat-time,
+ .chat-row.is-confirming .chat-time { opacity: 0; }
  .chat-row .chat-time { display: none; }
 }
 

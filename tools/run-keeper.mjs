@@ -9,7 +9,7 @@
 // The page sends the round-0 context (system prompt, config, schemas); everything after that
 // — the tool loop — is built here.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 const CONTEXT = { reserve: 0.1, chars: 3.2, image: 1200 };
 const COMPACT = {
@@ -150,7 +150,7 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
    run: args => host.invoke('update:run', { ...(args && typeof args === 'object' ? args : {}), chatId: activeRun()?.chatId || '' }),
   },
  };
- for (const file of ['i18n.js', 'agent-prompt.js', 'agent-tools.js']) {
+ for (const file of ['i18n.js', 'agent-prompt.js', 'format-guide.js', 'agent-tools.js']) {
   try { new Function('window', readFileSync(join(root, 'app', file), 'utf8'))(window); } catch (error) { log(`could not load ${file}: ${error.message}`); }
  }
  const AgentTools = window.AgentTools || null;
@@ -460,19 +460,54 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  }
 
  async function subagentSystem(run, label, task) {
+  const base = await buildSystem({ folder: run.folder, mode: run.mode, model: run.config?.model });
+  return `${base}\n\n# Sub-agent\nYou are a sub-agent launched by Prism V2. You work alone, in its own conversation, on ONE task, and report back to the agent that launched you. The user does not see your messages — your final answer IS your report: complete, specific and self-contained (what you did, what you found, exact paths, commands, results, and whatever the caller still has to know). Never ask questions; if something is missing, say so in the report.\n\nYour task${label ? ` ("${label}")` : ''}: ${task}`;
+ }
+
+ // A system prompt for a turn the engine starts itself — a sub-agent, or the conversation
+ // carried on after an update restart. It uses the very same renderer modules a page uses
+ // (agent prompt, format guide, memory, MCP, instructions, skills), so such a turn behaves
+ // like any other.
+ async function buildSystem({ folder, mode = 'full', model = '', extra = '' }) {
   let env = null;
   try { env = await AgentTools.environment(); } catch {}
   let memory = '';
   try {
    const items = (await host.invoke('memory:list')) || [];
-   if (items.length) memory = ['# Memory', ...items.map(item => `- ${item.text}`)].join('\n');
+   if (items.length) memory = ['# Memory', 'Short facts saved earlier.', ...items.map(item => `- ${item.text}`)].join('\n');
   } catch {}
   let mcp = '';
   try { await AgentTools.refreshMcp(); mcp = AgentTools.mcpSummary(); } catch {}
+  let instructions = '';
+  try {
+   const pick = readJson(join(storeDir, 'instructions.json'), null);
+   if (pick?.file && typeof pick.folder === 'string') {
+    const base = resolve(pick.folder), target = resolve(base, pick.file);
+    if (target.startsWith(base)) {
+     const text = readFileSync(target, 'utf8').slice(0, 12000);
+     if (text.trim()) instructions = `# Selected instructions (from ${pick.file})\nThese were chosen by the user and apply to every chat; follow them like the user's words.\n\n${text}`;
+    }
+   }
+  } catch {}
+  let skills = '';
+  try {
+   const found = (await host.invoke('skills:list', folder)) || [];
+   if (found.length) skills = ['# Skills (Claude skill folders)', 'Reusable instructions saved as SKILL.md files on this computer. When a task matches one, read its file with read_file and follow it.', ...found.slice(0, 40).map(item => `- ${item.name}${item.description ? ` — ${item.description}` : ''} (${item.path})`)].join('\n');
+  } catch {}
+  let custom = '';
+  try {
+   const prompts = readJson(join(storeDir, 'prompts.json'), null);
+   if (prompts && prompts.enabled !== false && typeof prompts.global === 'string' && prompts.global.trim()) custom += `\n\n# User instructions (global)\n${prompts.global.trim()}`;
+   const own = prompts?.models?.[model];
+   if (typeof own === 'string' && own.trim()) custom += `\n\n# User instructions (this model)\n${own.trim()}`;
+  } catch {}
+  const serverNote = '# This machine is a server\n- This Prism runs on the user\'s own machine; every tool acts on THIS machine, not on the device the page is on.';
   const base = AgentPrompt?.build
-   ? AgentPrompt.build({ folder: run.folder, mode: run.mode, env, browser: '', mcp, memory, plan: '', instructions: '', skills: '', now: new Date() })
-   : 'You are Prism V2, an AI agent working on the user\'s computer.';
-  return `${base}\n\n# Sub-agent\nYou are a sub-agent launched by Prism V2. You work alone, in your own conversation, on ONE task, and report back to the agent that launched you. The user does not see your messages — your final answer IS your report: complete, specific and self-contained (what you did, what you found, exact paths, commands, results, and whatever the caller still has to know). Never ask questions; if something is missing, say so in the report.\n\nYour task${label ? ` ("${label}")` : ''}: ${task}`;
+   ? AgentPrompt.build({ folder, mode, env, browser: '', mcp, memory, plan: '', instructions, skills, serverNote, now: new Date() })
+   : 'You are Prism V2, an AI agent working on the user\'s own machine.';
+  const raw = window.FormatGuide;
+  const guide = Array.isArray(raw) ? raw.join('\n') : String(raw || '');
+  return `${base}${custom}${guide ? `\n\n# Formatting\n${guide}` : ''}${extra}`;
  }
 
  // -------------------------------------------------- one model round
@@ -1028,6 +1063,8 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
   stop,
   state,
   stopAll,
+  buildSystem,
+  get schemas() { try { return AgentTools?.schemas || []; } catch { return []; } },
   get running() { return [...runs.keys()]; },
  };
 }

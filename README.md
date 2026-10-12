@@ -58,7 +58,10 @@ here is in this repository; nothing else was removed.
   is not replayed to every page that opens later. And the update does not end in silence: a
   boot that follows one writes "✅ Prism V2 updated to v… — I'm back" into the conversation
   that asked for it and sends the same line to Discord, so a phone that watched the server
-  go away and come back sees that it worked.
+  go away and come back sees that it worked. And the conversation carries on by itself: the
+  update records which chat asked for it, and when the new build is up that chat gets a
+  fresh turn — "the restart cut your work off: finish it, test it, write the summary" — so
+  the agent is never left silent after restarting the very machine it runs on.
 - **One Prism per machine** — every engine (the app, the headless server, its web server and
   the Discord bot) announces itself in a small instance registry together with its build.
   When an update lands, the new build stops whatever still runs from the old one before it
@@ -96,7 +99,11 @@ here is in this repository; nothing else was removed.
   card draws the todos the moment the run starts), the thread is not rebuilt while the run
   saves its progress — that was why a long conversation seemed to lose its earlier messages
   while it worked — and whatever folds above the reader's place (a Thought closing, a tool
-  line collapsing, the live card shrinking) no longer drags the view up with it.
+  line collapsing, the live card shrinking) no longer drags the view up with it. The
+  checklist appears the moment the run starts, lives in the live card while it works (one
+  checklist, never two), and after a reload it sits after the message whose step last used
+  it, not blindly at the end. On a phone the conversation list stays calm: the row actions
+  belong to the row the reader is in or is touching, not to every row at once.
 - **Live mirror of the running turn.** The phone sees the same thing the app does while it
   works: the Thought box growing, the tool cards running (white snake included, same icon and
   title), and the answer being written — laid out exactly like the app's own message, not

@@ -5,7 +5,7 @@
 // all keep working. Close the terminal to stop the server.
 //
 //   node tools/web-server.mjs [--port 8787] [--host 127.0.0.1] [--profile work] [--no-open]
-import { existsSync, createReadStream, mkdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { existsSync, createReadStream, createWriteStream, mkdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
@@ -104,6 +104,43 @@ const server = createServer((req, res) => {
   res.end(body);
  };
  if (url.pathname === "/ws") { res.writeHead(426); res.end("websocket only"); return; }
+ // A file attached in a browser (a phone has no path the tools could open): the bytes are
+ // written here and the answer hands the agent the real path, so read_file, a scan or a
+ // script can work on the actual file instead of only what fit in the message.
+ if (url.pathname === "/upload" && req.method === "POST") {
+  const chat = String(url.searchParams.get("chat") || "misc").replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 60) || "misc";
+  const asked = decodeURIComponent(String(url.searchParams.get("name") || "file")).replace(/[\x00-\x1f\x7f\r\n"\\/]+/g, "_").replace(/^\.+/, "").trim() || "file";
+  const folder = join(USER_DATA, "uploads", chat);
+  let name = asked.slice(0, 120).replace(/[ .]+$/, "") || "file";
+  try {
+   mkdirSync(folder, { recursive: true });
+   const dot = name.lastIndexOf(".");
+   const stem = dot > 0 ? name.slice(0, dot) : name, ext = dot > 0 ? name.slice(dot) : "";
+   let n = 1;
+   while (existsSync(join(folder, name))) name = `${stem} (${++n})${ext}`;
+   const file = join(folder, name);
+   const limit = 512 * 1024 * 1024;
+   let size = 0, tooBig = false;
+   const out = createWriteStream(file);
+   req.on("data", chunk => {
+    size += chunk.length;
+    if (size > limit) { tooBig = true; req.destroy(); out.destroy(); return; }
+    out.write(chunk);
+   });
+   req.on("end", () => {
+    out.end(() => {
+     if (tooBig) { try { rmSync(file, { force: true }); } catch {} send(413, JSON.stringify({ ok: false, error: "the file is larger than 512 MB" }), "application/json"); return; }
+     console.log(`[${stamp()}] upload ${chat}/${name} (${size} bytes)`);
+     send(200, JSON.stringify({ ok: true, path: file, name, size }), "application/json");
+    });
+   });
+   req.on("error", () => { try { out.destroy(); rmSync(file, { force: true }); } catch {} });
+   out.on("error", () => { try { res.destroy(); } catch {} });
+  } catch (error) {
+   send(500, JSON.stringify({ ok: false, error: String(error?.message || error) }), "application/json");
+  }
+  return;
+ }
  if (url.pathname === "/live" && req.method === "POST") {
   // The desktop app pushes its live runs here at typing speed (its presence.json path is
   // slower): the page watching that machine gets the mirror about every 35 ms.
@@ -134,8 +171,7 @@ const server = createServer((req, res) => {
   const asked = url.searchParams.get("path") || "";
   const file = [asked, asked.includes("\\") ? asked.replace(/\\/g, "/") : ""].find(item => item && isAbsolute(item) && existsSync(item) && statSync(item).isFile()) || "";
   const name = String(url.searchParams.get("name") || basename(file || asked)).replace(/[\r\n"]/g, "");
-  if (!file) return send(404, "no such file", "text/plain");
-  res.writeHead(200, {
+  if (!file) return send(404, "no such file", "text/plain");  res.writeHead(200, {
    "content-type": "application/octet-stream",
    "content-disposition": `attachment; filename="${name}"`,
    "content-length": statSync(file).size,
@@ -237,6 +273,82 @@ const keeper = createKeeper({
 host.handlers.set("run:start", (event, request) => keeper.start(request));
 host.handlers.set("run:stop", (event, chatId) => keeper.stop(chatId));
 host.handlers.set("run:state", (event, chatId) => keeper.state(chatId));
+
+// ----------------------------------------------------------- carrying on after an update
+// An update triggered from a conversation leaves its chat id in update-state.json: when the
+// new build is up, that conversation is picked back up by itself — a fresh turn in the same
+// chat ("the restart cut your work off: finish it, test it, write the summary") — so the
+// user's agent is not left silent after restarting the very machine it runs on. The
+// engine-host already wrote the "✅ updated" line and the Discord DM at boot.
+function continueAfterUpdate() {
+ const state = readJsonSafe(updateStateFile);
+ if (!state || state.phase !== "done" || state.continued) return;
+ const chatId = String(state.chatId || "").replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 60);
+ if (!chatId) return;
+ if (Date.now() - (Number(state.at) || 0) > 30 * 60 * 1000) return;
+ const store = join(USER_DATA, "store");
+ const index = readJsonSafe(join(store, "index.json"));
+ const record = (index?.chats || []).find(item => item?.id === chatId);
+ if (!record?.folder) return;
+ const catalog = readJsonSafe(join(store, "catalog.json"));
+ const keys = readJsonSafe(join(store, "keys.json"));
+ const model = String(record.model || "");
+ const provider = model.includes(":") ? model.split(":")[0] : model;
+ const def = ((catalog?.providers || {})[provider] || []).find(item => item?.id === model) || null;
+ const key = String((keys?.keys || {})[provider] || "");
+ if (!provider || !key) { log(`[update] no key for ${provider || "?"} — not carrying the chat on`); markContinued(); return; }
+ // The restart may have cut a turn off mid-step: a note about the restart goes in first, then
+ // the ask to finish, exactly the way a person would write it.
+ const text = `The update to v${String(state.version || "").replace(/^v/, "")} finished and the server restarted — if your last turn was cut off, it was the restart. Go on with the task from where you stopped: finish the work, test it here, and write the summary.`;
+ try {
+  const file = join(store, "chats", `${chatId}.json`);
+  const body = readJsonSafe(file);
+  if (!body || body.sealed || !Array.isArray(body.messages)) { markContinued(); return; }
+  const last = [...body.messages].reverse().find(entry => entry?.role === "user");
+  if (!last || String(last.text || "").trim() !== text) body.messages.push({ role: "user", text, content: text, origin: "update" });
+  const temp = `${file}.tmp`;
+  writeFileSync(temp, JSON.stringify(body));
+  renameSync(temp, file);
+ } catch (error) { console.log(`[keeper] could not note the restart in ${chatId}: ${error.message}`); markContinued(); return; }
+ markContinued();
+ keeper.buildSystem({ folder: record.folder, mode: "full", model })
+  .then(system => {
+   const started = keeper.start({
+    id: `u-${Date.now().toString(36)}`,
+    chatId,
+    folder: record.folder,
+    mode: "full",
+    title: String(record.title || ""),
+    config: {
+     provider,
+     model: model.slice(provider.length + 1) || model,
+     key,
+     effort: def?.defaultEffort || "",
+     vision: def?.vision !== false,
+     context: Number(def?.context) || 128000,
+     efforts: def?.efforts || [],
+    },
+    system,
+    tools: keeper.schemas,
+    prompt: text,
+    origin: "update",
+   });
+   if (started?.ok) console.log(`[update] carrying the conversation ${chatId} on after the restart`);
+   else console.log(`[update] could not carry ${chatId} on: ${started?.error || "unknown"}`);
+  })
+  .catch(error => console.log(`[update] could not carry ${chatId} on: ${error.message}`));
+}
+
+const readJsonSafe = file => { try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; } };
+const markContinued = () => {
+ try {
+  const state = readJsonSafe(updateStateFile) || {};
+  // `at` stays as it was: refreshing it would make the one-shot banner look fresh again.
+  writeFileSync(updateStateFile, JSON.stringify({ ...state, continued: true }));
+ } catch {}
+};
+// A moment for the engines (store watchers, the Discord bridge, the beacon) to settle first.
+setTimeout(continueAfterUpdate, 5000);
 let desktopPresence = [];
 const PRESENCE_STALE = 20000;
 function readDesktopPresence() {

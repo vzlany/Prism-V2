@@ -278,6 +278,18 @@ window.openghost = {
   page: line => send('log:page', line),
   onLine: callback => on('log:event', callback),
  },
+ // A file attached in this browser goes to the server first: the tools can then open the
+ // real file (the phone has no path they could reach). Answers { path, name, size } or null.
+ upload: async (file, chatId) => {
+  try {
+   const response = await fetch(`/upload?chat=${encodeURIComponent(chatId || 'misc')}&name=${encodeURIComponent(file?.name || 'file')}`, { method: 'POST', body: file });
+   if (!response.ok) return null;
+   const data = await response.json().catch(() => null);
+   return data?.ok ? data : null;
+  } catch {
+   return null;
+  }
+ },
  // A turn started on this page, for the app to run.
  delegate: {
   send: request => send('delegate:add', request),
