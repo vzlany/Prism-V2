@@ -216,10 +216,16 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
  const writeUpdateState = patch => { try { writeFileSync(updateStateFile, JSON.stringify({ at: Date.now(), ...patch })); } catch {} };
  // A boot that follows an update means the new build is running: say so for the pages, and
  // tell the user — a line in the conversation that asked, and a Discord DM — so a successful
- // update is never met with silence.
+ // update is never met with silence. Two shapes count as "an update just landed": the state
+ // the updater wrote before stepping aside ("restarting"), and the state it left behind if it
+ // was killed before that last write ("installing"/"downloading" with the running build
+ // already at the announced version).
  {
   const prior = readUpdateState();
-  if (prior?.phase === "restarting") {
+  const fresh = prior && Date.now() - (Number(prior.at) || 0) < 30 * 60 * 1000;
+  const landed = fresh && String(prior.version || "") === startedVersion
+   && ["restarting", "installing", "downloading"].includes(String(prior.phase));
+  if (landed) {
    const version = String(prior.version || startedVersion || "");
    writeUpdateState({ phase: "done", version, chatId: prior.chatId || "" });
    if (webPort > 0) announceUpdate(version, prior.chatId || "").catch(() => {});
@@ -385,6 +391,10 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   writeUpdateState({ phase: "installing", version: release.version, chatId });
   let applied = null;
   try { applied = updateCore.applyLinux({ root: installRoot, tarFile: file }); } catch (error) { writeUpdateState({ phase: "idle", version: release.version, chatId }); return { error: error.message }; }
+  // The files on disk are the new build now: the next boot IS an update boot, and that is
+  // recorded before anything else can kill this process (the supervisor's own rotation used
+  // to win that race; the new build then announced nothing and carried nothing on).
+  writeUpdateState({ phase: "restarting", version: applied?.version || release.version, chatId });
   try {
    const Server = require(join(ROOT, "desktop", "server.js"));
    await updateCore.fixSandbox(installRoot, Server.sudoEnv());

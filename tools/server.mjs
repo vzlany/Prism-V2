@@ -96,10 +96,18 @@ log(`prism server up — web on http://${HOST}:${PORT}${NO_BOT ? "" : ", Discord
 // keeps running: notice the new install and rotate. Under systemd the whole unit steps
 // aside (exit 75) and comes back on the new build; without one, the children are bounced
 // and come back with the new code on their own.
+const updateState = () => { try { return JSON.parse(readFileSync(join(USER_DATA, "update-state.json"), "utf8")); } catch { return null; } };
 setInterval(() => {
  if (stopping) return;
  const fresh = version();
  if (!fresh || fresh === watching) return;
+ // An upgrade in flight writes its own state as it goes (downloading → installing →
+ // restarting → done). Rotating the helpers in the middle of that killed the update
+ // process before its last writes: the new build then booted from a half-finished state,
+ // announcing nothing and carrying no conversation on. Wait for the updater to finish.
+ const state = updateState();
+ const inFlight = state && ["downloading", "installing", "restarting"].includes(String(state.phase)) && Date.now() - (Number(state.at) || 0) < 5 * 60 * 1000;
+ if (inFlight) return;
  log(`install changed to v${fresh} (this supervisor started v${startedVersion}) — rotating`);
  watching = fresh;
  sweepStrays("update");
