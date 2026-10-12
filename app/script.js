@@ -284,6 +284,8 @@ function syncLive() {
   liveView.el.remove();
   liveView = null;
  }
+ // The task files panel sits below everything — the live card included.
+ window.TaskFiles?.refresh?.();
 }
 window.Presence?.on?.(() => {
  const now = new Set(window.Presence.list().map(entry => entry.id));
@@ -296,8 +298,11 @@ window.Presence?.on?.(() => {
   if (run && run.status === 'running') window.ParallelRuns.update(id, { status: 'completed' });
   if (window.Presence.ours(id)) continue;
   // A short beat: the app tells "over" the moment the chat is written, and the file is read
-  // here through the server — this covers the tail of that write.
-  setTimeout(() => chat.refresh(id).catch(() => {}), 350);
+  // here through the server — this covers the tail of that write. Anything typed during the
+  // run (the outbox) goes out right after the conversation is read again.
+  setTimeout(() => {
+   chat.refresh(id).catch(() => {}).then(() => chat.drainOutbox(id));
+  }, 350);
  }
  presenceBusy = now;
  // Parallel runs the app started appear in the Runs tab here too (their presence says so),
@@ -323,7 +328,19 @@ window.Presence?.on?.(() => {
  presenceRender(window.Presence.list());
  syncLive();
  syncComposer();
+ // A chat nothing is working on any more may still owe the outbox a turn (a run that ended
+ // while no presence change was seen, a stop pressed elsewhere).
+ for (const [id, conv] of chat.conversations) {
+  if (conv.outbox?.length && !chat.isBusy(id)) chat.drainOutbox(id);
+ }
+ if (chat.active?.outbox?.length && !chat.isBusy(chat.active.id)) chat.drainOutbox(chat.active.id);
 });
+
+// A phone that was asleep, switched apps or hopped networks comes back with a stale thread:
+// whatever arrived while the socket was down (a line from Discord, an answer) is read again.
+const catchUp = () => { if (chat.activeId) setTimeout(() => { chat.refresh(chat.activeId).catch(() => {}); chat.drainOutbox(chat.activeId); }, 300); };
+window.addEventListener('prism-reconnected', catchUp);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) catchUp(); });
 
 // The shared store changed on its own (the app, or another window, saved a conversation):
 // the open chat is read again at once, unless this page wrote it itself a moment ago.
@@ -342,16 +359,17 @@ window.openghost?.store?.onChatChange?.(id => {
    // A run is going on elsewhere (the app, the server engine, the Discord bot). The live card
    // shows the work; the file is growing on every save and rebuilding the thread for that was
    // why a long conversation seemed to lose its earlier messages while it worked. Only a new
-   // line from another surface — the user typing on the phone while the app runs — is worth
-   // touching the thread for, and even then just the line itself is appended.
-   if (window.Presence?.isBusy?.(id)) {
-    try {
-     const { messages } = await library.conversation(id);
-     const seen = current.messages || [];
-     const users = list => (list || []).filter(entry => entry?.role === 'user').length;
-     if (users(messages) > users(seen)) chat.appendNew(id).catch(() => {});
-    } catch {}
-   }
+   // line from another surface — the user typing on the phone while the app runs, a Discord
+   // message — is worth touching the thread for, and even then just the line itself is
+   // appended. A run that ended between the event and now falls through to a full refresh —
+   // the race used to swallow the answer's write silently.
+   if (!window.Presence?.isBusy?.(id) && !current.waiting) { chat.refresh(id).catch(() => {}); return; }
+   try {
+    const { messages } = await library.conversation(id);
+    const seen = current.messages || [];
+    const users = list => (list || []).filter(entry => entry?.role === 'user').length;
+    if (users(messages) > users(seen)) chat.appendNew(id).catch(() => {});
+   } catch {}
    return;
   }
   chat.refresh(id).catch(() => {});
@@ -540,12 +558,12 @@ if (window.TaskFiles) {
   document.querySelector('.task-files-icon').innerHTML = Glyphs.file;
 }
 // Steer: rewind the chat to that message and put its words back into the composer.
-function steerMessage(message) {
+async function steerMessage(message) {
   const conv = message?.closest('.thread-list')?.__conversation;
   if (!conv || conv !== chat.active) return;
   const entry = chat.entryOf(conv, message);
   if (!entry) return;
-  const prompt = chat.rewind(conv, entry);
+  const prompt = await chat.rewind(conv, entry);
   if (prompt == null) return;
   composerInput.value = prompt;
   composerText.refresh();

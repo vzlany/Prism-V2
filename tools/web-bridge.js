@@ -37,6 +37,9 @@ function connect() {
    keepWarm();
    nudge();
    watchVersion();
+   // The page may have missed writes while the socket was down (a line from Discord, an
+   // answer, a whole run): whoever listens refreshes what is on screen.
+   try { window.dispatchEvent(new Event('prism-reconnected')); } catch {}
   };
   ws.onclose = () => {
    for (const pending of state.pending.values()) pending.reject(new Error('connection lost'));
@@ -65,10 +68,24 @@ function connect() {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { nudge(); watchVersion(); } });
 window.addEventListener('online', () => nudge());
 
+// A socket that is OPEN but dead (the phone slept, the network hopped) never fires `close`,
+// and the caller then waited forever behind a spinner. Every invoke gets a deadline: when it
+// passes, the socket is closed on purpose — the reconnect takes over and the caller gets a
+// real error it can show.
+const INVOKE_LIMIT = 90 * 1000;
+const SLOW_CALLS = new Set(['skills:install']);
 const invoke = (channel, ...args) => {
  const id = ++state.seq;
  return ready.then(() => new Promise((resolve, reject) => {
-  state.pending.set(id, { resolve, reject });
+  const timer = setTimeout(() => {
+   state.pending.delete(id);
+   try { state.ws.close(); } catch {}
+   reject(new Error('the server did not answer — reconnecting'));
+  }, SLOW_CALLS.has(channel) ? 15 * 60 * 1000 : INVOKE_LIMIT);
+  state.pending.set(id, {
+   resolve: value => { clearTimeout(timer); resolve(value); },
+   reject: error => { clearTimeout(timer); reject(error); },
+  });
   state.ws.send(JSON.stringify({ t: 'invoke', id, channel, args }));
  }));
 };

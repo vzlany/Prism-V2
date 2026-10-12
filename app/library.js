@@ -325,7 +325,12 @@ class Library {
 
  // A sealed chat opens only with its key; without one this throws rather than hand back an empty chat that could overwrite it.
  async conversation(id) {
-  const data = await this.store.read(`chats/${id}`).catch(() => null);
+  let data = null, failed = false;
+  try { data = await this.store.read(`chats/${id}`); } catch { failed = true; }
+  // A FAILED read (the connection dropped, the socket died) must never look like an empty
+  // conversation: the page would draw a blank thread and its next save would overwrite the
+  // real chat with nothing. A missing file legitimately reads as null.
+  if (failed) throw new Error(I18n.t('chat.readFailed'));
   const body = data?.sealed ? await ChatLock.open(this.keys.get(id), data.sealed) : data;
   return {
    messages: Array.isArray(body?.messages) ? body.messages : [],
@@ -343,10 +348,14 @@ class Library {
   if (!chat || (chat.lock && !key)) return Promise.resolve();
   return this.queue(id, async () => {
    let kept = null, keptDetached = null;
-   if ((todos === null || extras === null) && !key) {
+   const wantTodos = todos === null;
+   // The detached list only ever grows: an empty incoming list (a device whose copy is stale)
+   // must not erase the file's own — the other device's detach would come undone.
+   const wantDetached = !(Array.isArray(extras?.detached) && extras.detached.length);
+   if ((wantTodos || wantDetached) && !key) {
     const previous = await this.store.read(`chats/${id}`).catch(() => null);
-    if (todos === null) kept = Array.isArray(previous?.todos) ? previous.todos : null;
-    if (extras === null) keptDetached = Array.isArray(previous?.detached) ? previous.detached : null;
+    if (wantTodos) kept = Array.isArray(previous?.todos) ? previous.todos : null;
+    if (wantDetached) keptDetached = Array.isArray(previous?.detached) ? previous.detached : null;
    }
    const detached = Array.isArray(extras?.detached) && extras.detached.length ? extras.detached : keptDetached;
    const body = {
@@ -354,7 +363,7 @@ class Library {
     tokens,
     ...(spend ? { spend } : {}),
     ...(todos ? { todos } : kept ? { todos: kept } : {}),
-    ...(detached?.length ? { detached } : {}),
+    ...(Array.isArray(detached) && detached.length ? { detached } : {}),
    };
    return this.store.write(`chats/${id}`, key ? { version: 1, sealed: await ChatLock.seal(key, body) } : { version: 1, ...body });
   });

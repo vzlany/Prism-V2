@@ -107,6 +107,13 @@ window.Artifacts = {
   action = card.addAction(I18n.t('artifact.download'), () => runDownload(action, () => download(real, name)));
  },
 
+ // The same download a card's button runs, for callers that have only a path — the files
+ // panel's Download button on every device.
+ save({ path, name } = {}) {
+  if (!path) return null;
+  return download(path, name || nameOf(path));
+ },
+
  // A finished file the agent attached with attach_file: a small chip under the card with the
  // name, its size, a Preview when it is text, and a Download that copies the real bytes.
  attach(container, { path, name, size, cwd }) {

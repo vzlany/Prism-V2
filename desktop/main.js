@@ -564,7 +564,17 @@ function startWeb(auto = readAuto()) {
    windowsHide: true,
    stdio: 'inherit',
   });
-  webChild.on('exit', () => { webChild = null; });
+  // A web server that dies must not take the phone access down silently: the exit is said
+  // out loud and the child is brought back after a pause (capped, so a broken install cannot
+  // restart-loop forever without a word).
+  let restarts = 0;
+  webChild.on('exit', (code, signal) => {
+   webChild = null;
+   console.log(`[auto] web server stopped${code != null ? ` (exit ${code})` : signal ? ` (${signal})` : ''}`);
+   if (quitting || restarts >= 10) return;
+   restarts++;
+   setTimeout(() => { if (!quitting && !webChild) { console.log('[auto] starting the web server again'); startWeb(); } }, Math.min(30000, 3000 * restarts));
+  });
   console.log(`[auto] web server on port ${webPort(auto)}`);
  } catch (error) {
   console.log('[auto] could not start the web server:', error.message);

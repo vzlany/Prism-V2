@@ -1,8 +1,9 @@
-// The files of this task, in one panel above the message box: everything the user attached
-// (kept after sending) and everything the agent attached with attach_file, newest first.
-// Nothing is ever dropped by itself — the agent can take a file back out ("detach") and the
-// list is derived from the conversation plus that detach list, so a reload (and any other
-// device) shows the very same files.
+// The files the agent attached to this task, in one panel right below the newest message of
+// the conversation — under the answer, or under the last tool call when the run stopped.
+// Only what the AGENT attached (attach_file) lives here: files the user sent are the user's,
+// and the agent decides whether they belong to the task by attaching them. Nothing is ever
+// dropped by itself — the agent can take a file back out ("detach") and the list is derived
+// from the conversation plus that detach list, so a reload shows the very same files.
 (() => {
 'use strict';
 
@@ -20,20 +21,22 @@ class TaskFiles {
   this.signature = '';
   more.addEventListener('click', () => {
    this.expanded = !this.expanded;
-   this.paint();
+   this.signature = '';
+   this.refresh();
   });
   this.refresh = this.refresh.bind(this);
  }
 
- // Reads the task's files out of the conversation on screen. Everything is derived, so two
- // surfaces (the desktop app and the phone) always agree without syncing anything.
+ // Reads the task's files out of the conversation on screen: every attach_file call, minus
+ // what the agent detached. Everything is derived, so two surfaces (the desktop app and the
+ // phone) always agree without syncing anything.
  current() {
   const conv = this.chat?.active;
   if (!conv || !conv.record) return { conv, files: [] };
   const detached = new Set((conv.detached || []).map(key));
   const files = [];
   const seen = new Set();
-  const add = (path, name, size, image) => {
+  const add = (path, name, size) => {
    const id = key(path) || key(name);
    if (!id || seen.has(id) || detached.has(id)) return;
    seen.add(id);
@@ -41,13 +44,8 @@ class TaskFiles {
     path: String(path || ''),
     name: String(name || String(path).split(/[\\/]/).filter(Boolean).pop() || 'file'),
     size: Number(size) || 0,
-    image: Boolean(image),
    });
   };
-  for (const entry of conv.messages || []) {
-   if (entry.role !== 'user') continue;
-   for (const item of entry.attachments || []) add(item.path, item.name, item.size, item.image);
-  }
   for (const entry of conv.messages || []) {
    if (entry.role !== 'assistant') continue;
    for (const step of entry.steps || []) {
@@ -55,7 +53,7 @@ class TaskFiles {
      if (call.function?.name !== 'attach_file') continue;
      try {
       const args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-      if (args?.path && args.detach !== true) add(args.path, args.name, args.size, false);
+      if (args?.path && args.detach !== true) add(args.path, args.name, args.size);
      } catch {}
     }
    }
@@ -65,11 +63,17 @@ class TaskFiles {
 
  refresh() {
   const { conv, files } = this.current();
+  const list = conv?.list || null;
+  // The panel lives at the very end of the conversation it belongs to — under the newest
+  // message, tool line or live card — so it is moved back every time, before anything is
+  // compared: a thread that grew would otherwise leave it buried above the newest message.
+  if (list && files.length) list.append(this.root);
   const signature = `${conv?.id || ''}|${this.expanded ? 1 : 0}|${files.map(file => `${file.path}\u0000${file.name}\u0000${file.size}`).join('\u0001')}`;
   if (signature === this.signature) return;
   this.signature = signature;
   this.files = files;
   this.conv = conv;
+  this.listNode = list;
   this.paint();
  }
 
@@ -80,6 +84,7 @@ class TaskFiles {
    this.list.replaceChildren();
    return;
   }
+  this.root.classList.add('is-in-thread');
   this.count.textContent = String(files.length);
   const shown = this.expanded ? files : files.slice(0, COLLAPSED);
   const rows = shown.map(file => this.row(file));
@@ -110,6 +115,20 @@ class TaskFiles {
    size.textContent = FileKinds.formatSize(file.size);
    row.append(size);
   }
+  const actions = document.createElement('span');
+  actions.className = 'task-file-actions';
+  if (file.path) {
+   const image = /\.(png|jpe?g|gif|webp|avif|bmp|ico|svg)$/i.test(file.name);
+   actions.append(
+    this.action('taskfiles.preview', 'Preview', () => {
+     if (image) { window.Lightbox?.open([{ url: FileUrl.of(file.path), name: file.name }], 0); return; }
+     window.Artifacts?.preview?.({ path: file.path, name: file.name })?.catch?.(() => {});
+    }),
+    this.action('taskfiles.download', 'Download', () => {
+     window.Artifacts?.save?.({ path: file.path, name: file.name });
+    }),
+   );
+  }
   const remove = document.createElement('button');
   remove.type = 'button';
   remove.className = 'task-file-x';
@@ -127,20 +146,18 @@ class TaskFiles {
    this.signature = '';
    this.refresh();
   });
-  row.append(remove);
-  if (file.path) {
-   row.classList.add('is-openable');
-   row.setAttribute('role', 'button');
-   row.tabIndex = 0;
-   const open = () => {
-    const url = FileUrl.of(file.path);
-    if (file.image) { window.Lightbox?.open([{ url, name: file.name }], 0); return; }
-    window.Artifacts?.preview?.({ path: file.path, name: file.name })?.catch?.(() => {});
-   };
-   row.addEventListener('click', open);
-   row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
-  }
+  actions.append(remove);
+  row.append(actions);
   return row;
+ }
+
+ action(labelKey, fallback, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'task-file-action';
+  button.textContent = I18n.has(labelKey) ? I18n.t(labelKey) : fallback;
+  button.addEventListener('click', event => { event.stopPropagation(); onClick(); });
+  return button;
  }
 }
 

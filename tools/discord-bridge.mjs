@@ -1289,10 +1289,16 @@ function replyTarget(messageId) {
  }
 }
 
-// If the app is running a turn in that chat, the bridge must not start a second one.
+// If a run is working in that chat anywhere on this machine, the bridge must not start a
+// second one: the app's runs live in presence.json, runs the server engine keeps in its own
+// heartbeat file (web-runs.json) — checking only the first was why a reply could land inside
+// a keeper turn and then vanish under its next save.
 function busyInApp(chatId) {
  const runs = readJson(join(USER_DATA, "presence.json"), {})?.runs;
- return Array.isArray(runs) && runs.some(run => run?.id === chatId && Date.now() - (Number(run.at) || 0) < 30000);
+ if (Array.isArray(runs) && runs.some(run => run?.id === chatId && Date.now() - (Number(run.at) || 0) < 30000)) return true;
+ const keeper = readJson(join(USER_DATA, "web-runs.json"), {});
+ if (!Array.isArray(keeper?.runs) || Date.now() - (Number(keeper.at) || 0) > 30000) return false;
+ return keeper.runs.some(id => String(id) === String(chatId));
 }
 
 // The user replied to a finish DM: write the message into the app conversation (tagged as

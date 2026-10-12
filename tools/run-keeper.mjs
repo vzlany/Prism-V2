@@ -160,9 +160,13 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  // -------------------------------------------------- renderer modules on a window shim
  const window = {};
  globalThis.window = window;
- globalThis.document = { documentElement: { lang: 'en', classList: { add() {}, remove() {}, contains: () => false, toggle() {} } }, querySelector: () => null, querySelectorAll: () => [] };
- globalThis.navigator = { language: 'en' };
- globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+ // Node 21+ has a read-only global `navigator` (a getter-only property): assigning it threw
+ // at startup on the Linux app, whose bundled Node is newer than the server's. Every shim is
+ // defined only when it is missing, and even a read-only built-in never crashes the boot.
+ const shim = (name, value) => { try { if (globalThis[name] === undefined) globalThis[name] = value; } catch {} };
+ shim('document', { documentElement: { lang: 'en', classList: { add() {}, remove() {}, contains: () => false, toggle() {} } }, querySelector: () => null, querySelectorAll: () => [] });
+ shim('navigator', { language: 'en' });
+ shim('localStorage', { getItem: () => null, setItem() {}, removeItem() {} });
  window.document = globalThis.document;
  window.navigator = globalThis.navigator;
  window.localStorage = globalThis.localStorage;
@@ -227,6 +231,21 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
    if (body?.sealed) return;
    const next = body && typeof body === 'object' ? body : { version: 1 };
    next.version = next.version || 1;
+   // A line written by another surface while this run works (a reply from Discord, a message
+   // typed on the phone, a queued send) must survive this save: the file is the truth for the
+   // user's words. Entries this run never saw are appended, counted per line so the same text
+   // written twice is kept twice.
+   const keyOf = entry => `${String(entry?.text ?? entry?.content ?? '').slice(0, 400)}|${entry?.origin || ''}`;
+   const counts = list => { const map = new Map(); for (const entry of list || []) { if (entry?.role !== 'user') continue; const k = keyOf(entry); map.set(k, (map.get(k) || 0) + 1); } return map; };
+   const mine = counts(run.entries);
+   const seen = new Map();
+   for (const entry of Array.isArray(body?.messages) ? body.messages : []) {
+    if (entry?.role !== 'user') continue;
+    const k = keyOf(entry);
+    const n = (seen.get(k) || 0) + 1;
+    seen.set(k, n);
+    if (n > (mine.get(k) || 0)) run.entries.push(entry);
+   }
    next.messages = run.entries;
    next.tokens = Math.round(run.tokens || 0);
    // The chat's own spend stays and this run's usage is added to it: a run the server kept
@@ -1075,7 +1094,11 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
   try {
    const notify = readJson(join(storeDir, 'notify.json'), null);
    if (notify?.discord === true && !run.quiet && !run.parent) {
-    const summary = error && !aborted ? `⚠️ ${String(error.message || error)}` : (run.discordSummary || String(run.entry?.content || '').trim().slice(0, 16000));
+    // An empty answer is still an answer the user is waiting for: the DM says what happened
+    // in plain words instead of arriving blank.
+    const summary = error && !aborted
+     ? `⚠️ ${String(error.message || error)}`
+     : (run.discordSummary || String(run.entry?.content || '').trim().slice(0, 16000) || (aborted ? '(stopped while working)' : '(the model sent an empty reply)'));
     const outcome = aborted ? 'failed' : error ? 'error' : 'completed';
     await host.invoke('discord:dm', { title: run.title || t('chat.new'), outcome, summary, files: (run.files || []).map(file => file.path), chatId: run.chatId });
    }

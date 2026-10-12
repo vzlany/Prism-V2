@@ -387,14 +387,19 @@ class Chat {
   // it drag the reader back down before following is switched off.
   const intent = event => {
    this.scrollIntent = performance.now();
+   // A touchmove's coordinates live on its Touch objects — `event.clientY` is undefined on
+   // every TouchEvent, and comparing with it meant the phone could NEVER tell an upward
+   // swipe from a downward one: the follow spring kept dragging the reader back down.
+   const touchY = event.touches?.[0]?.clientY ?? event.changedTouches?.[0]?.clientY;
    const up = event.type === 'wheel' ? event.deltaY < 0
     : event.type === 'scroll-intent' ? event.detail?.up === true
-    : event.type === 'touchmove' ? (this.touchY != null && event.clientY > this.touchY)
+    : event.type === 'touchmove' ? (typeof touchY === 'number' && this.touchY != null && touchY > this.touchY)
     : event.type === 'keydown' ? ['ArrowUp', 'PageUp', 'Home'].includes(event.key)
     : false;
-   // The direction of the last real gesture: onScroll only unfollows on an upward one.
+   // The direction of the last real gesture: onScroll only unfollows on an upward one, and
+   // only ever re-arms following after a gesture that was NOT upward.
    this.intentUp = up;
-   if (event.type === 'touchmove') this.touchY = event.clientY;
+   if (event.type === 'touchmove' && typeof touchY === 'number') this.touchY = touchY;
    if (up) this.leaveBottom();
   };
   thread.addEventListener('wheel', intent, { passive: true });
@@ -889,6 +894,7 @@ class Chat {
   clearTimeout(this.loadingTimer);
   this.loadingTimer = 0;
   if (!this.loadingEl) return;
+  this.main.classList.toggle('is-loading-thread', Boolean(show));
   if (!show) {
    this.loadingEl.classList.remove('is-shown');
    return;
@@ -906,6 +912,7 @@ class Chat {
    conv.spend = spend || null;
    conv.todos = Array.isArray(todos) ? todos : [];
    conv.detached = Array.isArray(detached) ? detached : [];
+   conv.loadFailed = false;
    this.restore(conv);
    this.renderTodos(conv);
    window.TaskFiles?.refresh?.();
@@ -1072,9 +1079,11 @@ class Chat {
  send(text, attachments = []) {
   const conv = this.active, config = this.config(conv);
   if (conv.locked) return false;
-  // The same chat cannot answer in two places at once: a run started on another page keeps
-  // the turn, and this page waits for it (the reply appears here when it finishes).
-  if (window.Presence?.isBusy?.(conv.id) || conv.waiting) return false;
+  // The same chat cannot answer in two places at once — but pressing send must never look
+  // dead. A message written while a run owns the chat somewhere else (the server engine, the
+  // app, another page) is shown at once, saved with the conversation, and answered the
+  // moment that run ends (the outbox below is drained by drainOutbox()).
+  const busyElsewhere = (window.Presence?.isBusy?.(conv.id) || conv.waiting) && !conv.turn;
   // With the desktop app running, the turn goes there: it has the tools, the browser and its
   // own keys, so this page does not need a key of its own to send.
   const delegating = Boolean(window.openghost?.delegate && window.openghost.app?.connected?.());
@@ -1083,6 +1092,7 @@ class Chat {
    return false;
   }
   if (!conv.record) {
+   if (busyElsewhere) return false;
    if (!conv.folder) return false;
    conv.record = this.library.create({ folder: conv.folder, text, attachments, incognito: Boolean(conv.incognito) });
    this.library.update(conv.id, { model: this.modelOf(conv), ...(conv.mode === 'plan' ? { mode: 'plan' } : {}) });
@@ -1099,6 +1109,8 @@ class Chat {
   this.follow = true;
   if (conv.turn) {
    this.interject(conv, prompt);
+  } else if (busyElsewhere) {
+   this.queueWhileBusy(conv, prompt);
   } else if (delegating) {
    // The desktop app is running: the turn goes there, with its tools and keys, and this page
    // watches it like any other run happening elsewhere (live card, then the saved answer).
@@ -1116,6 +1128,49 @@ class Chat {
   // Sending is an explicit move: show the message that was just sent, even from further up.
   this.scrollToBottom();
   return true;
+ }
+
+ // A message typed while another run owns the chat: it appears in the thread immediately (a
+ // send that renders nothing reads as a broken button), is written with the conversation —
+ // the server engine's next save keeps foreign user lines too — and is handed to the model
+ // by drainOutbox() the moment the busy run ends.
+ queueWhileBusy(conv, prompt) {
+  const bubble = this.userMessage(prompt);
+  conv.list.append(bubble);
+  this.main.classList.remove('is-empty');
+  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM, ...(prompt.device || FROM_DEVICE ? { device: prompt.device || FROM_DEVICE } : {}) };
+  conv.messages.push(entry);
+  this.nodes.set(entry, bubble);
+  const note = document.createElement('div');
+  note.className = 'message-note is-queued';
+  note.textContent = I18n.t('chat.queued');
+  bubble.append(note);
+  (conv.outbox ||= []).push(prompt);
+  userContent(prompt).then(content => {
+   entry.content = content;
+   this.save(conv).catch(() => {});
+  }).catch(() => {});
+  this.onChange();
+  return true;
+ }
+
+ // The busy run is over: everything typed during it goes out now, as one turn on the stored
+ // history (the lines are already in the conversation, so nothing is written twice). If the
+ // run that ended already picked the queued line up (the model saw it in a later round and
+ // answered), nothing more is owed — resuming would answer it a second time.
+ drainOutbox(id) {
+  const conv = this.conversations.get(id);
+  if (!conv?.outbox?.length || conv.turn || conv.locked) return;
+  if (window.Presence?.isBusy?.(id) || conv.waiting) return;
+  conv.outbox.length = 0;
+  for (const note of conv.list.querySelectorAll('.message-note.is-queued')) note.remove();
+  if (conv.record) this.save(conv).catch(() => {});
+  const messages = conv.messages || [];
+  const lastUser = messages.map(entry => entry.role).lastIndexOf('user');
+  const answered = lastUser >= 0 && messages.slice(lastUser + 1).some(entry => entry.role === 'assistant' && (String(entry.content || '').trim() || (entry.steps || []).length));
+  if (answered) { this.onChange(); return; }
+  this.resume(conv, this.config(conv));
+  if (conv === this.active) this.followBottom();
  }
 
  // Whether turns from this page can run in the server engine itself: every page a build with
@@ -1147,6 +1202,12 @@ class Chat {
   conv.messages.push(entry);
   this.nodes.set(entry, bubble);
   conv.waiting = Date.now();
+  // A hand-off whose presence never arrives must not freeze the page: after fifteen seconds
+  // without a word, the chat stops looking "waiting" and the next write is handled normally.
+  clearTimeout(conv.waitingTimer);
+  conv.waitingTimer = setTimeout(() => {
+   if (conv.waiting && !window.Presence?.isBusy?.(conv.id)) { conv.waiting = 0; this.onChange(); }
+  }, 15000);
   this.onChange();
   try {
    entry.content = await userContent(prompt);
@@ -1302,17 +1363,28 @@ class Chat {
   // hidden for exactly that moment and shown again once the reader's place is back.
   if (active) conv.list.style.visibility = 'hidden';
   this.rebuilding = true;
-  conv.list.replaceChildren();
-  await this.load(conv);
-  if (active) {
-   this.main.classList.toggle('is-empty', !conv.list.childElementCount);
-   if (following) { this.follow = true; this.followBottom(); }
-   else if (anchor) this.anchorRestore(anchor);
-  }
-  this.rebuilding = false;
-  if (active) {
-   this.lastTop = this.thread.scrollTop;
-   requestAnimationFrame(() => { conv.list.style.visibility = ''; });
+  try {
+   conv.list.replaceChildren();
+   await this.load(conv);
+   if (active) {
+    this.main.classList.toggle('is-empty', !conv.list.childElementCount);
+    if (following) { this.follow = true; this.followBottom(); }
+    else if (anchor) this.anchorRestore(anchor);
+   }
+  } catch (error) {
+   // A reload that fails (a dropped connection, a chat sealed elsewhere) must say so instead
+   // of leaving an invisible, empty thread behind.
+   conv.loadFailed = true;
+   const note = document.createElement('div');
+   note.className = 'message-note is-error';
+   note.textContent = I18n.t('chat.loadFailed', { reason: String(error?.message || error) });
+   conv.list.replaceChildren(note);
+  } finally {
+   this.rebuilding = false;
+   if (active) {
+    this.lastTop = this.thread.scrollTop;
+    requestAnimationFrame(() => { conv.list.style.visibility = ''; });
+   }
   }
   this.onChange();
  }
@@ -1339,8 +1411,10 @@ class Chat {
   const count = list => (list || []).filter(entry => entry?.role === 'user').length;
   if (count(messages) <= count(conv.messages)) return this.refresh(id);
   const fresh = messages.slice(conv.messages.length).filter(entry => entry.role === 'user' && this.drawable(entry));
-  conv.messages = messages;
+  // Nothing to draw (the run wrote assistant parts only): the file copy is NOT committed, so
+  // the comparisons keep telling the truth and the end-of-run refresh catches up.
   if (!fresh.length) return;
+  conv.messages = messages;
   for (const entry of fresh) {
    if (!conv.window.entries.includes(entry)) conv.window.entries.push(entry);
    this.renderEntry(conv, entry);
@@ -1398,8 +1472,19 @@ class Chat {
 
  // Steer an own prompt: the chat rewinds to just before it — the message and everything after
  // it go — and its words are handed back so they can be edited and sent again.
- rewind(conv, entry) {
+ async rewind(conv, entry) {
   if (!conv || !entry || conv.locked) return null;
+  // A run on the server engine (or the app, or another page) may own this conversation right
+  // now: editing the file under a live run was silently undone by its next save, so the run
+  // is stopped first and the wait is for it to be really gone.
+  if (!conv.turn && (window.Presence?.isBusy?.(conv.id) || conv.waiting)) {
+   this.stop();
+   const until = Date.now() + 8000;
+   while (Date.now() < until && (window.Presence?.isBusy?.(conv.id) || conv.waiting)) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+   }
+   if (window.Presence?.isBusy?.(conv.id) || conv.waiting) return null;
+  }
   const at = conv.messages.indexOf(entry);
   if (at < 0) return null;
   if (conv.turn) {
@@ -1449,10 +1534,13 @@ class Chat {
    this.follow = false;
    this.followHold = Math.max(this.followHold || 0, now + 1200);
   } else if (distance <= FOLLOW_DISTANCE
-   && !this.followMoving && now - (this.followAt || 0) > 250 && now > (this.followHold || 0)) {
+   && !this.followMoving && now - (this.followAt || 0) > 250 && now > (this.followHold || 0)
+   && !(this.intentUp === true && now - this.scrollIntent < 2500)) {
    // Following comes back when the reader brings the view to the bottom themselves (or the
    // "scroll down" button does) — never because the follow spring just happened to be there,
-   // which was the loop that made the end of a conversation impossible to leave.
+   // which was the loop that made the end of a conversation impossible to leave. And never
+   // while the last real gesture was an upward one: a reader slowly scrolling up used to be
+   // re-armed the moment they came near the bottom and yanked back down every time.
    this.follow = true;
   }
   this.lastTop = top;
@@ -2718,7 +2806,7 @@ class Chat {
     window.openghost?.discord?.dm?.({
      title,
      outcome,
-     summary: reason ? `⚠️ ${reason}` : (turn.discordSummary || String(entry.content || '').trim().slice(0, 16000)),
+     summary: reason ? `⚠️ ${reason}` : (turn.discordSummary || String(entry.content || '').trim().slice(0, 16000) || (aborted ? I18n.t('chat.stoppedShort') : I18n.t('chat.emptyReply'))),
      files: (turn.files || []).map(file => file.path).filter(Boolean),
      // Replying to that DM continues this exact conversation.
      chatId: conv.record?.id || conv.id,
@@ -2839,6 +2927,9 @@ class Chat {
 
  save(conv) {
   if (!this.library.chat(conv.id)) return Promise.resolve();
+  // A conversation whose messages never loaded must never be written: an empty list would
+  // overwrite the real chat on disk (the read may have failed, not the chat).
+  if (conv.loadFailed) return Promise.resolve();
   conv.savedAt = Date.now();
   const write = this.library.saveMessages(conv.id, conv.messages, conv.tokens, conv.spend || null, conv.todos?.length ? conv.todos : null, { detached: conv.detached || [] });
   this.library.update(conv.id, { updated: Date.now() });
@@ -2982,8 +3073,20 @@ class Chat {
 
  promptOf(entry) {
   const urls = Array.isArray(entry.content) ? entry.content.filter(part => part.type === 'image_url').map(part => part.image_url.url) : [];
+  // A browser upload's saved path rides in the message's own <file …> block: the stored
+  // attachment itself may have been written before the upload answered, so the path is
+  // recovered from the content — without it a phone-attached file could never be opened.
+  const paths = new Map();
+  if (typeof entry.content === 'string') {
+   for (const match of entry.content.matchAll(/<file name="([^"]+)"[^>]*\bpath="([^"]+)"/g)) paths.set(match[1].replace(/&quot;/g, '"'), match[2]);
+  }
   let k = 0;
-  const attachments = (entry.attachments || []).map(item => ({ ...item, info: FileKinds.describe(item.name), url: item.image ? urls[k++] || '' : '' }));
+  const attachments = (entry.attachments || []).map(item => ({
+   ...item,
+   path: item.path || paths.get(String(item.name || '')) || '',
+   info: FileKinds.describe(item.name),
+   url: item.image ? urls[k++] || '' : '',
+  }));
   return { text: entry.text || '', attachments, origin: entry.origin || '', device: entry.device || '' };
  }
 

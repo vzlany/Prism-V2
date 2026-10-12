@@ -67,9 +67,11 @@ function start(name, script, scriptArgs) {
  child.on("exit", code => {
   children.delete(name);
   if (stopping) return;
-  // 1 = configuration problem (the Discord bot has no token yet): leave it off instead of
-  // restarting every few seconds; the child explained what to set.
-  if (code === 1) { log(`${name} is not set up — leaving it off until the next start`); return; }
+  // 1 = configuration problem — and only the Discord bot has one (no token yet): leave it
+  // off instead of restarting every few seconds; the child explained what to set. The web
+  // server has no such state: a crash there exits 1 too, and treating it as "not set up"
+  // used to leave the machine without a UI until someone restarted the service.
+  if (code === 1 && name === "discord") { log(`${name} is not set up — leaving it off until the next start`); return; }
   if (code === 0) return;
   // 75 = "the install changed under me" (an update): rotate the other helper too, so the
   // whole stack comes back on the same build instead of one half running the old code.

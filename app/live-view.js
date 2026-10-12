@@ -43,6 +43,9 @@ class LiveView {
   for (let k = parts.length; k < this.nodes.length; k++) this.nodes[k].el.remove();
   if (this.nodes.length > parts.length) this.nodes.length = parts.length;
   this.todos(info.todos);
+  // The checklist is the "where is it now" line and stays the LAST thing in the card: new
+  // tool cards and text used to land under it and bury it mid-card.
+  if (this.todoCard?.el?.parentElement === this.body && this.body.lastElementChild !== this.todoCard.el) this.body.append(this.todoCard.el);
  }
 
  // The device's todo checklist, drawn from the live mirror: checkmarks move while it works,

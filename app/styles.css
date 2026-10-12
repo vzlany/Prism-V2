@@ -1526,6 +1526,9 @@ ghost-thinking {
   right: 0;
   margin: 0;
   opacity: 0;
+  /* Hidden means unclickable: on a phone a finger landing in the room under the bubble used
+     to fire the invisible Steer button and rewind the chat with no confirmation. */
+  pointer-events: none;
   animation: none;
   transition: opacity 0.2s ease;
 }
@@ -1533,6 +1536,7 @@ ghost-thinking {
 .message.is-user:hover .message-tools,
 .message.is-user .message-tools:has(:focus-visible, .is-copied) {
   opacity: 1;
+  pointer-events: auto;
 }
 
 @keyframes message-tools-in {
@@ -8567,7 +8571,9 @@ a.settings-button {
 .message-thinking-body{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .3s cubic-bezier(.32,.72,0,1),opacity .22s ease}
 .message-thinking.is-open .message-thinking-body{grid-template-rows:1fr;opacity:1}
 .message-thinking-inner{min-height:0;overflow:hidden;white-space:pre-wrap;font-size:12.5px;line-height:1.6;color:rgba(255,255,255,.42);font-style:italic;scrollbar-width:thin;scrollbar-color:rgba(var(--fg-rgb),0.15) transparent}
-.message-thinking.is-open .message-thinking-inner{max-height:300px;overflow-y:auto}
+/* Open, the whole reasoning is reachable: a tall box that scrolls on its own — from the
+   newest words at the bottom all the way up — with the gesture left to the box itself. */
+.message-thinking.is-open .message-thinking-inner{max-height:min(440px,52vh);overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}
 /* Extended thinking: the box shows in full, like a terminal log — no header, no folding, no inner scroll. */
 .message-thinking.is-extended .message-thinking-head{display:none}
 .message-thinking.is-extended .message-thinking-body{grid-template-rows:1fr;opacity:1}
@@ -9044,7 +9050,7 @@ html.is-simple .tool-group.is-open .tool-chevron{transform:rotate(90deg)}
    (the vertical bars were asked away — the ⚡ and the little icons now appear only when a
    line is opened, and while something works only its WORDS shimmer, not the whole row). */
 html.is-simple .tool-group{margin:1px 0;padding-left:0}
-html.is-simple .message-thinking{margin:1px 0;padding-left:0;background:transparent;box-shadow:none}
+html.is-simple .message-thinking{margin:1px 0;padding-left:0;border-left:0;background:transparent;box-shadow:none}
 html.is-simple .message-thinking-head{height:24px;padding:0 2px}
 /* The steps of one turn sit as close as the lines of one rail; a text step keeps a breath
    above it. */
@@ -9053,14 +9059,13 @@ html.is-simple .message.is-assistant > .message-content:not(:empty){margin-top:4
 /* Every tool card: no frame — border included — the reason and the time, expandable on
    click. Cards already on screen when the setting is flipped keep the same look. */
 html.is-simple .tool:not(.is-parallel){background:transparent;box-shadow:none;border:0;border-radius:0;margin:1px 0;padding-left:0;animation:none}
-/* The ⚡ and the tool's own icon stay out of the closed line; opening the line brings the
-   icon back. */
-html.is-simple .tool-group-icon{display:none}
-html.is-simple .tool-group.is-open .tool-group-icon{display:block}
+/* The gray ⚡ marks a tool call line (the Thought row keeps its 🧠 alone — no rail); the
+   tool's own icon appears when the line is opened. */
+html.is-simple .tool-group-icon{display:block}
 html.is-simple .tool:not(.is-parallel) .tool-icon{display:none}
 html.is-simple .tool:not(.is-parallel).is-open .tool-icon{display:block}
 html.is-simple .tool-group.is-open .tool-icon{display:block}
-html.is-simple .tool:not(.is-parallel) .tool-reason::before{content:none}
+html.is-simple .tool:not(.is-parallel) .tool-reason::before{content:"⚡";margin-right:6px;filter:grayscale(1);opacity:.5}
 /* While a simple card runs, only its words carry the shimmer — the whole row used to wear a
    travelling glint, which read as the line itself lighting up. */
 html.is-simple .tool:not(.is-parallel).is-running::after{display:none}
@@ -9701,3 +9706,19 @@ html.is-simple .thread-list > .message{content-visibility:visible}
 
 /* Prism V2: a checklist box under the todo call that made it — tied to the work, not to the end */
 .todo-card.is-snapshot{margin:6px 0 10px}
+
+/* Prism V2: the files panel lives at the end of the conversation (under the newest message,
+   tool line or live card), with Preview and Download on every row. */
+.task-files.is-in-thread{margin:18px 0 6px}
+.task-file-actions{flex:none;display:inline-flex;align-items:center;gap:6px;margin-left:6px}
+.task-file-action{border:0;border-radius:8px;padding:3px 9px;background:rgba(var(--fg-rgb),.07);color:rgba(var(--fg-rgb),.78);font:inherit;font-size:11px;line-height:1.6;cursor:pointer;white-space:nowrap;transition:background-color .15s ease,color .15s ease}
+.task-file-action:hover,.task-file-action:focus-visible{background:rgba(var(--fg-rgb),.14);color:rgba(var(--fg-rgb),.98)}
+.task-file-x{opacity:.55}
+.task-file:hover .task-file-x,.task-file-x:focus-visible{opacity:1}
+
+/* Prism V2: a send queued while another run works — already in the thread, waiting its turn. */
+.message-note.is-queued{margin:6px 0 0;padding:4px 10px;border-radius:9px;background:rgba(138,180,255,.10);box-shadow:inset 0 0 0 1px rgba(138,180,255,.20);color:rgba(var(--fg-rgb),.72);font-size:12px;display:inline-block}
+
+/* While a conversation is being read from disk the composer waits with it: the page said
+   "Loading conversation" while the message box stayed bright and busy. */
+.main.is-loading-thread .composer{opacity:.4;pointer-events:none}
