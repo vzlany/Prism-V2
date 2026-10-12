@@ -25,7 +25,10 @@ here is in this repository; nothing else was removed.
   window at all — one process, restart-on-crash — for a box without a desktop. A root
   password set in Settings → Server lets the agent run `sudo apt-get install -y …` itself:
   the app answers sudo's prompt through an askpass helper, and the password never reaches the
-  model. Downloads: see the release assets (`Prism-V2-<version>-linux.tar.gz`).
+  model. On the headless server ffmpeg is the media decoder (the Electron canvas is not
+  there), so pictures, screenshots and video frames need `sudo apt-get install -y ffmpeg` —
+  without it those tools say plainly that the decoder is missing instead of blaming the
+  file. Downloads: see the release assets (`Prism-V2-<version>-linux.tar.gz`).
 - **Pick which device to work with.** Every running Prism (app, tray or headless server)
   announces itself on the LAN; when another one answers, the app asks at launch which device
   this window should use — a PC icon, the device's name, its system and version, a **Server**
@@ -52,7 +55,10 @@ here is in this repository; nothing else was removed.
   `update_prism` tool, which downloads, applies and restarts it. Releases are public, so no
   token is needed; a GitHub token can be set anyway for rate limits or a private fork. The
   "updated to v…" banner is a one-shot notice: it shows while the update really is fresh and
-  is not replayed to every page that opens later.
+  is not replayed to every page that opens later. And the update does not end in silence: a
+  boot that follows one writes "✅ Prism V2 updated to v… — I'm back" into the conversation
+  that asked for it and sends the same line to Discord, so a phone that watched the server
+  go away and come back sees that it worked.
 - **One Prism per machine** — every engine (the app, the headless server, its web server and
   the Discord bot) announces itself in a small instance registry together with its build.
   When an update lands, the new build stops whatever still runs from the old one before it
@@ -86,7 +92,11 @@ here is in this repository; nothing else was removed.
   conversation, a closed tab or a locked phone cannot stop the work. Any page that opens the
   conversation sees it working — the ghost in the list, the live card, the stop button — and
   Stop reaches the run wherever it is: a stop pressed while the agent waits ends it quietly,
-  with no "done" or "failed" notice.
+  with no "done" or "failed" notice. The checklist updates as the agent ticks it (the live
+  card draws the todos the moment the run starts), the thread is not rebuilt while the run
+  saves its progress — that was why a long conversation seemed to lose its earlier messages
+  while it worked — and whatever folds above the reader's place (a Thought closing, a tool
+  line collapsing, the live card shrinking) no longer drags the view up with it.
 - **Live mirror of the running turn.** The phone sees the same thing the app does while it
   works: the Thought box growing, the tool cards running (white snake included, same icon and
   title), and the answer being written — laid out exactly like the app's own message, not
@@ -181,7 +191,11 @@ here is in this repository; nothing else was removed.
 - **File cards** — writes and edits show green `+N` / red `−M` line counts, carry Preview and
   Download on the card itself (one box per file), and **`attach_file`** lets the agent hand
   over any finished file — a build, an installer, an archive — as a chip with a real binary
-  download (the desktop asks where to save; the web streams it).
+  download (the desktop asks where to save; the web streams it). A path written relative to
+  the chat's folder resolves the same on every platform — the old backslash join made every
+  relative download on a phone a 404 that still said "Downloaded" — and the web button asks
+  the server for the file first, so a missing one comes back to "Download" instead of
+  pretending, with the reason in the server's console.
 - **Screen pictures** — two white snakes glide around a running tool card's frame at one
   constant speed, half a loop apart; the `screenshot` tool captures the whole screen or one
   window through Electron itself, so it works without ffmpeg and antivirus has no script to

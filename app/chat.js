@@ -1317,12 +1317,17 @@ class Chat {
   if (!conv?.record || conv.turn || conv.locked) return;
   // A hand-off that visibly ended (or never started) is over: the stop button may return.
   if (conv.waiting && !window.Presence?.isBusy?.(id)) { clearTimeout(conv.waitingTimer); conv.waiting = 0; }
+  // The thread is rebuilt from the file: a reader who was following the bottom stays on it,
+  // and one who was up in the conversation is put back on the message they were reading.
+  const active = conv === this.active;
+  const following = this.follow;
+  const anchor = active && !following ? this.anchor() : null;
   conv.list.replaceChildren();
   await this.load(conv);
-  if (conv === this.active) {
+  if (active) {
    this.main.classList.toggle('is-empty', !conv.list.childElementCount);
-   this.follow = true;
-   this.followBottom();
+   if (following) { this.follow = true; this.followBottom(); }
+   else if (anchor) this.anchorRestore(anchor);
   }
   this.onChange();
  }
@@ -1473,6 +1478,61 @@ class Chat {
   entry.content = entry.content.replace(from, to);
   const conv = event.target.closest('.thread-list')?.__conversation;
   if (conv?.record && conv.messages.includes(entry)) this.library.saveMessages(conv.id, conv.messages, conv.tokens);
+ }
+
+ 
+ // The message the reader is looking at right now: the first top-level element that reaches
+ // into the viewport, with its offset from the top of it. A rebuilt thread can put the view
+ // back on the same message with it (an element that survived the change is preferred, a
+ // position in the conversation is the fallback).
+ anchor() {
+  const conv = this.active, list = conv?.list;
+  if (!conv || !list?.childElementCount) return null;
+  const top = this.thread.getBoundingClientRect().top;
+  for (const node of list.children) {
+   const rect = node.getBoundingClientRect();
+   if (rect.bottom > top + 1) {
+    const entry = node.__entry || null;
+    return { node, index: entry ? conv.messages.indexOf(entry) : -1, offset: rect.top - top };
+   }
+  }
+  return null;
+ }
+
+ anchorRestore(anchor) {
+  const conv = this.active, list = conv?.list;
+  if (!anchor || !list) return;
+  let el = anchor.node?.isConnected ? anchor.node : null;
+  if (!el && Number.isInteger(anchor.index) && anchor.index >= 0) {
+   const entry = conv.messages[anchor.index];
+   if (entry) for (const node of list.children) if (node.__entry === entry) { el = node; break; }
+  }
+  if (!el) return;
+  const top = this.thread.getBoundingClientRect().top;
+  const offset = el.getBoundingClientRect().top - top;
+  if (Math.abs(offset - anchor.offset) > 0.5) {
+   this.thread.scrollTop += offset - anchor.offset;
+   this.lastTop = this.thread.scrollTop;
+  }
+ }
+
+ // A box folding, a card collapsing, a rebuilt thread: content above the viewport changes
+ // height under the reader's eyes. When the bottom is not being followed, the message they
+ // were reading is pinned to its place for the length of the animation (following the bottom
+ // is the spring's own job, and a real scroll gesture cancels the hold at once).
+ holdView(work) {
+  if (this.follow) return typeof work === 'function' ? work() : undefined;
+  const anchor = this.anchor();
+  const out = typeof work === 'function' ? work() : undefined;
+  if (!anchor) return out;
+  const until = performance.now() + 600;
+  const step = () => {
+   if (performance.now() - this.scrollIntent < 200) return;
+   this.anchorRestore(anchor);
+   if (performance.now() < until) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  return out;
  }
 
  followBottom() {
@@ -1806,8 +1866,8 @@ class Chat {
   group.classList.toggle('is-working', working);
   group.classList.toggle('has-error', failed > 0);
   // The line that is working stays open; once it is done — or a newer line starts — it folds,
-  // unless the user opened it by hand.
-  if (!group.__touched) group.classList.toggle('is-open', working);
+  // unless the user opened it by hand. The fold is a collapse above the reader's place: hold it.
+  this.holdView(() => { if (!group.__touched) group.classList.toggle('is-open', working); });
   const time = group.querySelector('.tool-group-time');
   if (time && group.__begun) {
    time.hidden = false;
@@ -2458,11 +2518,12 @@ class Chat {
   // the thinking box stays above the cards, and the cards stay where they ran.
   const hasBody = Boolean(view.el.querySelector('.tool, .media-slider, .file-card, .message-error, .message-note'));
   if (!entry.steps.length && !hasText && !hasThinking) drop(conv.messages, entry);
-  view.thinking?.finish();
+  // The thought box folding is the biggest collapse of a step: hold the reader's place.
+  this.holdView(() => { view.thinking?.finish(); });
   if (view.thinking?.elapsed && !entry.thinkingMs) entry.thinkingMs = Math.round(view.thinking.elapsed);
   view.stream.finish().then(() => {
    view.el.classList.remove('is-streaming');
-   if (!hasText && !hasThinking && !hasBody) collapse(view.el);
+   if (!hasText && !hasThinking && !hasBody) this.holdView(() => collapse(view.el));
    // Paths written in the finished step become links with icons.
    window.PathChips?.enhance(view.el, conv.record?.folder);
   });

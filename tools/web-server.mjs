@@ -128,10 +128,13 @@ const server = createServer((req, res) => {
   return;
  }
  if (url.pathname === "/file") {
-  // A file the agent attached, streamed as it is (any type) with its own name.
-  const file = url.searchParams.get("path") || "";
-  const name = String(url.searchParams.get("name") || basename(file)).replace(/[\r\n"]/g, "");
-  if (!isAbsolute(file) || !existsSync(file) || !statSync(file).isFile()) return send(404, "no such file", "text/plain");
+  // A file the agent attached, streamed as it is (any type) with its own name. An older
+  // record may carry a path joined with backslashes (the old download join): try that
+  // spelling too instead of a 404.
+  const asked = url.searchParams.get("path") || "";
+  const file = [asked, asked.includes("\\") ? asked.replace(/\\/g, "/") : ""].find(item => item && isAbsolute(item) && existsSync(item) && statSync(item).isFile()) || "";
+  const name = String(url.searchParams.get("name") || basename(file || asked)).replace(/[\r\n"]/g, "");
+  if (!file) return send(404, "no such file", "text/plain");
   res.writeHead(200, {
    "content-type": "application/octet-stream",
    "content-disposition": `attachment; filename="${name}"`,

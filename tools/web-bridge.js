@@ -93,13 +93,32 @@ window.openghost = {
  saveFile: (path, name) => {
   return new Promise(resolve => {
    try {
-    const link = document.createElement('a');
-    link.href = `/file?path=${encodeURIComponent(path)}${name ? `&name=${encodeURIComponent(name)}` : ''}`;
-    link.download = name || '';
-    document.body.append(link);
-    link.click();
-    link.remove();
-    resolve(name || path);
+    const url = `/file?path=${encodeURIComponent(path)}${name ? `&name=${encodeURIComponent(name)}` : ''}`;
+    // The server is asked first: a missing file, a bad path or a 404 must not keep the
+    // button saying "Downloaded" while nothing ever reaches the device.
+    fetch(url, { method: 'HEAD' }).then(response => {
+     if (!response.ok) { resolve(null); return; }
+     try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = name || '';
+      document.body.append(link);
+      link.click();
+      link.remove();
+      resolve(name || path);
+     } catch { resolve(null); }
+    }, () => {
+     // The check itself failed (offline): let the plain link try anyway.
+     try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = name || '';
+      document.body.append(link);
+      link.click();
+      link.remove();
+      resolve(name || path);
+     } catch { resolve(null); }
+    });
    } catch {
     resolve(null);
    }

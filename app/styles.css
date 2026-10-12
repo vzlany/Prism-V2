@@ -7665,18 +7665,21 @@ a.settings-button {
 /* The hidden-mode note on the new-conversation screen: it says out loud what the glass
    just did, so nobody wonders where the conversation went. */
 .incognito-note {
-  position: absolute;
-  z-index: 1;
-  top: calc((100% - var(--composer-space, 140px) + var(--composer-bottom-gap) - var(--welcome-space)) / 2 + calc(var(--welcome-size, 64px) * 70 / 64) + 16px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: min(430px, 84vw);
-  padding: 7px 15px;
-  border-radius: 999px;
-  background: rgba(var(--fg-rgb), 0.05);
-  box-shadow: inset 0 0 0 1px rgba(var(--fg-rgb), 0.09);
-  color: rgba(var(--fg-rgb), 0.62);
+  /* A flex row of its own, right above the composer: it can wrap to as many lines as the
+     screen needs without a magic `top` and never lands on the composer or the folder pill
+     (the old absolute position was measured from the welcome ghost and overlapped both on
+     a phone). */
+  position: relative;
+  z-index: 3;
+  align-self: center;
+  margin: auto auto 10px;
+  width: fit-content;
+  max-width: min(430px, calc(100% - 32px));
+  padding: 8px 14px;
+  border-radius: 16px;
+  background: rgba(var(--fg-rgb), 0.06);
+  box-shadow: inset 0 0 0 1px rgba(var(--fg-rgb), 0.1);
+  color: rgba(var(--fg-rgb), 0.66);
   font-size: 12.5px;
   line-height: 1.45;
   text-align: center;
@@ -7687,8 +7690,8 @@ a.settings-button {
 .incognito-note[hidden] { display: none; }
 
 @keyframes incognito-note-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
-  to { opacity: 1; transform: translateX(-50%); }
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
 }
 
 .browser-toggle[hidden] {
@@ -9318,9 +9321,20 @@ html.is-simple .thread-list > .message{content-visibility:visible}
 /* Prism V2: a touch screen has no hover — the row and folder actions stay visible there, so
    deleting a conversation or a category never waits for a hover that cannot happen. */
 @media (hover: none), (pointer: coarse) {
+ /* A finger has no hover: the row buttons live on the list, but quietly. Showing every
+    action of every row at full strength turned the whole list into a toolbar — the row the
+    reader is in (or is touching right now) is the one that shows them bright. */
  .chat-actions { pointer-events: auto; }
  .chat-action,
- .chats-folder-action { opacity: 1; transform: none; pointer-events: auto; }
+ .chats-folder-action { opacity: .5; transform: none; pointer-events: auto; }
+ .chat-action + .chat-action,
+ .chats-folder-action + .chats-folder-action { margin-left: 1px; }
+ .chat-row.is-active .chat-action,
+ .chat-row:active .chat-action,
+ .chat-row.is-confirming .chat-action,
+ .chats-folder-head:active .chats-folder-action,
+ .chats-folder.is-confirming .chats-folder-action { opacity: 1; }
+ .chat-row.is-active .chat-time { opacity: 0; }
  .chat-row .chat-time { display: none; }
 }
 

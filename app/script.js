@@ -257,10 +257,13 @@ function presenceRender(list) {
 function syncLive() {
  const conv = chat.active;
  const info = conv && !conv.turn ? window.Presence?.info?.(conv.id) : null;
- if (conv && info?.parts?.length) {
+ // Any run counts, even one that has not written its first word yet: the card's head carries
+ // the ghost and the "thinking" label, which is the only "it is working" the thread shows.
+ if (conv && info) {
   if (!liveView) liveView = new LiveView();
   if (liveView.el.parentElement !== conv.list) conv.list.append(liveView.el);
-  liveView.update(info);
+  // The card grows and folds as the run moves along; a reader up in the thread keeps their place.
+  chat.holdView(() => liveView.update(info));
   if (chat.follow) chat.followBottom();
  } else if (liveView) {
   liveView.el.remove();
@@ -321,17 +324,17 @@ window.openghost?.store?.onChatChange?.(id => {
   if (!current || current.turn || current.waiting) return;
   if (Date.now() - (current.savedAt || 0) < 1500) return;
   if (busy) {
-   // A run is going on elsewhere (the app, the Discord bot). The live card shows the work,
-   // but a message the other surface just wrote — the user's own line — must not wait for
-   // the end: read the file quietly and rebuild the thread only when it holds something new.
+   // A run is going on elsewhere (the app, the server engine, the Discord bot). The live card
+   // shows the work; the file is growing on every save and rebuilding the thread for that was
+   // why a long conversation seemed to lose its earlier messages while it worked. Only a new
+   // line from another surface — the user typing on the phone while the app runs — is worth
+   // rebuilding the thread for.
    if (window.Presence?.isBusy?.(id)) {
     try {
      const { messages } = await library.conversation(id);
      const seen = current.messages || [];
-     const textOf = entry => String(entry?.content ?? entry?.text ?? '');
-     const grew = messages.length !== seen.length
-      || textOf(messages[messages.length - 1]) !== textOf(seen[seen.length - 1]);
-     if (grew) chat.refresh(id).catch(() => {});
+     const users = list => (list || []).filter(entry => entry?.role === 'user').length;
+     if (users(messages) > users(seen)) chat.refresh(id).catch(() => {});
     } catch {}
    }
    return;

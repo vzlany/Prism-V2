@@ -214,11 +214,38 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
  const updateStateFile = join(USER_DATA, "update-state.json");
  const readUpdateState = () => { try { return JSON.parse(readFileSync(updateStateFile, "utf8")); } catch { return null; } };
  const writeUpdateState = patch => { try { writeFileSync(updateStateFile, JSON.stringify({ at: Date.now(), ...patch })); } catch {} };
- // A boot that follows an update means the new build is running: say so for the pages.
+ // A boot that follows an update means the new build is running: say so for the pages, and
+ // tell the user — a line in the conversation that asked, and a Discord DM — so a successful
+ // update is never met with silence.
  {
   const prior = readUpdateState();
-  if (prior?.phase === "restarting") writeUpdateState({ phase: "done", version: prior.version || startedVersion });
-  else if (prior?.phase === "downloading" || prior?.phase === "installing") writeUpdateState({ phase: "idle", version: prior.version || "" });
+  if (prior?.phase === "restarting") {
+   const version = String(prior.version || startedVersion || "");
+   writeUpdateState({ phase: "done", version, chatId: prior.chatId || "" });
+   if (webPort > 0) announceUpdate(version, prior.chatId || "").catch(() => {});
+  } else if (prior?.phase === "downloading" || prior?.phase === "installing") writeUpdateState({ phase: "idle", version: prior.version || "" });
+ }
+ async function announceUpdate(version, chatId) {
+  const text = `✅ Prism V2 updated to v${version} — I'm back, running the new version.`;
+  try {
+   const notify = JSON.parse(readFileSync(join(USER_DATA, "store", "notify.json"), "utf8"));
+   if (notify?.discord === true) await Discord.send("Prism V2", "completed", text);
+  } catch {}
+  if (!chatId) return;
+  try {
+   const file = join(USER_DATA, "store", "chats", `${chatId}.json`);
+   const body = JSON.parse(readFileSync(file, "utf8"));
+   if (!body || body.sealed || !Array.isArray(body.messages)) return;
+   body.messages.push({ role: "assistant", content: text, turn: "update" });
+   const temp = `${file}.tmp`;
+   writeFileSync(temp, JSON.stringify(body));
+   renameSync(temp, file);
+   const indexFile = join(USER_DATA, "store", "index.json");
+   const index = JSON.parse(readFileSync(indexFile, "utf8"));
+   const record = (index?.chats || []).find(item => item?.id === chatId);
+   if (record) { record.updated = Date.now(); writeFileSync(indexFile, JSON.stringify(index)); }
+   console.log(`[update] told conversation ${chatId} that v${version} is running`);
+  } catch (error) { console.log(`[update] could not note the update in the chat: ${error.message}`); }
  }
  handlers.set("update:state", () => readUpdateState());
  // The switches live in the store (the app writes store/auto.json — this used to read the
@@ -341,7 +368,7 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   if (supervised()) process.exit(75);
   else console.log("[update] no supervisor is running this engine: restart it to pick the new build up");
  }, 20000).unref?.();
- async function runUpdate({ force = false } = {}) {
+ async function runUpdate({ force = false, chatId = "" } = {}) {
   const settings = updateCore.readSettings(USER_DATA);
   const token = updateCore.tokenOf(settings);
   let release = null;
@@ -353,11 +380,11 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   const asset = updateCore.pickAsset(release, "linux");
   if (!asset) return { error: `v${release.version} has no Linux build` };
   const file = join(paths.temp, "prism-update", asset.name);
-  writeUpdateState({ phase: "downloading", version: release.version });
-  try { await updateCore.download({ url: asset.url, file, token, onProgress: value => { const pct = Math.round((Number(value) || 0) * 100); if (pct % 5 === 0) writeUpdateState({ phase: "downloading", version: release.version, progress: Number(value) || 0 }); } }); } catch (error) { writeUpdateState({ phase: "idle", version: release.version }); return { error: error.message }; }
-  writeUpdateState({ phase: "installing", version: release.version });
+  writeUpdateState({ phase: "downloading", version: release.version, chatId });
+  try { await updateCore.download({ url: asset.url, file, token, onProgress: value => { const pct = Math.round((Number(value) || 0) * 100); if (pct % 5 === 0) writeUpdateState({ phase: "downloading", version: release.version, progress: Number(value) || 0, chatId }); } }); } catch (error) { writeUpdateState({ phase: "idle", version: release.version, chatId }); return { error: error.message }; }
+  writeUpdateState({ phase: "installing", version: release.version, chatId });
   let applied = null;
-  try { applied = updateCore.applyLinux({ root: installRoot, tarFile: file }); } catch (error) { writeUpdateState({ phase: "idle", version: release.version }); return { error: error.message }; }
+  try { applied = updateCore.applyLinux({ root: installRoot, tarFile: file }); } catch (error) { writeUpdateState({ phase: "idle", version: release.version, chatId }); return { error: error.message }; }
   try {
    const Server = require(join(ROOT, "desktop", "server.js"));
    await updateCore.fixSandbox(installRoot, Server.sudoEnv());
@@ -383,7 +410,7 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
    Server.ensureLinuxAutostart(installRoot);
   } catch {}
   const up = supervised();
-  writeUpdateState({ phase: up ? "restarting" : "done", version: applied.version || release.version });
+  writeUpdateState({ phase: up ? "restarting" : "done", version: applied.version || release.version, chatId });
   if (up) {
    // Let the answer that asked for the update go out first: step aside once this engine is
    // idle again (at most two minutes), and the supervisor brings the new build right back.
@@ -414,7 +441,7 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   return { ...result, message: updateCore.message(result) };
  });
  handlers.set("update:run", async (event, args) => {
-  const result = await runUpdate({ force: args?.force === true });
+  const result = await runUpdate({ force: args?.force === true, chatId: String(args?.chatId || "") });
   return { ...result, message: updateCore.message(result) };
  });
  // Auto-update on a server: every six hours, when "Install automatically" is on and nothing

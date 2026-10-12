@@ -6,9 +6,13 @@
 const escapeHtml = text => String(text ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
 const nameOf = path => String(path || '').split(/[\\/]/).pop() || 'file';
 // A tool call may name the file relative to the project folder; previews and downloads need
-// the real path, whatever the current working directory of the app happens to be.
+// the real path, whatever the current working directory of the app happens to be. The join
+// uses forward slashes on every platform: Node and the web server both accept them on
+// Windows, while a backslash on the Linux server is just a character in a filename — and the
+// old join put one there, so every relative-path download on a phone was a 404 that still
+// said "Downloaded".
 const isAbsolute = path => /^([a-zA-Z]:[\\/]|\\\\|\/)/.test(String(path || ''));
-const full = (path, cwd) => (path && cwd && !isAbsolute(path) ? `${String(cwd).replace(/[\\/]+$/, '')}\\${String(path).replace(/^[\\/]+/, '')}` : path);
+const full = (path, cwd) => (path && cwd && !isAbsolute(path) ? `${String(cwd).replace(/[\\/]+$/, '')}/${String(path).replace(/^[\\/]+/, '')}` : path);
 
 async function read(path, cwd) {
  try {

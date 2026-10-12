@@ -126,7 +126,6 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  window.document = globalThis.document;
  window.navigator = globalThis.navigator;
  window.localStorage = globalThis.localStorage;
- let currentRun = null;
  const rawTool = (id, name, args, cwd) => host.invoke('tool:run', id, name, args, cwd);
  window.openghost = {
   tools: {
@@ -146,7 +145,9 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
    message: payload => host.invoke('discord:message', payload),
   },
   update: {
-   run: args => host.invoke('update:run', args),
+   // The conversation that asked travels with the request: after the restart the new engine
+   // notes the success in that very chat.
+   run: args => host.invoke('update:run', { ...(args && typeof args === 'object' ? args : {}), chatId: activeRun()?.chatId || '' }),
   },
  };
  for (const file of ['i18n.js', 'agent-prompt.js', 'agent-tools.js']) {
@@ -288,7 +289,11 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  function openPart(run) {
   run.entry = { role: 'assistant', content: '', steps: [], turn: run.id };
   run.entries.push(run.entry);
-  run.part = null; // parts are created lazily: a thinking box only when there is a thought
+  // The thinking box exists from the start (empty): a watching page gets the live card — the
+  // ghost and the "thinking" label — in the very first publish, instead of nothing at all
+  // while the model is still silent.
+  run.part = { thinking: { kind: 'thinking', text: '', live: true }, card: null, text: null };
+  run.parts.push(run.part.thinking);
  }
 
  function partThinking(run) {
@@ -572,8 +577,19 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
    } else if (entry.role === 'user') {
     out.push({ role: 'user', content: addressOf(entry) });
    } else if (entry.role === 'assistant') {
-    if (entry.steps?.length) out.push(...entry.steps);
-    else if (entry.content) out.push({ role: 'assistant', content: entry.content });
+    const steps = entry.steps || [];
+    const usable = [];
+    for (let k = 0; k < steps.length; k++) {
+     const step = steps[k], calls = step.tool_calls?.length || 0;
+     // A step whose tool results never reached the file (the run was stopped between the
+     // call and its answers) must not be replayed: providers reject a tool call with no
+     // reply, and the whole conversation would fail with a 400 — retried three times, for
+     // every message after it. The page's own history snapshot cuts the same way.
+     if (calls && steps.slice(k + 1, k + 1 + calls).filter(next => next.role === 'tool').length < calls) break;
+     usable.push(step);
+    }
+    if (usable.length) out.push(...usable);
+    else if (String(entry.content || '').trim()) out.push({ role: 'assistant', content: entry.content });
    }
   }
   return out;
@@ -590,8 +606,11 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
     break;
    } catch (error) {
     const aborted = error?.aborted || error?.name === 'AbortError' || run.stopped;
-    // Once tokens have arrived a retry would double them: only empty failures are retried.
-    if (aborted || attempt > tries || !error?.empty) throw error;
+    // Once tokens have arrived a retry would double them; only empty failures are retried,
+    // and only the transient kind — a 400 (a malformed request, a rejected history) is the
+    // request's own fault and would fail the same three times over.
+    const transient = !error?.status || error.status >= 500;
+    if (aborted || attempt > tries || !error?.empty || !transient) throw error;
     log(`model call for ${run.chatId} failed (${error.message}); retrying in ${pause / 1000}s (${attempt}/${tries})`);
     await new Promise(resolve => setTimeout(resolve, pause));
     if (run.stopped) throw Object.assign(new Error('Aborted'), { aborted: true });

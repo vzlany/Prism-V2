@@ -132,7 +132,11 @@ function tool(name, args, { ms = WAIT.image, signal } = {}) {
   else signal?.addEventListener('abort', onAbort, { once: true });
   child.stdout.on('data', chunk => out.push(chunk));
   child.stderr.on('data', chunk => err.push(chunk));
-  child.on('error', error => finish(error));
+  // A missing decoder is a setup problem, not a broken file: say so plainly (the headless
+  // server decodes through ffmpeg — without it no image or video can be read at all).
+  child.on('error', error => finish(error.code === 'ENOENT'
+   ? plain(`the media decoder (${name}) is not installed on this machine${process.platform === 'linux' ? ' — install it with: sudo apt-get install -y ffmpeg' : ', install it with: winget install Gyan.FFmpeg'}`)
+   : error));
   child.on('close', code => {
    if (code === 0) return finish(null, Buffer.concat(out));
    const said = String(Buffer.concat(err)).trim().split(/\r?\n/).filter(Boolean).at(-1) || 'media 3';
