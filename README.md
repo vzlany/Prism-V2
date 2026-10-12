@@ -50,7 +50,9 @@ here is in this repository; nothing else was removed.
   swapped and the process comes back (systemd, or `prism server`, restarts it). The same
   works on the web and from Discord by asking the agent — "update Prism V2" runs the
   `update_prism` tool, which downloads, applies and restarts it. Releases are public, so no
-  token is needed; a GitHub token can be set anyway for rate limits or a private fork.
+  token is needed; a GitHub token can be set anyway for rate limits or a private fork. The
+  "updated to v…" banner is a one-shot notice: it shows while the update really is fresh and
+  is not replayed to every page that opens later.
 - **One Prism per machine** — every engine (the app, the headless server, its web server and
   the Discord bot) announces itself in a small instance registry together with its build.
   When an update lands, the new build stops whatever still runs from the old one before it
@@ -66,15 +68,31 @@ here is in this repository; nothing else was removed.
   web) turns the next conversation — or the one on screen — incognito: it stays out of the
   chat list everywhere, and the model is told not to save anything to memory unless you ask.
   Pressing the glass again turns it back into a normal conversation, even after it started.
+  The glass is drawn by hand in the same line style as the hamburger and the globe (no
+  emoji, no resting background), the lenses drink in when it is on, and a new conversation
+  says out loud what the mode means — "Hidden mode: this conversation stays out of the list
+  and out of memory" — until the first message goes out.
+- **The globe on the web** — a phone page wears the same globe as the app, attached right
+  beside the glass. There is no webview there, so it opens a light runs panel instead: the
+  agent's parallel runs and sub-agents, live, with the X to close it — and the composer's
+  runs meter brings the same panel forward.
 - **The website runs its turns in the app.** When the desktop app is running, a message sent
   from `prism web` (the phone) is handed to the app through a small file bridge: the app runs
   the turn with its tools, browser, skills and keys, streams it in its own window, and the
-  phone follows the same run live. Without the app, the web falls back to running turns
-  itself, so a headless `prism web` still works.
+  phone follows the same run live.
+- **Turns survive the page** — without the app, a message sent from the web no longer runs in
+  the tab that sent it. The server engine keeps the whole turn (model rounds, tools, titles,
+  Discord DMs) and writes the conversation as it goes, so a refresh, a switch to another
+  conversation, a closed tab or a locked phone cannot stop the work. Any page that opens the
+  conversation sees it working — the ghost in the list, the live card, the stop button — and
+  Stop reaches the run wherever it is: a stop pressed while the agent waits ends it quietly,
+  with no "done" or "failed" notice.
 - **Live mirror of the running turn.** The phone sees the same thing the app does while it
   works: the Thought box growing, the tool cards running (white snake included, same icon and
   title), and the answer being written — laid out exactly like the app's own message, not
-  wrapped in an extra card, and replaced by the saved conversation when the turn ends.
+  wrapped in an extra card, and replaced by the saved conversation when the turn ends. While
+  a step works, a soft white glint also travels left to right across its line — the tool
+  card, the slim step line, the Thought box — so the row itself says "in use".
 - **Instant sync both ways.** The shared store is watched on both sides (index and every
   conversation file), so a project, a chat, a rename or a finished reply shows up in the other
   place right away, and an open thread refreshes the moment the other process writes it.
@@ -154,6 +172,11 @@ here is in this repository; nothing else was removed.
   screen (with a gray 🧠), their clocks stop with the turn and survive a reload, and the box
   no longer scroll-jumps while the model writes. A Thought row folds away the moment a tool
   starts. Steps of one turn sit close together instead of leaving blank bands.
+- **A `wait` the agent can sit in** — the `wait` tool takes seconds, minutes, or both
+  (thirty minutes at most), so the agent can pause for a build, a download or a server that
+  is starting instead of re-checking in a spin. The user can stop the wait from the chat: the
+  result says so, the turn ends quietly (no "done" or "failed" toast, no Discord DM), and the
+  agent is told to go on with whatever the result allows rather than wait again.
 - **Tables fit** — long tables wrap inside the reply column instead of running off the edge.
 - **File cards** — writes and edits show green `+N` / red `−M` line counts, carry Preview and
   Download on the card itself (one box per file), and **`attach_file`** lets the agent hand
@@ -170,10 +193,13 @@ here is in this repository; nothing else was removed.
 - **A phone that does not fight back** — on the website Enter makes a new line (the Send
   button sends) and a pasted multi-line block can never fire a send; the thread stops
   following the moment you scroll up, so new thoughts and tool cards never drag the page down
-  under your finger; a conversation that fails to load says why, with a retry; the loading
-  veil no longer covers the button that opens the conversation list; on touch screens the
-  row actions (pin, lock, delete) are always visible, and a category that still holds
-  conversations flashes red instead of deleting.
+  under your finger — and a thought box unfolding or a tool card appearing no longer reads as
+  "you scrolled away": the follow stays put, and the scroll-down button stays out of the way
+  while you are at the bottom; a conversation that fails to load says why, with a retry; the
+  loading veil no longer covers the button that opens the conversation list; on touch screens
+  the row actions (pin, lock, delete) are always visible, a category that still holds
+  conversations flashes red instead of deleting, and delete actually deletes — a finger's
+  hover-leave used to cancel the confirmation between the two taps.
 - **The System panel** (on a server) scrolls as one piece with its head pinned, and wears an
   X like the Dashboard's.
 - **Copy that works everywhere** — including a phone on plain http, where the browser
