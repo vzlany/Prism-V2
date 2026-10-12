@@ -55,6 +55,13 @@ class WebRunsPanel {
  // calls other modules make (the sidebar resizer, the collapse switch) are simply answered.
  fit() {}
  report() {}
+ // The rest of the small API the app expects from window.browserPanel: a prompt note about
+ // the open pages (there are none here), and the agent-driving bookkeeping (no webview to
+ // drive). userHas stays false, so browser tools never wait on this panel.
+ context() { return ''; }
+ drive() {}
+ waitForAgent() { return Promise.resolve('back'); }
+ get userHas() { return false; }
  setOpen(open) {
   if (this.open === open) return;
   this.open = open;

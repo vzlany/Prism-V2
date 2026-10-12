@@ -8920,6 +8920,27 @@ body.has-lightbox{overflow:hidden}
 .tool.is-running .tool-snake rect{animation:tool-snake-glide 1.1s linear infinite}
 @keyframes tool-snake-glide{to{stroke-dashoffset:-50}}
 
+/* Prism V2: and a soft white glint travels left to right across the working line itself —
+   the tool card, the slim line under Simple visuals, the thought box — so the row breathes
+   while the agent is inside it. */
+.tool.is-running::after,
+.message-thinking.is-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image: linear-gradient(100deg, transparent 38%, rgba(255, 255, 255, 0.13) 50%, transparent 62%);
+  background-size: 260% 100%;
+  background-repeat: no-repeat;
+  animation: working-glint 1.8s linear infinite;
+}
+.message-thinking.is-live { position: relative; }
+@keyframes working-glint {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+
 /* Prism V2: the Runs rows while a run is alive */
 .run-item.is-running{position:relative}
 .run-pulse{flex:none;width:7px;height:7px;border-radius:50%;background:#8ab4ff;box-shadow:0 0 0 0 rgba(138,180,255,.55);animation:run-pulse 1.4s ease-out infinite}
@@ -8961,6 +8982,7 @@ parallel-button[hidden]{display:none}
 
 @media (prefers-reduced-motion: reduce){
   .tool.is-running .tool-snake rect{animation:none}
+  .tool.is-running::after,.message-thinking.is-live::after{animation:none;background:none}
   .context-circle.is-lapped .context-fill{animation:none}
   .run-pulse,.parallels-dots i,.chat-spinner{animation:none}
   .tool-group.is-working .tool-group-label,.tool-dots i{animation:none}

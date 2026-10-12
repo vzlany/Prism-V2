@@ -444,8 +444,9 @@ if (AgentTools.available) {
   const serverOnly = info => {
    if (!info?.server) return;
    modePicker.setServerOnly(true);
-   // The server's working indicator is the quiet dots, not the ghost — also when its chat is
-   // watched from another device. The System row shows on every view of that server.
+   // A server device wears only the Discord switch in the mode menu: Ask/Auto/Full are the
+   // machine's own business there. Its chats still show the working ghost, like everywhere.
+   // The System row shows on every view of that server.
    document.documentElement.classList.add('is-server-mode');
    chatList?.setServer(true);
   };
