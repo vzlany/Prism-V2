@@ -57,6 +57,9 @@ class ThinkingView {
    this.stick = gap < 24;
   }, { passive: true });
   this.head.addEventListener('click', () => {
+   // Same as a tool card: opening or closing somewhere in the thread must not move what the
+   // reader is looking at.
+   try { this.el.dispatchEvent(new CustomEvent('tool-toggle', { bubbles: true })); } catch {}
    this.touched = true;
    this.setOpen(!this.open);
   });

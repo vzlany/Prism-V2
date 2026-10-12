@@ -404,6 +404,8 @@ class Chat {
    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) intent(event);
   });
   thread.addEventListener('click', event => this.onClick(event));
+  // A card or Thought row opening or closing: hold the reader's place through the animation.
+  thread.addEventListener('tool-toggle', () => this.holdToggle());
   thread.addEventListener('diagram-edit', event => this.onDiagramEdit(event));
   bottom.addEventListener('scroll-bottom', () => this.scrollToBottom());
   new RowGlide(thread);
@@ -1539,6 +1541,23 @@ class Chat {
  // height under the reader's eyes. When the bottom is not being followed, the message they
  // were reading is pinned to its place for the length of the animation (following the bottom
  // is the spring's own job, and a real scroll gesture cancels the hold at once).
+ // A tap on a tool card, a step line or a Thought row expands or collapses it — and the part
+ // of the conversation the reader is looking at stays exactly where it is. The follow stops
+ // chasing the bottom for the length of the animation, and the first visible message is
+ // pinned back to its place while the content above or below it changes height.
+ holdToggle() {
+  const anchor = this.anchor();
+  const until = performance.now() + 700;
+  this.followHold = Math.max(this.followHold || 0, until);
+  if (!anchor) return;
+  const step = () => {
+   if (this.intentUp && performance.now() - this.scrollIntent < 400) return;
+   this.anchorRestore(anchor);
+   if (performance.now() < until) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+ }
+
  holdView(work) {
   if (this.follow) return typeof work === 'function' ? work() : undefined;
   if (performance.now() - (this.scrollIntent || 0) < 400) return typeof work === 'function' ? work() : undefined;
@@ -1765,6 +1784,7 @@ class Chat {
   group.__items = [];
   const head = group.querySelector('.tool-group-head');
   head.addEventListener('click', () => {
+   this.holdToggle();
    group.__touched = true;
    group.classList.toggle('is-open');
    head.setAttribute('aria-expanded', String(group.classList.contains('is-open')));

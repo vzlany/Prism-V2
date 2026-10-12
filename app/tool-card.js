@@ -105,6 +105,10 @@ class ToolCard {
   el.append(this.head, this.body);
   this.render();
   this.head.addEventListener('click', () => {
+   // A tap is not a reason for the page to move: the conversation asks the chat to hold the
+   // reader's place for the length of this toggle (the body opening above the viewport used
+   // to shove the whole thread, and with the follow on it pulled towards the bottom).
+   try { this.el.dispatchEvent(new CustomEvent('tool-toggle', { bubbles: true })); } catch {}
    this.touched = true;
    this.open = !this.open && this.hasBody();
    // Simple visuals keys the open body off this class, so a card that existed before the

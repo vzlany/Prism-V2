@@ -74,7 +74,11 @@ const MIME = {
 };
 
 const page = () => readFileSync(join(ROOT, "app", "index.html"), "utf8")
- .replace('  <script src="desktop.js"></script>', '  <script src="/web-bridge.js"></script>\n  <script src="desktop.js"></script>');
+ .replace('  <script src="desktop.js"></script>', '  <script src="/web-bridge.js"></script>\n  <script src="desktop.js"></script>')
+ // Every script and stylesheet carries the build's version: a phone that reloads after an
+ // update asks for new URLs, so it can never keep running an old chat.js out of its cache
+ // ("the version changed but nothing looks different").
+ .replace(/(src|href)="([^":/]+\.(?:js|css))"/g, (all, attr, file) => `${attr}="${file}?v=${VERSION}"`);
 
 const stamp = () => new Date().toISOString().slice(11, 19);
 let connections = 0;
