@@ -117,6 +117,13 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  const runs = new Map();
  const storeDir = join(userData, 'store');
 
+ // The run an engine-side helper should attach itself to (the update shim records which
+ // conversation asked for the update; a sub-agent's own run is the newest active one).
+ function activeRun() {
+  for (const run of runs.values()) if (!run.ended) return run;
+  return null;
+ }
+
  // -------------------------------------------------- renderer modules on a window shim
  const window = {};
  globalThis.window = window;
@@ -147,7 +154,7 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
   update: {
    // The conversation that asked travels with the request: after the restart the new engine
    // notes the success in that very chat.
-   run: args => host.invoke('update:run', { ...(args && typeof args === 'object' ? args : {}), chatId: activeRun()?.chatId || '' }),
+   run: args => host.invoke('update:run', { ...(args && typeof args === 'object' ? args : {}), chatId: (() => { try { return activeRun()?.chatId || ''; } catch { return ''; } })() }),
   },
  };
  for (const file of ['i18n.js', 'agent-prompt.js', 'format-guide.js', 'agent-tools.js']) {
