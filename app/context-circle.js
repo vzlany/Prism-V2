@@ -178,8 +178,19 @@ class ContextCircle {
    : '';
   const fresh = Math.max(0, (Number(spend.input) || 0) - cached - written);
   const out = Number(spend.output) || 0;
+  // Which model (and provider) the numbers belong to, right in the panel.
+  const modelId = context.model || '';
+  const modelName = (() => { try { return this.settings.find(modelId)?.name || modelId; } catch { return modelId; } })();
+  const provider = String(modelId).includes(':') ? String(modelId).split(':')[0] : '';
+  // "No price for this model" was shown whenever the cost happened to be zero — including a
+  // model the app prices, before any usage was recorded. Say which of the two it is.
+  const priced = Boolean(window.Prices?.of(context.model));
+  const costText = total > 0
+   ? `~${escapeHtml(window.Prices.format(total))}`
+   : escapeHtml(I18n.t(priced ? 'context.noUsage' : 'context.noPrice'));
   this.panel.innerHTML = [
    `<div class="context-head">${escapeHtml(I18n.t('context.title'))}</div>`,
+   modelName ? row('context.model', `${escapeHtml(modelName)}${provider ? ` <span class="context-provider">${escapeHtml(provider)}</span>` : ''}`) : '',
    row('context.context', `${escapeHtml(size(tokens))} / ${escapeHtml(size(windowSize))} · ${Math.round(live * 100)}%`),
    row('context.peak', laps ? `${escapeHtml(size(peak))} / ${escapeHtml(size(windowSize))} · ${laps}×` : `${escapeHtml(size(peak))} / ${escapeHtml(size(windowSize))}`),
    row('context.messages', String(context.messages.length)),
@@ -187,7 +198,7 @@ class ContextCircle {
    row('context.output', `${escapeHtml(size(Math.max(0, out - reasoning)))}${reasoning ? ` · ${escapeHtml(size(reasoning))} reasoning` : ''}`),
    cache,
    parallel.cost > 0 ? row('context.parallel', `~${escapeHtml(window.Prices.format(parallel.cost))} · ${parallel.runs}`) : '',
-   row('context.cost', total > 0 ? `~${escapeHtml(window.Prices.format(total))}` : escapeHtml(I18n.t('context.noPrice'))),
+   row('context.cost', costText),
   ].join('');
  }
 }

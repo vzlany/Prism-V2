@@ -59,6 +59,9 @@ const composerText = new ComposerText(composerInput, document.querySelector('.co
 LinkChip.watch(document.querySelector('.composer-mirror'));
 LinkChip.watch(thread);
 const settings = new Settings(document.querySelector('.settings'));
+// Tool cards (a sub-agent's box, the parallel runs) name a model by its display name through
+// this: the catalog lives here, not in agent-tools.js.
+window.__prismModelName = id => { try { return settings.find(String(id || ''))?.name || ''; } catch { return ''; } };
 new SidebarResizer({ app, sidebar, handle: sidebar.querySelector('.sidebar-resizer') });
 new Scrollbar(document.querySelector('.settings-page'), document.querySelector('.settings-scrollbar')).observe(document.querySelector('.settings-providers'));
 const threadBottom = document.querySelector('.thread-bottom');

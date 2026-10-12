@@ -213,7 +213,8 @@ class RunsView {
   item.statusEl.className = `run-status is-${run.status}`;
   item.statusEl.textContent = `${I18n.t(STATUS_KEY[run.status] || 'runs.running')}${running ? ` · ${clock(run.started)}` : ''}`;
   const model = run.model || '';
-  if (item.model !== model) { item.model = model; item.modelEl.textContent = model; }
+  const shown = (() => { try { return window.__prismModelName?.(model) || model; } catch { return model; } })();
+  if (item.model !== shown) { item.model = shown; item.modelEl.textContent = shown; }
   const title = run.title || '';
   if (item.title !== title) { item.title = title; item.titleEl.textContent = title; }
   const snippet = run.snippet || '';

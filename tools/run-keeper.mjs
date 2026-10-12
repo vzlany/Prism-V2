@@ -196,6 +196,10 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
    next.version = next.version || 1;
    next.messages = run.entries;
    next.tokens = Math.round(run.tokens || 0);
+   // The usage the ~$ readout is priced from rode along with the page's saves only: a run
+   // the server kept left the chat's spend untouched, and the context panel then said "no
+   // price for this model" for a model it prices just fine.
+   if (run.spend) next.spend = run.spend;
    if (run.todos.length) next.todos = run.todos;
    writeJson(chatFile(run.chatId), next);
    touchIndex(run);
@@ -348,16 +352,22 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  }
 
  function flushDiscordSummary(run) {
+  // The summary block is for the finish DM, never for the screen. A complete block leaves the
+  // stored answer; one that is still arriving (no closing tag yet) is hidden from the live
+  // view right away — the raw text stays in the stored content until the block closes, or the
+  // closing tag could never be found.
   const content = String(run.entry.content || '');
-  if (!content.includes('<discord_summary>')) return;
-  let match = null, last = '';
-  DISCORD_SUMMARY.lastIndex = 0;
-  while ((match = DISCORD_SUMMARY.exec(content))) last = String(match[1] || '').trim();
-  if (!last) return;
-  run.discordSummary = last.slice(0, 16000);
-  DISCORD_SUMMARY.lastIndex = 0;
-  run.entry.content = content.replace(DISCORD_SUMMARY, '').replace(/\n{3,}/g, '\n\n').trim();
-  if (run.part?.text) run.part.text.text = run.entry.content;
+  const at = content.indexOf('<discord_summary>');
+  if (at < 0) return;
+  const rest = content.slice(at + '<discord_summary>'.length);
+  const close = rest.indexOf('</discord_summary>');
+  const body = (close >= 0 ? rest.slice(0, close) : rest).trim();
+  if (body) run.discordSummary = body.slice(0, 16000);
+  const shown = (close >= 0
+   ? content.slice(0, at) + rest.slice(close + '</discord_summary>'.length)
+   : content.slice(0, at)).replace(/\n{3,}/g, '\n\n').trim();
+  if (close >= 0) run.entry.content = shown;
+  if (run.part?.text) run.part.text.text = shown;
  }
 
  // -------------------------------------------------- the todo tool (same list the page keeps)

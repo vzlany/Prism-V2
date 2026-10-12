@@ -9128,6 +9128,7 @@ html.is-simple .tool-group.has-error .tool-group-label{background:none;backgroun
 .context-price[hidden]{display:none}
 .context-panel{position:fixed;position-anchor:--context;position-area:left center;position-try-fallbacks:flip-inline,flip-block;inset:auto;margin:0 12px 0 0;padding:10px 12px;width:262px;background:var(--composer-bg);border:0;border-radius:14px;box-shadow:inset 0 0 0 1px var(--composer-border),0 18px 48px rgba(0,0,0,.45);color:rgba(var(--fg-rgb),.85);font-size:12px}
 .context-head{font-size:12px;color:var(--fg-secondary);margin:0 2px 8px}
+.context-provider{opacity:.55;font-size:11px;letter-spacing:.02em}
 .context-row{display:flex;align-items:baseline;gap:10px;padding:3px 2px}
 .context-label{flex:none;color:var(--fg-tertiary)}
 .context-value{margin-left:auto;text-align:right;font-family:var(--mono-font);font-size:11.5px;color:rgba(var(--fg-rgb),.85)}

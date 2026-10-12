@@ -305,7 +305,8 @@ function continueAfterUpdate() {
   const body = readJsonSafe(file);
   if (!body || body.sealed || !Array.isArray(body.messages)) { markContinued(); return; }
   const last = [...body.messages].reverse().find(entry => entry?.role === "user");
-  if (!last || String(last.text || "").trim() !== text) body.messages.push({ role: "user", text, content: text, origin: "update" });
+  // `system: true` marks a line that exists for the model only: the page never draws it.
+  if (!last || String(last.text || "").trim() !== text) body.messages.push({ role: "user", text, content: text, origin: "update", system: true });
   const temp = `${file}.tmp`;
   writeFileSync(temp, JSON.stringify(body));
   renameSync(temp, file);
@@ -348,6 +349,13 @@ function continueAfterUpdate() {
 }
 
 const readJsonSafe = file => { try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; } };
+// The keeper's own heartbeat: who is working right here. The Discord bridge reads it, so its
+// "Working in app…" status stays true for a whole web-run turn — tools included, not only
+// while a model call is streaming.
+const keeperRunsFile = join(USER_DATA, "web-runs.json");
+setInterval(() => {
+ try { writeFileSync(keeperRunsFile, JSON.stringify({ at: Date.now(), runs: keeper.running })); } catch {}
+}, 5000);
 const markContinued = () => {
  try {
   const state = readJsonSafe(updateStateFile) || {};

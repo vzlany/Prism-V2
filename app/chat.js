@@ -331,6 +331,9 @@ class Chat {
   // following switch off. Content-driven scroll events must not count as leaving the bottom.
   this.scrollIntent = 0;
   this.intentUp = false;
+  // Set while refresh() swaps the thread: the scroll events a rebuild fires are ours, not
+  // the reader's, and must neither end nor re-arm the follow.
+  this.rebuilding = false;
   this.scrollFrame = 0;
   this.followFrame = 0;
   this.followLast = 0;
@@ -347,11 +350,13 @@ class Chat {
   this.loadingEl = main.querySelector('.thread-loading');
   this.loadingTimer = 0;
   this.resize = new ResizeObserver(entries => {
-   // Whatever grew (a thought box unfolding, text arriving, a card appearing): note it. A
-   // gap opening right now is the spring lagging, not the reader leaving the bottom.
+   // Whatever changed height — a thought box unfolding, text arriving, a card appearing, and
+   // just as much a box folding or a tool line collapsing: note it. A gap opening right now
+   // is the spring lagging, not the reader leaving the bottom; a shrink is a fold above the
+   // viewport, and the spring simply catches up with it instead of giving up.
    for (const entry of entries) {
     const height = entry.target.scrollHeight || entry.contentRect?.height || 0;
-    if (height > (this.listHeights.get(entry.target) || 0) + 0.5) this.grewAt = performance.now();
+    if (Math.abs(height - (this.listHeights.get(entry.target) || 0)) > 0.5) this.grewAt = performance.now();
     this.listHeights.set(entry.target, height);
    }
    if (this.follow) {
@@ -1303,12 +1308,22 @@ class Chat {
   const active = conv === this.active;
   const following = this.follow;
   const anchor = active && !following ? this.anchor() : null;
+  // The swap below empties the list for a moment and the browser clamps the scroll to the
+  // top: a long conversation flashed its top for the length of the reload. The list is
+  // hidden for exactly that moment and shown again once the reader's place is back.
+  if (active) conv.list.style.visibility = 'hidden';
+  this.rebuilding = true;
   conv.list.replaceChildren();
   await this.load(conv);
   if (active) {
    this.main.classList.toggle('is-empty', !conv.list.childElementCount);
    if (following) { this.follow = true; this.followBottom(); }
    else if (anchor) this.anchorRestore(anchor);
+  }
+  this.rebuilding = false;
+  if (active) {
+   this.lastTop = this.thread.scrollTop;
+   requestAnimationFrame(() => { conv.list.style.visibility = ''; });
   }
   this.onChange();
  }
@@ -1404,13 +1419,27 @@ class Chat {
 
  onScroll() {
   const top = this.thread.scrollTop, distance = this.thread.scrollHeight - top - this.thread.clientHeight;
+  const now = performance.now();
+  if (this.rebuilding) { this.lastTop = top; return; }
   // Any real upward scroll leaves the bottom, however small; coming back near the bottom
   // starts following again. Content-driven scroll events (cards folding, older messages
   // loading) carry no scroll intent, so they never count as the reader scrolling away — and
   // a gesture that was itself downward (a wheel nudge at the bottom) must not either, or a
   // thought box folding above the viewport would read as the reader leaving.
-  if (top < this.lastTop - 1 && this.intentUp === true && performance.now() - this.scrollIntent < 900) this.follow = false;
-  else if (distance <= FOLLOW_DISTANCE) this.follow = true;
+  if (top < this.lastTop - 1 && this.intentUp === true && now - this.scrollIntent < 900) {
+   // Momentum after a flick keeps moving upwards long after the last touchmove: refreshing
+   // the intent here is what makes the guards below (and the scroll anchor) back off while
+   // the finger's inertia is still carrying the view.
+   this.scrollIntent = now;
+   this.follow = false;
+   this.followHold = Math.max(this.followHold || 0, now + 1200);
+  } else if (distance <= FOLLOW_DISTANCE
+   && !this.followMoving && now - (this.followAt || 0) > 250 && now > (this.followHold || 0)) {
+   // Following comes back when the reader brings the view to the bottom themselves (or the
+   // "scroll down" button does) — never because the follow spring just happened to be there,
+   // which was the loop that made the end of a conversation impossible to leave.
+   this.follow = true;
+  }
   this.lastTop = top;
   this.syncBottom();
   this.loadOlder();
@@ -1418,7 +1447,11 @@ class Chat {
 
  // The reader is scrolling up: stop following now and freeze the follow spring where it is.
  leaveBottom() {
-  if (!this.follow) return;
+  // The hold keeps the follow spring from pulling the view back while the reader is up in
+  // the conversation; it also survives the programmatic scroll events a fold or a rebuild
+  // fires, which used to re-arm "following" within the same second.
+  this.followHold = performance.now() + 1400;
+  if (!this.follow) { this.stopFollow(); this.syncBottom(); return; }
   this.follow = false;
   this.stopFollow();
   this.syncBottom();
@@ -1483,6 +1516,11 @@ class Chat {
  anchorRestore(anchor) {
   const conv = this.active, list = conv?.list;
   if (!anchor || !list) return;
+  // The reader's own scroll outranks any anchoring: during a gesture (or its momentum, which
+  // keeps firing scroll events after the finger left) the view is not ours to adjust. A
+  // rebuild that hid the list to swap it is the exception — putting the reader's place back
+  // is the whole point of that anchor.
+  if (!this.rebuilding && performance.now() - (this.scrollIntent || 0) < 400) return;
   let el = anchor.node?.isConnected ? anchor.node : null;
   if (!el && Number.isInteger(anchor.index) && anchor.index >= 0) {
    const entry = conv.messages[anchor.index];
@@ -1503,12 +1541,13 @@ class Chat {
  // is the spring's own job, and a real scroll gesture cancels the hold at once).
  holdView(work) {
   if (this.follow) return typeof work === 'function' ? work() : undefined;
+  if (performance.now() - (this.scrollIntent || 0) < 400) return typeof work === 'function' ? work() : undefined;
   const anchor = this.anchor();
   const out = typeof work === 'function' ? work() : undefined;
   if (!anchor) return out;
   const until = performance.now() + 600;
   const step = () => {
-   if (performance.now() - this.scrollIntent < 200) return;
+   if (performance.now() - this.scrollIntent < 400) return;
    this.anchorRestore(anchor);
    if (performance.now() < until) requestAnimationFrame(step);
   };
@@ -1518,6 +1557,7 @@ class Chat {
 
  followBottom() {
   if (!this.follow || this.jumpFrame) return;
+  if (performance.now() < (this.followHold || 0)) return;
   // Content that just grew — a thought box unfolding, a tool card appearing, a batch of text
   // arriving — opens a gap the spring has not closed yet. That is not the reader leaving the
   // bottom, and treating it as one was why the "scroll down" hint flashed on while the page
@@ -1525,9 +1565,11 @@ class Chat {
   // pulled away from our own writes) really ends the follow.
   const distance = this.thread.scrollHeight - this.thread.scrollTop - this.thread.clientHeight;
   if (distance > FOLLOW_DISTANCE) {
-   const grew = this.thread.scrollHeight > this.grewHeight + 0.5 || performance.now() - this.grewAt < 600;
+   const now = performance.now();
+   const changed = this.thread.scrollHeight > this.grewHeight + 0.5 || now - this.grewAt < 600;
+   const userLeft = this.intentUp === true && now - this.scrollIntent < 900;
    const pulledUp = this.thread.scrollTop < this.followPos - 8;
-   if (!grew || pulledUp) { this.leaveBottom(); return; }
+   if (userLeft || (pulledUp && !changed)) { this.leaveBottom(); return; }
   }
   // A frame that was scheduled but never ran (the window went hidden before it fired) is
   // stale: it is replaced instead of blocking the follow forever.
@@ -1661,17 +1703,22 @@ class Chat {
   part.entry.content = content.replace(DISCORD_BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
  }
 
- // A finished <discord_summary> block: the agent's own text for the finish DM. It leaves the
- // chat answer (like the other blocks) and waits on the turn until end() sends it.
+ // A <discord_summary> block: the agent's own text for the finish DM. A complete block leaves
+ // the reply; one that is still arriving is hidden at once, so the user never watches raw
+ // tags stream by (the raw text stays stored until the closing tag, or it could never be found).
  flushDiscordSummary(turn, part) {
   const content = String(part.entry.content || '');
-  if (!content.includes('<discord_summary>')) return;
-  let match = null, last = '';
-  DISCORD_SUMMARY.lastIndex = 0;
-  while ((match = DISCORD_SUMMARY.exec(content))) last = String(match[1] || '').trim();
-  if (!last) return;
-  turn.discordSummary = last.slice(0, 16000);
-  part.entry.content = content.replace(DISCORD_SUMMARY, '').replace(/\n{3,}/g, '\n\n').trim();
+  const at = content.indexOf('<discord_summary>');
+  if (at < 0) return;
+  const rest = content.slice(at + '<discord_summary>'.length);
+  const close = rest.indexOf('</discord_summary>');
+  const body = (close >= 0 ? rest.slice(0, close) : rest).trim();
+  if (body) turn.discordSummary = body.slice(0, 16000);
+  const shown = (close >= 0
+   ? content.slice(0, at) + rest.slice(close + '</discord_summary>'.length)
+   : content.slice(0, at)).replace(/\n{3,}/g, '\n\n').trim();
+  part.pendingSummary = close >= 0 ? null : shown;
+  if (close >= 0) part.entry.content = shown;
  }
 
  // A finished <write-message_ID> block: delivered to that agent as its own chat message and
@@ -2254,7 +2301,8 @@ class Chat {
        this.flushAgentMessages(conv, part);
        // A <discord_summary> block is kept for the finish DM and removed from the reply.
        this.flushDiscordSummary(turn, part);
-       view.stream.push(part.entry.content);
+       // A pending <discord_summary> block is hidden from the stream, not only from the file.
+       view.stream.push(part.pendingSummary ?? part.entry.content);
        this.runSnippet(conv, part.entry.content);
        this.publishLive(conv, turn);
       },
@@ -2754,7 +2802,14 @@ class Chat {
   }
   // Long chats draw their tail only: the newest messages, everything older on demand.
   const entries = conv.messages.filter(entry => this.drawable(entry));
-  const from = Math.max(0, entries.length - WINDOW_MIN);
+  // A rebuild must never un-draw what was already on screen: the messages only ever grow at
+  // the end, so the previous window's first index still points at the same message — keeping
+  // it means a refresh (or the end-of-run reload) leaves the whole conversation the reader
+  // could see on screen, plus whatever arrived since. The old behaviour re-windowed to the
+  // last WINDOW_MIN entries only, which is why a busy conversation seemed to lose half of
+  // itself while it worked.
+  const previous = Number.isInteger(conv.window?.from) ? conv.window.from : Number.MAX_SAFE_INTEGER;
+  const from = Math.max(0, Math.min(previous, entries.length - WINDOW_MIN));
   conv.window = { entries, ends, from };
   for (let index = from; index < entries.length; index++) this.renderEntry(conv, entries[index]);
   settle(conv.list);
@@ -2793,6 +2848,9 @@ class Chat {
 
  // Whether an entry is worth drawing on the screen: words, reasoning, or a tool it called.
  drawable(entry) {
+  // A system line (the carry-on note after an update restart) is for the model, not for the
+  // screen: it stays in the stored history and is never drawn.
+  if (entry.system) return false;
   if (entry.role === 'user' || entry.role === 'compact') return true;
   if (entry.error) return true;
   if ((entry.content || '').trim() || (entry.thinking || '').trim()) return true;
@@ -2881,7 +2939,11 @@ class Chat {
    } catch {
     card = new ToolCard({ kind: 'command', title: call.function?.name || '', code: call.function?.arguments || '' });
    }
-   card.setResult(call.__output || '');
+   // A call whose tool step never reached the file (the turn was stopped mid-step — an
+   // update restart, a stop, a crash) used to come back as a card with no result, which read
+   // as "Running" forever. Say what happened instead.
+   const answered = call.__output !== undefined && call.__output !== null;
+   card.setResult(answered ? call.__output : I18n.t('tool.unfinished'), !answered);
    if (call.__ms) card.setDuration(call.__ms);
    if (simple && !card.parallel) {
     if (!group) {

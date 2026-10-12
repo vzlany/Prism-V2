@@ -861,10 +861,24 @@ function appBusy() {
  const runs = readJson(join(USER_DATA, "presence.json"), {})?.runs;
  if (Array.isArray(runs) && runs.some(run => Date.now() - (Number(run.at) || 0) < 30000)) return true;
  const web = readJson(join(USER_DATA, "web-busy.json"), {});
- return Number(web?.busy) > 0 && Date.now() - (Number(web?.at) || 0) < 30000;
+ if (Number(web?.busy) > 0 && Date.now() - (Number(web?.at) || 0) < 30000) return true;
+ // A keeper run writes its own heartbeat: between model rounds (tools running) the web
+ // engine's llm counter is zero, and without this the status fell back to "online" in the
+ // middle of a working turn.
+ const keeper = readJson(join(USER_DATA, "web-runs.json"), {});
+ return Array.isArray(keeper?.runs) && keeper.runs.length > 0 && Date.now() - (Number(keeper.at) || 0) < 30000;
 }
 
-// The status is put back in line every few seconds unless a turn is really running, so a
+// Discord snowflakes are time-ordered: equal length compares as a string, a longer id is
+// always newer. ("0" — nothing handled yet — is older than everything real.)
+function isNewer(a, b) {
+ const left = String(a || ""), right = String(b || "0");
+ if (!left) return false;
+ if (left.length !== right.length) return left.length > right.length;
+ return left > right;
+}
+
+// The idle status is put back in line every few seconds unless a turn is really running, so a
 // missed reset (a dropped gateway, a killed turn) can never leave "writing…" behind.
 function startPresenceLoop() {
  clearInterval(presenceLoop);
@@ -914,7 +928,12 @@ function connectGateway() {
     if (data.author?.bot) return;
     if (String(data.author?.id) !== String(config.userId)) return;
     if (data.guild_id) return; // DMs only
-    if (typeof data.id === "string" && data.id > state.lastId) state.lastId = data.id;
+    // A replayed event (a gateway resume after a reconnect, or a restart racing the poll)
+    // used to be answered all over again — "the bot randomly answers old messages". The
+    // persisted lastId is the fence: anything at or below it was already handled.
+    if (typeof data.id === "string" && isNewer(data.id, state.lastId) === false) return;
+    if (typeof data.id === "string") state.lastId = data.id;
+    savedState();
     enqueue({ channel: data.channel_id, message: data });
     } else if (msg.t === "INTERACTION_CREATE") {
      handleInteraction(msg.d).catch(error => log("interaction failed:", String(error?.message || error)));

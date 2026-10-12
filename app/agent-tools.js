@@ -369,6 +369,20 @@ function needsApproval(name, args, { mode, cwd }) {
  }
 }
 
+function oneLine(value) {
+ return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+// The display name of a model id. The page publishes the catalog lookup (window.__prismModelName);
+// on its own the id loses its provider prefix and its dashes.
+function modelNameOf(id) {
+ const text = String(id || '');
+ if (!text) return '';
+ try { const named = window.__prismModelName?.(text); if (named) return oneLine(named); } catch {}
+ return oneLine(text.includes(':') ? text.split(':').slice(1).join(':') : text).replace(/-/g, ' ');
+}
+
+
 function relative(cwd, path) {
  const raw = String(path ?? '.').trim() || '.';
  if (!/^[a-zA-Z]:[\\/]|^\\\\/.test(raw)) return raw.replace(/^\.[\\/]/, '');
@@ -406,7 +420,14 @@ function describeTool(name, args, cwd) {
   case 'video_frames': return args.save_to
    ? { kind: 'file', title: I18n.t('approve.frames'), path, text: I18n.t('approve.framesTo', { folder: relative(cwd, args.save_to) }) }
    : { kind: 'file', title: I18n.t('approve.video'), path };
-  case 'subagent': return { kind: 'command', title: I18n.t('subagent.parallel'), code: String(args.description || '') };
+  case 'subagent': {
+   // The caller asked for the model and effort of this box right on it: "Which model did the
+   // sub-agent use" — the summary line carries it, the description stays in the body.
+   const chosen = String(args.model || '');
+   const effort = String(args.effort || '');
+   const what = chosen ? `model: ${modelNameOf(chosen)}${effort ? ` · effort: ${effort}` : ''}` : '';
+   return { kind: 'command', title: I18n.t('subagent.parallel'), code: String(args.description || ''), ...(what ? { text: what } : {}) };
+  }
   case 'agents': return { kind: 'command', title: I18n.t('agents.title'), text: agentActionLabel(args.action, args.id, false), reason: agentActionLabel(args.action, args.id, false) };
   case 'ask_user': return { kind: 'command', title: I18n.t('ask.title'), code: String(args.question || '') };
   case 'screenshot': return { kind: 'command', title: I18n.t(args.window ? 'approve.screenshotWindow' : 'approve.screenshot'), code: String(args.window ? args.window : '') };

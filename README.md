@@ -99,10 +99,19 @@ here is in this repository; nothing else was removed.
   card draws the todos the moment the run starts), the thread is not rebuilt while the run
   saves its progress — that was why a long conversation seemed to lose its earlier messages
   while it worked — and whatever folds above the reader's place (a Thought closing, a tool
-  line collapsing, the live card shrinking) no longer drags the view up with it. The
+  line collapsing, the live card shrinking) no longer drags the view up with it. A rebuild
+  keeps everything that was already on screen (the window only ever grows), it happens
+  invisibly, and once the reader has scrolled away the follow stays off for a moment instead
+  of dragging them back to the bottom — that was the "stuck at the end, scrolls down again"
+  trap a checklist at the end of a conversation used to spring. A tool step whose answer
+  never arrived (the turn was stopped mid-step by a restart or a stop) reads "this step was
+  cut off" instead of "Running" forever. The
   checklist appears the moment the run starts, lives in the live card while it works (one
-  checklist, never two), and after a reload it sits after the message whose step last used
-  it, not blindly at the end. On a phone the conversation list stays calm: the row actions
+  checklist, never two), keeps its ticked states across a refresh, and after a reload it sits
+  after the message whose step last used it, not blindly at the end. The carry-on message an
+  update writes into the conversation is a system line: the model reads it, the screen never
+  shows it. A `<discord_summary>` block is hidden while it is still arriving, so raw tags
+  never stream through the reply. On a phone the conversation list stays calm: the row actions
   belong to the row the reader is in or is touching, not to every row at once.
 - **Live mirror of the running turn.** The phone sees the same thing the app does while it
   works: the Thought box growing, the tool cards running (white snake included, same icon and
@@ -130,6 +139,12 @@ here is in this repository; nothing else was removed.
 - **Several API keys per provider.** Each provider keeps a list of keys in Settings →
   Providers; add as many as you like, rename them, equip one, and every model call uses the
   equipped key. The old single key migrates into the list on first run.
+- **Which model, and what it cost.** The context panel names the model (and provider) the
+  numbers belong to, and a run the server kept writes its usage into the chat as well, so
+  "no price for this model" no longer appears for a model the app prices perfectly well — the
+  cost is priced from the same rates, and a conversation with no usage yet says that instead.
+  A sub-agent's box names the model (and effort) it was launched with, in the conversation
+  and in the runs list.
 - **Prompt settings.** Settings → Prompt holds a **global system prompt** for every model
   (toggleable, with Prism V2's built-in agent rules still in place) and a **per-model
   prompt**; the global one is shared through the store, so a prompt written on the phone is
