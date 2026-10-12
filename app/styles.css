@@ -7646,36 +7646,49 @@ a.settings-button {
   right: var(--toggle-inset);
 }
 
-/* The glass button: the next conversation (or this one) runs incognito — out of the chat
-   list and out of memory. It sits beside the globe, and stays while incognito is on so it
-   can be turned back into a normal conversation. */
+/* The glass button: hidden mode as a hand-drawn icon — no emoji and no resting background,
+   the same visual weight as the hamburger and the globe, attached right beside the globe. */
 .incognito-toggle {
   position: absolute;
   z-index: 3;
   top: var(--toggle-inset);
-  right: calc(var(--toggle-inset) + var(--icon-button-size, 32px) + 8px);
-  display: grid;
-  place-items: center;
-  width: var(--icon-button-size, 32px);
-  height: var(--icon-button-size, 32px);
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(var(--fg-rgb), 0.05);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-  filter: grayscale(1) opacity(0.55);
-  transition: background-color 0.2s ease, filter 0.2s ease, transform 0.2s ease;
+  right: calc(var(--toggle-inset) + var(--icon-button-size, 32px) + 6px);
+}
+
+/* No globe in reach (an older engine): the glass sits flush at the corner, no empty slot. */
+.browser-toggle[hidden] + .incognito-toggle {
+  right: var(--toggle-inset);
 }
 
 .incognito-toggle[hidden] { display: none; }
-.incognito-toggle:hover { background: rgba(var(--fg-rgb), 0.1); filter: none; }
-.incognito-toggle:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); outline: none; }
-.incognito-toggle.is-on {
-  background: rgba(var(--fg-rgb), 0.14);
-  filter: none;
-  box-shadow: inset 0 0 0 1px rgba(var(--fg-rgb), 0.28);
+
+/* The hidden-mode note on the new-conversation screen: it says out loud what the glass
+   just did, so nobody wonders where the conversation went. */
+.incognito-note {
+  position: absolute;
+  z-index: 1;
+  top: calc((100% - var(--composer-space, 140px) + var(--composer-bottom-gap) - var(--welcome-space)) / 2 + calc(var(--welcome-size, 64px) * 70 / 64) + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(430px, 84vw);
+  padding: 7px 15px;
+  border-radius: 999px;
+  background: rgba(var(--fg-rgb), 0.05);
+  box-shadow: inset 0 0 0 1px rgba(var(--fg-rgb), 0.09);
+  color: rgba(var(--fg-rgb), 0.62);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: center;
+  pointer-events: none;
+  animation: incognito-note-in 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.incognito-note[hidden] { display: none; }
+
+@keyframes incognito-note-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to { opacity: 1; transform: translateX(-50%); }
 }
 
 .browser-toggle[hidden] {

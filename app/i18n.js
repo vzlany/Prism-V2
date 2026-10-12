@@ -13,6 +13,7 @@ const STRINGS = {
   'chat.loadFailed': 'This conversation could not be loaded: {reason}. Open another one from the list, or click this one again to retry.',
   'incognito.off': 'Incognito: the next conversation stays out of the list and out of memory',
   'incognito.on': 'Incognito is on — press to turn this conversation back to normal',
+  'incognito.note': 'Hidden mode — this conversation stays out of the list and out of memory. Nothing is saved unless you ask for it.',
   'chats.label': 'Chats',
   'chats.foldRuns': 'Collapse the parallel runs',
   'chats.unfoldRuns': 'Expand the parallel runs',

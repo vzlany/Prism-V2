@@ -104,12 +104,12 @@ new ParallelPanel({
  },
 });
 const parallelMeter = new ParallelMeter({ button: document.querySelector('.composer-parallels') });
-// On the website (a server's web UI) the parallel button is gone: the AI launches its own
-// parallel agents with the subagent tool — with a model and thinking effort of its choosing
-// — so a second way to start runs from here is only noise. The desktop app keeps the panel.
+// On the website (a server's web UI) the button that starts parallel runs is gone: the AI
+// launches its own parallel agents with the subagent tool — with a model and thinking effort
+// of its choosing — so a second way to start runs from here is only noise. The little meter
+// that shows working runs stays: pressing it brings the Runs panel (the globe) forward.
 if (window.openghost?.web) {
  document.querySelector('.composer-parallel')?.setAttribute('hidden', '');
- document.querySelector('.composer-parallels')?.setAttribute('hidden', '');
 }
 // Other devices on the network: the DEVICES row in the sidebar, and the launch picker that
 // asks which device this window should use when another answers. A remote window (the
@@ -417,15 +417,19 @@ const browserToggle = document.querySelector('.browser-toggle');
 // nothing goes to memory unless the user asks. Pressing it again turns the conversation
 // back into a normal one, even after it has started.
 const incognitoToggle = document.querySelector('.incognito-toggle');
+const incognitoNote = document.querySelector('.incognito-note');
 function syncIncognito() {
  const conv = chat.active;
  const on = Boolean(conv && conv.incognito);
  incognitoToggle.hidden = !(on || (conv && !conv.record && !conv.locked));
- incognitoToggle.classList.toggle('is-on', on);
- incognitoToggle.setAttribute('aria-pressed', String(on));
+ incognitoToggle.toggleAttribute('on', on);
  const text = I18n.t(on ? 'incognito.on' : 'incognito.off');
+ incognitoToggle.setAttribute('label', text);
  incognitoToggle.title = text;
- incognitoToggle.setAttribute('aria-label', text);
+ // The note explains the state on a conversation that has not started yet — the moment the
+ // first message goes out, the conversation itself is the answer.
+ incognitoNote.hidden = !(on && !conv?.messages?.length);
+ incognitoNote.textContent = incognitoNote.hidden ? '' : I18n.t('incognito.note');
 }
 incognitoToggle.addEventListener('click', () => { chat.toggleIncognito(); syncIncognito(); });
 window.__prismIncognitoReady = true;
@@ -478,7 +482,12 @@ if (AgentTools.available) {
    }).catch(() => {});
   }
   if (window.openghost?.web) {
-   browserToggle.hidden = true;
+   // The globe belongs on a web page too, attached right beside the glass. There is no
+   // Electron webview here, so it opens the light runs panel instead — the agent's parallel
+   // runs and sub-agents, live — with the X to close it.
+   browserToggle.hidden = false;
+   browserPanel = window.browserPanel = new WebRunsPanel({ app, toggle: browserToggle });
+   browserPanel.addRunsView(new RunsView({ chat }).el);
   } else {
    browserToggle.hidden = false;
    browserPanel = window.browserPanel = new BrowserPanel({ app, main, toggle: browserToggle });
