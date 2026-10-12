@@ -289,11 +289,11 @@ function continueAfterUpdate() {
  if (!state || state.phase !== "done" || state.continued) return;
  const chatId = String(state.chatId || "").replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 60);
  if (!chatId) return;
- if (Date.now() - (Number(state.at) || 0) > 30 * 60 * 1000) return;
+ if (Date.now() - (Number(state.at) || 0) > 30 * 60 * 1000) return console.log(`[update] carry-on skipped: the state is ${Math.round((Date.now() - Number(state.at)) / 60000)} minutes old`);
  const store = join(USER_DATA, "store");
  const index = readJsonSafe(join(store, "index.json"));
  const record = (index?.chats || []).find(item => item?.id === chatId);
- if (!record?.folder) return;
+ if (!record?.folder) return console.log(`[update] carry-on skipped: ${chatId} has no folder in the store`);
  const catalog = readJsonSafe(join(store, "catalog.json"));
  const keys = readJsonSafe(join(store, "keys.json"));
  const model = String(record.model || "");
@@ -308,6 +308,12 @@ function continueAfterUpdate() {
   const file = join(store, "chats", `${chatId}.json`);
   const body = readJsonSafe(file);
   if (!body || body.sealed || !Array.isArray(body.messages)) { markContinued(); return; }
+  // The "✅ updated" line: the boot writes it (and flags the state), but if another engine
+  // consumed the state first the chat used to hear nothing at all. Either way it is said once.
+  if (!state.announced && !body.messages.some(entry => String(entry?.content || "").includes("Prism V2 updated to v"))) {
+   const note = `✅ Prism V2 updated to v${String(state.version || "").replace(/^v/, "")} — I'm back, running the new version.`;
+   body.messages.push({ role: "assistant", content: note, turn: "update" });
+  }
   const last = [...body.messages].reverse().find(entry => entry?.role === "user");
   // `system: true` marks a line that exists for the model only: the page never draws it.
   if (!last || String(last.text || "").trim() !== text) body.messages.push({ role: "user", text, content: text, origin: "update", system: true });
@@ -364,7 +370,7 @@ const markContinued = () => {
  try {
   const state = readJsonSafe(updateStateFile) || {};
   // `at` stays as it was: refreshing it would make the one-shot banner look fresh again.
-  writeFileSync(updateStateFile, JSON.stringify({ ...state, continued: true }));
+  writeFileSync(updateStateFile, JSON.stringify({ ...state, continued: true, announced: true }));
  } catch {}
 };
 // Carrying on after an update has a race to survive: the update leaves the chat id in

@@ -225,11 +225,17 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   const fresh = prior && Date.now() - (Number(prior.at) || 0) < 30 * 60 * 1000;
   const landed = fresh && String(prior.version || "") === startedVersion
    && ["restarting", "installing", "downloading"].includes(String(prior.phase));
-  if (landed) {
-   const version = String(prior.version || startedVersion || "");
-   writeUpdateState({ phase: "done", version, chatId: prior.chatId || "" });
-   if (webPort > 0) announceUpdate(version, prior.chatId || "").catch(() => {});
-  } else if (prior?.phase === "downloading" || prior?.phase === "installing") writeUpdateState({ phase: "idle", version: prior.version || "" });
+  // Only the engine that serves the web UI handles this: every engine on the machine boots
+  // from the same state file, and the Discord bridge's host (no port) used to consume the
+  // "an update landed" state first — the web engine then found plain "done" and announced
+  // nothing. Whoever owns the pages owns the announcement.
+  if (webPort > 0) {
+   if (landed) {
+    const version = String(prior.version || startedVersion || "");
+    writeUpdateState({ phase: "done", version, chatId: prior.chatId || "", announced: false });
+    announceUpdate(version, prior.chatId || "").catch(() => {});
+   } else if (prior?.phase === "downloading" || prior?.phase === "installing") writeUpdateState({ phase: "idle", version: prior.version || "" });
+  }
  }
  async function announceUpdate(version, chatId) {
   const text = `✅ Prism V2 updated to v${version} — I'm back, running the new version.`;
@@ -250,6 +256,11 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
    const index = JSON.parse(readFileSync(indexFile, "utf8"));
    const record = (index?.chats || []).find(item => item?.id === chatId);
    if (record) { record.updated = Date.now(); writeFileSync(indexFile, JSON.stringify(index)); }
+   // So the carry-on does not tell it a second time — and can tell it if this never ran.
+   try {
+    const state = JSON.parse(readFileSync(updateStateFile, "utf8")) || {};
+    writeFileSync(updateStateFile, JSON.stringify({ ...state, announced: true }));
+   } catch {}
    console.log(`[update] told conversation ${chatId} that v${version} is running`);
   } catch (error) { console.log(`[update] could not note the update in the chat: ${error.message}`); }
  }
