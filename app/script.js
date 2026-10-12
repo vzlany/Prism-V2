@@ -158,6 +158,8 @@ if (window.openghost?.update?.onState) {
  document.body.append(notice);
  let device = '';
  let notified = new Set();
+ try { notified = new Set(JSON.parse(localStorage.getItem('openghost.updateToasted') || '[]')); } catch {}
+ const remember = () => { try { localStorage.setItem('openghost.updateToasted', JSON.stringify([...notified].slice(-8))); } catch {} };
  let hideTimer = 0;
  window.openghost?.engine?.info?.().then(info => { device = String(info?.name || ''); }).catch(() => {});
  const maybeToast = state => {
@@ -166,6 +168,7 @@ if (window.openghost?.update?.onState) {
   const key = `${state.phase}:${state.version || ''}`;
   if (notified.has(key)) return;
   notified.add(key);
+  remember();
   try { window.openghostRemote.updateNotify({ kind: state.phase, version: state.version || '', name: device }); } catch {}
  };
  window.openghost.update.onState(state => {
@@ -173,14 +176,18 @@ if (window.openghost?.update?.onState) {
   const version = state?.version ? `v${String(state.version).replace(/^v/, '')}` : '';
   const name = device || I18n.t('update.noticeDevice');
   const phase = state?.phase || 'idle';
+  // How much of the new build is already here, next to the words: the updater reports the
+  // download's progress, so the phone sees "62%" instead of a silent spinner.
+  const raw = state?.progress == null ? null : Number(state.progress);
+  const percent = raw != null && Number.isFinite(raw) ? ` (${Math.round(Math.min(1, Math.max(0, raw)) * 100)}%)` : '';
   const show = (text, busy) => {
    notice.textContent = text;
    notice.hidden = false;
    notice.classList.toggle('is-busy', Boolean(busy));
   };
   if (phase === 'available') show(I18n.t('update.noticeAvailable', { device: name, version: version || I18n.t('update.noticeLatest') }));
-  else if (phase === 'downloading') show(I18n.t('update.noticeDownloading', { device: name, version: version ? ` ${version}` : '' }), true);
-  else if (phase === 'installing') show(I18n.t('update.noticeInstalling', { device: name }), true);
+  else if (phase === 'downloading') show(I18n.t('update.noticeDownloading', { device: name, version: version ? ` ${version}` : '', percent }), true);
+  else if (phase === 'installing') show(I18n.t('update.noticeInstalling', { device: name, percent }), true);
   else if (phase === 'restarting') show(I18n.t('update.noticeRestarting', { device: name }), true);
   else if (phase === 'done') {
    show(I18n.t('update.noticeDone', { device: name, version }));
@@ -217,9 +224,10 @@ if (updatePill && window.openghost?.desktop && window.openghost?.update?.params)
    const spin = document.createElement('span');
    spin.className = 'update-spinner';
    spin.setAttribute('aria-hidden', 'true');
+   const named = version ? ` v${String(version).replace(/^v/, '')}` : '';
    const pct = progress == null ? '' : ` (${Math.round(progress * 100)}%)`;
-   updatePill.append(spin, document.createTextNode(`${I18n.t('update.installing')}${pct}`));
-   updatePill.title = `${I18n.t('update.installing')}${pct}`;
+   updatePill.append(spin, document.createTextNode(`${I18n.t('update.installing')}${named}${pct}`));
+   updatePill.title = `${I18n.t('update.installing')}${named}${pct}`;
    return;
   }
   updatePill.append(document.createTextNode(`${I18n.t('update.available')} `));
@@ -238,7 +246,7 @@ if (updatePill && window.openghost?.desktop && window.openghost?.update?.params)
  });
  window.openghost.update.onEvent?.(payload => {
   if (payload?.state === 'available') setPill('available', payload.version);
-  else if (payload?.state === 'downloading' || payload?.state === 'installing') setPill(payload.state, '', payload.progress ?? null);
+  else if (payload?.state === 'downloading' || payload?.state === 'installing') setPill(payload.state, payload.version || '', payload.progress ?? null);
   else if (payload?.state === 'none') setPill('');
  });
  window.openghost.update.params?.().then(params => {
@@ -271,13 +279,10 @@ function syncLive() {
   if (liveView.el.parentElement !== conv.list) conv.list.append(liveView.el);
   // The card grows and folds as the run moves along; a reader up in the thread keeps their place.
   chat.holdView(() => liveView.update(info));
-  // One checklist at a time: the live card already draws it, so the standalone box steps aside.
-  chat.todoStandalone(conv, false);
   if (chat.follow) chat.followBottom();
  } else if (liveView) {
   liveView.el.remove();
   liveView = null;
-  chat.todoStandalone(chat.active, true);
  }
 }
 window.Presence?.on?.(() => {
@@ -338,13 +343,13 @@ window.openghost?.store?.onChatChange?.(id => {
    // shows the work; the file is growing on every save and rebuilding the thread for that was
    // why a long conversation seemed to lose its earlier messages while it worked. Only a new
    // line from another surface — the user typing on the phone while the app runs — is worth
-   // rebuilding the thread for.
+   // touching the thread for, and even then just the line itself is appended.
    if (window.Presence?.isBusy?.(id)) {
     try {
      const { messages } = await library.conversation(id);
      const seen = current.messages || [];
      const users = list => (list || []).filter(entry => entry?.role === 'user').length;
-     if (users(messages) > users(seen)) chat.refresh(id).catch(() => {});
+     if (users(messages) > users(seen)) chat.appendNew(id).catch(() => {});
     } catch {}
    }
    return;
@@ -521,6 +526,19 @@ const attachments = new Attachments({
   // uploads/<chat>/ so the agent's tools can open it by path.
   chatId: () => chat.active?.id || '',
 });
+// The files of this task — what the user attached and what the agent attached — in one panel
+// above the message box: they stay until the agent detaches them, and a reload shows the
+// same list.
+if (window.TaskFiles) {
+  window.TaskFiles.create({
+    root: document.querySelector('.task-files'),
+    list: document.querySelector('.task-files-list'),
+    count: document.querySelector('.task-files-count'),
+    more: document.querySelector('.task-files-more'),
+    chat,
+  });
+  document.querySelector('.task-files-icon').innerHTML = Glyphs.file;
+}
 // Steer: rewind the chat to that message and put its words back into the composer.
 function steerMessage(message) {
   const conv = message?.closest('.thread-list')?.__conversation;
@@ -680,6 +698,7 @@ function syncAll() {
   chatList.render();
   lockScreen.sync();
   settings.show(chat.model);
+  window.TaskFiles?.refresh?.();
   if (planButton) {
    planButton.hidden = !AgentTools.available;
    const plan = chat.agentMode === 'plan';

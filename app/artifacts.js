@@ -84,6 +84,16 @@ async function runDownload(button, run) {
 }
 
 window.Artifacts = {
+ // A file from a path, in the same preview card the tool cards use: text renders (markdown
+ // does too), binaries say to use Download instead.
+ async preview({ path, name } = {}) {
+  if (!path) return null;
+  const label = name || nameOf(path);
+  const text = await read(path);
+  previewModal(label, text == null ? I18n.t('artifact.binary') : text);
+  return true;
+ },
+
  // Preview and Download live inside the write/edit card itself, so a file the agent touched
  // is one box, not a card plus a second file chip saying the same name.
  actions(card, { path, cwd }) {

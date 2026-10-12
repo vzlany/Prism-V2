@@ -52,8 +52,14 @@ class FolderPill {
   if (!this.menu) { this.pick(); return; }
   if (this.menu.matches(':popover-open')) { this.menu.hidePopover?.(); return; }
   const recents = window.RecentFolders?.list?.(5) || [];
+  // The folder this chat works in shows too, even when it was never picked by hand (the
+  // one a new conversation starts with — Downloads, usually): the menu used to list only
+  // hand-picked workspaces, so the folder the pill already wore was missing from it.
+  const current = this.chat.folder;
+  const folders = [...(current?.path ? [{ path: current.path, name: current.name || current.path }] : []), ...recents]
+   .filter((entry, index, all) => entry?.path && all.findIndex(other => other.path === entry.path) === index);
   const row = folder => `
-   <div class="folder-item" data-path="${escapeHtml(folder.path)}">
+   <div class="folder-item" data-path="${escapeHtml(folder.path)}"${folder.current ? ' data-current="1"' : ''}>
     <button type="button" class="folder-item-pick" title="${escapeHtml(folder.path)}">
      <span class="folder-item-name">${escapeHtml(folder.name || folder.path)}</span>
      <span class="folder-item-path">${escapeHtml(folder.path)}</span>
@@ -62,8 +68,8 @@ class FolderPill {
    </div>`;
   this.menu.innerHTML = [
    `<div class="folder-head">${escapeHtml(I18n.t('folder.recent'))}</div>`,
-   ...recents.map(row),
-   recents.length ? '' : `<div class="folder-empty">${escapeHtml(I18n.t('folder.noRecent'))}</div>`,
+   ...folders.map(folder => row({ ...folder, current: current?.path === folder.path })),
+   folders.length ? '' : `<div class="folder-empty">${escapeHtml(I18n.t('folder.noRecent'))}</div>`,
    `<div class="folder-sep" aria-hidden="true"></div>`,
    `<button type="button" class="folder-item-new" data-workspace="chat">${Glyphs.plus}<span>${escapeHtml(I18n.t('folder.workspace'))}</span></button>`,
    `<button type="button" class="folder-item-new" data-workspace="public">${Glyphs.folder}<span>${escapeHtml(I18n.t('folder.public'))}</span></button>`,
@@ -71,9 +77,10 @@ class FolderPill {
    `<button type="button" class="folder-item-new" data-pick-new>${Glyphs.folderAdd}<span>${escapeHtml(I18n.t('folder.choose'))}</span></button>`,
   ].join('');
   this.menu.showPopover?.();
+  const byPath = new Map(folders.map(entry => [entry.path, entry]));
   this.menu.querySelectorAll('.folder-item').forEach(item => {
    const path = item.dataset.path;
-   const folder = { path, name: (window.RecentFolders?.list?.(5) || []).find(entry => entry.path === path)?.name || path.split(/[\\/]/).pop() || path };
+   const folder = byPath.get(path) || { path, name: path.split(/[\\/]/).pop() || path };
    item.querySelector('.folder-item-pick').addEventListener('click', () => this.choose(folder));
    const x = item.querySelector('.folder-item-x');
    const forget = event => { event.stopPropagation(); window.RecentFolders?.forget?.(path); this.openMenu(); };

@@ -319,14 +319,19 @@ class EffortSlider {
   else if (e.key === 'Tab') this.close();
  }
 
- // Shows a level's name above the track; the thumb crossing a dot calls this too.
+ // Shows a level's name above the track; the thumb crossing a dot calls this too. Every
+ // level looks different on purpose — the text grows strongly from step to step (INSTANT
+ // stays small and quiet, MAX is big and loud), and the stylesheet gives each level its own
+ // colour, weight, tracking and, at the top, a fast shake, so the level is felt at a glance.
  label(value) {
   const name = I18n.has(`effort.${value}`) ? I18n.t(`effort.${value}`) : value;
   const node = this.panel.querySelector('.effort-name');
   if (node) {
-   // The text grows a little with the level, from the first step to the last.
    const level = Math.max(0, this.efforts.indexOf(value));
-   const size = 11 + (this.max ? level / this.max : 0) * 5;
+   const span = Math.max(1, this.max || 1);
+   // 11px at the first step up to ~19px at the last: a strong, readable climb.
+   const eased = Math.pow(level / span, 0.85);
+   const size = 11 + eased * 8;
    node.style.fontSize = `${size.toFixed(1)}px`;
    // Each level wears its own colour and tracking (see the stylesheet), so the name reads at
    // a glance even before the size does.

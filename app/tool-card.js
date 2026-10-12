@@ -5,6 +5,46 @@
 const PREVIEW_LINES = 60;
 const OUTPUT_CHARS = 4000;
 const ICONS = { command: 'terminal', file: 'file', web: 'globe' };
+// Every tool speaks in verbs: what it is doing while it runs, what it did once it is done —
+// "Editing a file" → "Edited a file", never the bare call name.
+const VERBS = {
+ run_powershell: ['Running a command', 'Ran a command'],
+ git: ['Running git', 'Ran git'],
+ read_file: ['Reading a file', 'Read a file'],
+ write_file: ['Writing a file', 'Wrote a file'],
+ edit_file: ['Editing a file', 'Edited a file'],
+ patch: ['Patching a file', 'Patched a file'],
+ list_files: ['Listing files', 'Listed files'],
+ attach_file: ['Attaching a file', 'Attached a file'],
+ video_frames: ['Looking at a video', 'Looked at a video'],
+ web_search: ['Searching the web', 'Searched the web'],
+ fetch_url: ['Opening a link', 'Opened a link'],
+ http_request: ['Sending a request', 'Sent a request'],
+ screenshot: ['Looking at the screen', 'Looked at the screen'],
+ clipboard: ['Using the clipboard', 'Used the clipboard'],
+ open_path: ['Opening a path', 'Opened a path'],
+ notify: ['Notifying the user', 'Notified the user'],
+ wait: ['Waiting', 'Waited'],
+ subagent: ['Starting a subagent', 'Started a subagent'],
+ ask_user: ['Asking the user', 'Asked the user'],
+ todo: ['Updating the checklist', 'Updated the checklist'],
+ agents: ['Checking the agents', 'Checked the agents'],
+ memory_save: ['Saving a memory', 'Saved a memory'],
+ memory_forget: ['Forgetting a memory', 'Forgot a memory'],
+ update_prism: ['Updating Prism', 'Updated Prism'],
+ send_discord_message: ['Sending a Discord message', 'Sent a Discord message'],
+};
+const verbOf = (name, running) => {
+ const value = String(name || '');
+ if (VERBS[value]) return VERBS[value][running ? 0 : 1];
+ // MCP tools keep the "MCP · server" title the describe gives them.
+ if (value.includes('__')) return '';
+ if (value.startsWith('browser_')) return running ? 'Using the browser' : 'Used the browser';
+ const plain = value.replace(/[_-]+/g, ' ').trim();
+ if (!plain) return '';
+ const titled = plain.charAt(0).toUpperCase() + plain.slice(1);
+ return running ? `Running ${titled}` : `Ran ${titled}`;
+};
 // Two white dashes, half a loop apart, glide around the card while it runs. An SVG rect is
 // used so the dash travels the whole perimeter at one speed, unlike a rotating gradient.
 const SNAKE = '<svg class="tool-snake" aria-hidden="true"><rect pathLength="100"/></svg>';
@@ -56,6 +96,7 @@ class ToolCard {
  constructor(info) {
   this.info = info || {};
   this.parallel = info?.tool === 'subagent';
+  this.state = 'running';
   // Simple visuals shows one collapsed line per call (subagent boxes keep their big form);
   // the settings' "stay open" does not apply to the simple lines.
   this.plain = Boolean(window.Effects?.simple) && !this.parallel;
@@ -99,6 +140,7 @@ class ToolCard {
    for (let k = 0; k < 3; k++) this.dots.append(document.createElement('i'));
   }
   this.head.append(...head, element('span', 'tool-title', this.titleOf()), this.reasonEl, ...(this.dots ? [this.dots] : []), this.summary, this.stat, this.status, this.timeEl, this.chevron);
+  this.titleEl = this.head.querySelector('.tool-title');
   this.body = element('div', 'tool-body');
   this.inner = element('div', 'tool-body-inner');
   this.body.append(this.inner);
@@ -121,9 +163,11 @@ class ToolCard {
 
  titleOf() {
   const info = this.info;
-  if (info.tool === 'read_file') return I18n.t('tool.read');
-  if (info.tool === 'list_files') return I18n.t('tool.list');
-  return info?.title || '';
+  const running = this.state !== 'done' && this.state !== 'error';
+  // The verb speaks for every tool — "Editing a file" while it runs, "Edited a file" once it
+  // is done — so a title never falls back to the raw call name. A described title is the
+  // last resort (an unknown MCP tool), and the reason the model gave stands beside it.
+  return verbOf(info?.tool, running) || info?.title || String(info?.tool || '');
  }
 
  summaryOf() {
@@ -145,11 +189,24 @@ class ToolCard {
    if (info.added) diff.append(...lines(info.added, info.removed ? '+' : '', info.removed ? 'is-added' : 'is-new'));
    this.inner.append(diff);
   }
+  // What the model sent, visible from the moment the call starts: a card can be opened while
+  // its tool still runs, and the input is the first thing it shows. A command's own code and
+  // a file's diff already ARE the input; everything else shows its arguments.
+  const hasInput = (info.kind === 'command' && info.code) || (info.kind === 'file' && (info.removed || info.added));
+  if (!hasInput && info.args && typeof info.args === 'object' && Object.keys(info.args).length) {
+   this.inner.append(element('div', 'tool-input-label', I18n.t('tool.input')));
+   this.inner.append(element('pre', 'tool-code tool-input', JSON.stringify(info.args, null, 1).slice(0, 4000)));
+  }
  }
 
  setResult(output, error = false) {
   this.el.classList.remove('is-running');
   this.el.classList.add(error ? 'is-error' : 'is-done');
+  this.state = error ? 'error' : 'done';
+  // The line speaks in the past tense the moment the call is over ("Editing a file" →
+  // "Edited a file"); a model's own reason, when there is one, is left as it is.
+  if (this.titleEl) this.titleEl.textContent = this.titleOf();
+  if (this.reasonEl && !this.info.reason) this.reasonEl.textContent = String(this.titleOf() || '').slice(0, 90);
   const text = String(output ?? '');
   const shown = text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n… (${text.length - OUTPUT_CHARS} more characters)` : text;
   if (shown.trim()) {

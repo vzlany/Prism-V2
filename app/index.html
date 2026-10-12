@@ -67,6 +67,18 @@
           <button type="button" class="composer-instructions" hidden></button>
           <button type="button" class="composer-folder"></button>
         </div>
+        <div class="task-files" hidden>
+          <div class="task-files-head">
+            <span class="task-files-icon" aria-hidden="true"></span>
+            <span class="task-files-title" data-i18n="taskfiles.title">All files in task</span>
+            <span class="task-files-count">0</span>
+          </div>
+          <div class="task-files-list"></div>
+          <button type="button" class="task-files-more" hidden aria-expanded="false">
+            <span class="task-files-more-text" data-i18n="taskfiles.expand">Expand files</span>
+            <span class="task-files-chevron" aria-hidden="true"></span>
+          </button>
+        </div>
         <div class="composer-attachments"><div class="attachments-row" aria-label="Attachments" data-i18n-attr="aria-label:attach.label"></div></div>
         <input class="composer-picker" type="file" multiple hidden>
         <div class="composer-field">
@@ -308,9 +320,11 @@
   <script src="stream-view.js"></script>
   <script src="thinking.js"></script>
   <script src="row-glide.js"></script>
+  <script src="file-url.js"></script>
   <script src="file-kinds.js"></script>
   <script src="attachment-reader.js"></script>
   <script src="attachments.js"></script>
+  <script src="task-files.js"></script>
   <script src="lightbox.js"></script>
   <script src="media-slider.js"></script>
   <script src="prompts.js"></script>

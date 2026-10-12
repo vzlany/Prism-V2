@@ -660,6 +660,9 @@ ipcMain.handle('devices:prompt', async event => {
 ipcMain.handle('devices:pick', async (event, id) => (fromApp(event) ? await pickDevice(id) : null));
 // The remote page reports the device's updater state; the PC (a Windows client, never a
 // server) shows a toast while the other machine downloads an update and when it is back.
+// One toast per device, kind and version: a page that reloads mid-update used to ring the
+// same toast again and again.
+const updateToasts = new Map();
 ipcMain.on('devices:update-toast', (event, payload) => {
  if (!remoteWin || remoteWin.isDestroyed() || event.sender !== remoteWin.webContents) return;
  if (process.platform !== 'win32' || serverMode()) return;
@@ -667,6 +670,10 @@ ipcMain.on('devices:update-toast', (event, payload) => {
  const version = payload?.version ? `v${String(payload.version).replace(/^v/, '')}` : '';
  const kind = payload?.kind === 'done' ? 'done' : payload?.kind === 'downloading' ? 'downloading' : '';
  if (!kind) return;
+ const stamp = `${name}|${kind}|${version}`;
+ const seen = updateToasts.get(stamp) || 0;
+ if (Date.now() - seen < 30 * 60 * 1000) return;
+ updateToasts.set(stamp, Date.now());
  try {
   const notification = new Notification(kind === 'done'
    ? { title: `${name} updated`, body: `Prism V2${version ? ` ${version}` : ''} is installed and running there.` }

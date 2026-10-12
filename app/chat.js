@@ -152,15 +152,16 @@ const SIMPLE_BUCKET = {
  read_file: 'explore', list_files: 'explore', video_frames: 'explore',
  write_file: 'write', edit_file: 'write', patch: 'write',
  run_powershell: 'run', git: 'run', http_request: 'run',
+ attach_file: 'attach',
  memory_save: 'memory', memory_forget: 'memory',
- web_search: 'search',
+ web_search: 'search', fetch_url: 'search',
  screenshot: 'shot',
 };
 const SIMPLE_LABEL = {
- running: { explore: 'Exploring {n} files', write: 'Writing {n} files', run: 'Running {n} commands', memory: 'Updating memory', search: 'Searching the web', shot: 'Taking {n} screenshots' },
- done: { explore: 'Explored {n} files', write: 'Wrote {n} files', run: 'Ran {n} commands', memory: 'Memory updated', search: 'Searched the web', shot: 'Took {n} screenshots' },
+ running: { explore: 'Exploring {n} files', write: 'Editing {n} files', run: 'Running {n} commands', attach: 'Attaching {n} files', memory: 'Updating memory', search: 'Searching the web', shot: 'Taking {n} screenshots' },
+ done: { explore: 'Explored {n} files', write: 'Wrote {n} files', run: 'Ran {n} commands', attach: 'Attached {n} files', memory: 'Memory updated', search: 'Searched the web', shot: 'Took {n} screenshots' },
 };
-const SIMPLE_ORDER = ['explore', 'write', 'run', 'memory', 'search', 'shot'];
+const SIMPLE_ORDER = ['explore', 'write', 'run', 'attach', 'memory', 'search', 'shot'];
 // The ⚡ before a tool line, gray like the 🧠 of a Thought row.
 const SIMPLE_ICON = '\u26A1';
 function splitQuotes(text) {
@@ -405,7 +406,13 @@ class Chat {
   });
   thread.addEventListener('click', event => this.onClick(event));
   // A card or Thought row opening or closing: hold the reader's place through the animation.
-  thread.addEventListener('tool-toggle', () => this.holdToggle());
+  // A card inside a timeline line opens it too — a line the user opened by hand must not fold
+  // itself away when another line takes the stage.
+  thread.addEventListener('tool-toggle', event => {
+   this.holdToggle();
+   const group = event.target?.closest?.('.tool-group');
+   if (group) group.__touched = true;
+  });
   thread.addEventListener('diagram-edit', event => this.onDiagramEdit(event));
   bottom.addEventListener('scroll-bottom', () => this.scrollToBottom());
   new RowGlide(thread);
@@ -747,55 +754,33 @@ class Chat {
    mark(args.done, 'done');
    mark(args.failed, 'failed');
   }
-  this.renderTodos(conv);
   if (conv.record) this.save(conv);
   const list = items();
   if (!list.length) return 'The todo list is empty.';
   const sign = { idle: '[ ]', doing: '[~]', done: '[x]', failed: '[!]' };
   const done = list.filter(item => item.state === 'done').length;
-  return `Todo (${done}/${list.length} done):\n${list.map(item => `${sign[item.state] || '[ ]'} ${item.text}`).join('\n')}`;
+  const open = list.filter(item => item.state === 'doing' || item.state === 'idle').length;
+  // The list is what the user reads when the answer feels vague — and a step left "doing"
+  // after the work ended reads as if the agent were still busy. One quiet reminder closes it.
+  const reminder = open ? `\n\n${open} of ${list.length} step(s) are still open. Before your final summary, mark every finished step done and every step you gave up on failed — nothing should be left as doing.` : '';
+  return `Todo (${done}/${list.length} done):\n${list.map(item => `${sign[item.state] || '[ ]'} ${item.text}`).join('\n')}${reminder}`;
  }
 
- // The one todo box: every update relocates it to the newest point of the thread — the place
- // the todo tool was just called — so the checklist always sits next to what it describes.
- // The old box is removed rather than left behind, and a stale box from an older render (a
- // reload, a store refresh) is cleaned up so only one ever shows.
+ // The checklist lives where the work is: every todo call draws its own box right under the
+ // tool line that made it (attached in place, in useTool), and it stays there — a later
+ // message, tool call or answer never moves or replaces it. Continuing the conversation
+ // makes a NEW box; it does not delete the last one.
  renderTodos(conv) {
   if (!conv) return;
+  // Boxes drawn by an older build (a single box that used to follow the work) are cleaned up
+  // once; from now on the boxes ride with their calls in the transcript.
   for (const stale of conv.list.querySelectorAll(':scope > .todo-card')) {
-   if (stale !== conv.todoCard?.el) stale.remove();
+   if (!stale.classList.contains('is-snapshot')) stale.remove();
   }
-  if (!conv.todos?.length) {
-   conv.todoCard?.el.remove();
-   conv.todoCard = null;
-   return;
-  }
-  const fresh = new TodoCard(conv.todos);
-  conv.todoCard?.el.remove();
-  // The checklist belongs where the work is: right after the message whose step last used
-  // the todo tool when the open transcript shows one ("only at the very end" made it read
-  // like a footnote of the conversation). Otherwise it stays at the end.
-  let holder = null;
-  for (const node of conv.list.children) {
-   const entry = node.__entry;
-   if (!entry?.steps?.length) continue;
-   for (const step of entry.steps) {
-    if (step.role === 'assistant' && (step.tool_calls || []).some(call => call.function?.name === 'todo')) holder = node;
-   }
-  }
-  if (holder?.isConnected && holder !== conv.liveView?.el) holder.after(fresh.el);
-  else conv.list.append(fresh.el);
-  conv.todoCard = fresh;
-  if (conv === this.active) this.followBottom();
  }
 
- // The live card carries the checklist while a run works: the standalone box steps aside
- // (one checklist, not two), and comes back — redrawn at the work — when the run ends.
- todoStandalone(conv, show) {
-  if (!conv) return;
-  if (show) this.renderTodos(conv);
-  else conv.todoCard?.el.remove();
- }
+ // Boxes are static now: the "one box that steps aside for the live card" dance is gone.
+ todoStandalone() {}
 
  // Sends the same prompt to several models at once: one chat per model, all running together.
  // With the desktop app running, every one of them is handed to the app instead.
@@ -915,13 +900,15 @@ class Chat {
  }
 
  load(conv) {
-  return this.library.conversation(conv.id).then(({ messages, tokens, spend, todos }) => {
+  return this.library.conversation(conv.id).then(({ messages, tokens, spend, todos, detached }) => {
    conv.messages = messages;
    conv.tokens = tokens;
    conv.spend = spend || null;
    conv.todos = Array.isArray(todos) ? todos : [];
+   conv.detached = Array.isArray(detached) ? detached : [];
    this.restore(conv);
    this.renderTodos(conv);
+   window.TaskFiles?.refresh?.();
   });
  }
 
@@ -1337,6 +1324,32 @@ class Chat {
    const fresh = this.library.chat(id);
    if (fresh) conv.record = fresh;
   }
+ }
+
+ // A line written by another surface while this conversation works somewhere else (a photo
+ // attached in Discord, a message typed on the phone): only the user's own lines are drawn,
+ // one by one. A full rebuild on every such write was why a busy conversation lagged — and
+ // the parts of a running answer are covered live by the live card anyway, then arrive whole
+ // with the rebuild that follows the run.
+ async appendNew(id) {
+  const conv = this.conversations.get(id);
+  if (!conv?.record || conv.turn || conv.locked || !conv.window) return;
+  const { messages } = await this.library.conversation(id).catch(() => ({ messages: null }));
+  if (!Array.isArray(messages) || messages.length <= conv.messages.length) return;
+  const count = list => (list || []).filter(entry => entry?.role === 'user').length;
+  if (count(messages) <= count(conv.messages)) return this.refresh(id);
+  const fresh = messages.slice(conv.messages.length).filter(entry => entry.role === 'user' && this.drawable(entry));
+  conv.messages = messages;
+  if (!fresh.length) return;
+  for (const entry of fresh) {
+   if (!conv.window.entries.includes(entry)) conv.window.entries.push(entry);
+   this.renderEntry(conv, entry);
+  }
+  if (conv === this.active) {
+   if (this.follow) this.followBottom();
+   else this.syncBottom();
+  }
+  this.onChange();
  }
 
  stop() {
@@ -1827,7 +1840,9 @@ class Chat {
  }
 
  simpleGroup(view, name, args = {}) {
-  if (!window.Effects?.simple || name === 'subagent') return null;
+  // A todo call never joins the summarized line: its own checklist box belongs right under
+  // the call that made it, so the line would separate the two.
+  if (!window.Effects?.simple || name === 'subagent' || name === 'todo') return null;
   let group = view.__simpleGroup;
   if (group && (!group.isConnected || group.parentElement !== view.el)) group = null;
   // Anything that landed after the line breaks it: a subagent box, a picture, a note.
@@ -2415,7 +2430,9 @@ class Chat {
    }
   }
   const described = name === 'ask_user' ? null : AgentTools.describe(name, args, cwd);
-  const card = described ? new ToolCard({ ...described, tool: name }) : null;
+  // The raw arguments ride along: a card can be opened while the call still runs, and what
+  // the model actually sent is part of what it shows.
+  const card = described ? new ToolCard({ ...described, tool: name, args }) : null;
   // Simple visuals: ordinary calls join the timeline line above them; subagent boxes stay
   // whole and a fresh line starts after them.
   const simple = card ? this.simpleGroup(view, name, args) : null;
@@ -2465,6 +2482,18 @@ class Chat {
     if (simple) this.simpleDone(simple, performance.now() - began);
     return `${TOOL_NOTES.handedBack}\n\n${now}`;
    }
+   // "Unattach" for the file panel: the agent takes a file back out of this conversation's
+   // file list. The file itself stays on disk; the list stays the way the AI left it, after
+   // a reload too.
+   if (name === 'attach_file' && args?.detach === true) {
+    const target = String(args.path || '').trim();
+    if (!target) return 'Nothing to detach: pass the file path.';
+    conv.detached = [...new Set([...(conv.detached || []), target])];
+    if (card) card.setResult(`Detached ${target} — it is out of this conversation's file list now.`);
+    if (simple) this.simpleDone(simple, performance.now() - began);
+    window.TaskFiles?.refresh?.();
+    return `Detached ${target} — it is out of this conversation's file list now.`;
+   }
    const output = await AgentTools.run(name, args, { id, cwd });
    card?.setResult(typeof output === 'string' ? output : output?.text);
    if (simple) this.simpleDone(simple, performance.now() - began);
@@ -2494,10 +2523,26 @@ class Chat {
     if (conv === this.active) this.followBottom();
    }
    // A finished file the agent attached (attach_file) is kept for the end of the turn: the
-   // downloads belong after the wrap-up, not in the middle of the work.
+   // downloads belong after the wrap-up, not in the middle of the work. The conversation's
+   // own file panel picks it up as well and keeps it until the agent detaches it.
    if (output && typeof output === 'object' && output.files?.length) {
     turn.files ||= [];
     for (const file of output.files) turn.files.push({ ...file, cwd });
+    if (name === 'attach_file') window.TaskFiles?.refresh?.();
+   }
+   // The checklist as it stands right after this call: one box per todo call, sitting under
+   // the very line that made it, never moved by anything that comes later.
+   if (name === 'todo' && Array.isArray(conv.todos)) {
+    const snapshot = conv.todos.map(item => ({ text: item.text, state: item.state }));
+    call.todo = snapshot;
+    if (card && snapshot.length) {
+     const box = new TodoCard(snapshot);
+     box.el.classList.add('is-snapshot');
+     const holder = card.el.closest('.tool-group') || card.el;
+     // Inserting a box mid-thread must not move what the reader is looking at.
+     this.holdView(() => holder.after(box.el));
+     if (conv === this.active) this.followBottom();
+    }
    }
    // A written or edited file gets Preview and Download on the card itself: the file is one
    // box, not a card plus a second chip repeating its name.
@@ -2512,6 +2557,7 @@ class Chat {
    this.publishLive(conv, turn);
    return `Error: ${error.message}`;
   } finally {
+   if (card && !Number.isFinite(call.ms)) call.ms = Math.round(performance.now() - began);
    turn.tool = '';
    turn.toolName = '';
    this.toolConvs?.delete(id);
@@ -2601,6 +2647,24 @@ class Chat {
   }
   window.browserPanel?.drive(conv, false);
   if (!entry.steps.length && !entry.content?.trim() && !entry.thinking?.trim()) drop(conv.messages, entry);
+  // A <discord_summary> or <send_discord_message> block whose closing tag never arrived (a
+  // reply cut off mid-block) must not reach the chat as raw text: its words are kept for the
+  // finish DM and the raw tags are dropped here, for every part of the turn.
+  for (const part of turn.parts) {
+   const text = part.entry?.content;
+   if (typeof text === 'string' && /<discord_summary|<send_discord_message/i.test(text)) {
+    const open = /<discord_summary>([\s\S]*?)(?:<\/discord_summary>|$)/i.exec(text);
+    if (open && !turn.discordSummary) turn.discordSummary = String(open[1]).trim().slice(0, 16000);
+    part.entry.content = text
+     .replace(/<discord_summary>[\s\S]*?<\/discord_summary>/gi, '')
+     .replace(/<send_discord_message>[\s\S]*?<\/send_discord_message>/gi, '')
+     .replace(/<discord_summary>[\s\S]*$/i, '')
+     .replace(/<send_discord_message>[\s\S]*$/i, '')
+     .replace(/\n{3,}/g, '\n\n')
+     .trim();
+    if (part.view?.stream) part.view.stream.push(part.entry.content);
+   }
+  }
   if (turn.next) collapse(turn.next.el);
   const queued = turn.queue.splice(0).map(({ prompt, bubble }) => {
    const item = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM, ...(prompt.device || FROM_DEVICE ? { device: prompt.device || FROM_DEVICE } : {}) };
@@ -2776,7 +2840,7 @@ class Chat {
  save(conv) {
   if (!this.library.chat(conv.id)) return Promise.resolve();
   conv.savedAt = Date.now();
-  const write = this.library.saveMessages(conv.id, conv.messages, conv.tokens, conv.spend || null, conv.todos?.length ? conv.todos : null);
+  const write = this.library.saveMessages(conv.id, conv.messages, conv.tokens, conv.spend || null, conv.todos?.length ? conv.todos : null, { detached: conv.detached || [] });
   this.library.update(conv.id, { updated: Date.now() });
   return write;
  }
@@ -2943,7 +3007,8 @@ class Chat {
    else if (step.role === 'tool') {
     const call = calls.find(item => item.id === step.tool_call_id);
     if (call) call.__output = step.content;
-    if (call && Number.isFinite(step.ms)) call.__ms = step.ms;
+    const ms = Number.isFinite(step.ms) ? step.ms : (call && Number.isFinite(call.ms) ? call.ms : null);
+    if (call && Number.isFinite(ms)) call.__ms = ms;
    }
   }
   // Simple visuals draws a reloaded step as the same timeline line the live one wore: one
@@ -2952,10 +3017,11 @@ class Chat {
   const simple = Boolean(window.Effects?.simple);
   let group = null;
   for (const call of calls) {
+   let args = {};
    let card;
    try {
-    const args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-    card = new ToolCard({ ...AgentTools.describe(call.function.name, args, cwd), tool: call.function.name });
+    args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+    card = new ToolCard({ ...AgentTools.describe(call.function.name, args, cwd), tool: call.function.name, args });
    } catch {
     card = new ToolCard({ kind: 'command', title: call.function?.name || '', code: call.function?.arguments || '' });
    }
@@ -2964,8 +3030,12 @@ class Chat {
    // as "Running" forever. Say what happened instead.
    const answered = call.__output !== undefined && call.__output !== null;
    card.setResult(answered ? call.__output : I18n.t('tool.unfinished'), !answered);
-   if (call.__ms) card.setDuration(call.__ms);
-   if (simple && !card.parallel) {
+   // How long the step took: read from the tool step or from the call itself, so a run
+   // nobody watched (the server engine) still shows its "(3.4s)" after a reload.
+   const ms = Number.isFinite(call.__ms) ? call.__ms : (Number.isFinite(call.ms) ? call.ms : 0);
+   if (ms) card.setDuration(ms);
+   const isTodo = call.function?.name === 'todo';
+   if (simple && !card.parallel && !isTodo) {
     if (!group) {
      group = this.groupElement();
      el.append(group);
@@ -2974,21 +3044,36 @@ class Chat {
     let label = null;
     if (call.function?.name === 'agents') {
      try {
-      const args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-      label = { running: AgentTools.agentActionLabel(args.action, args.id, true), done: AgentTools.agentActionLabel(args.action, args.id, false) };
+      const args2 = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+      label = { running: AgentTools.agentActionLabel(args2.action, args2.id, true), done: AgentTools.agentActionLabel(args2.action, args2.id, false) };
      } catch {}
     }
-    group.__items.push({ name: call.function?.name || '', state: 'done', started: 0, bucket: label ? null : (SIMPLE_BUCKET[call.function?.name] || 'run'), label });
+    group.__items.push({ name: call.function?.name || '', state: 'done', started: 0, ms, bucket: label ? null : (SIMPLE_BUCKET[call.function?.name] || 'run'), label });
    } else {
     group = null;
     el.append(card.el);
    }
-   if (call.function?.name === 'write_file' || call.function?.name === 'edit_file') {
-    try {
-     const written = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-     if (written.path) window.Artifacts?.actions?.(card, { path: written.path, cwd });
-    } catch {}
+   // The checklist a todo call left behind: one box per call, right under it, kept exactly
+   // where it was — a reload must not move it to the newest position or replace it.
+   if (isTodo && Array.isArray(call.todo) && call.todo.length) {
+    const box = new TodoCard(call.todo);
+    box.el.classList.add('is-snapshot');
+    const holder = card.el.closest('.tool-group') || card.el;
+    let ref = holder;
+    while (ref.nextElementSibling?.classList?.contains('todo-card')) ref = ref.nextElementSibling;
+    ref.after(box.el);
    }
+   if (call.function?.name === 'write_file' || call.function?.name === 'edit_file') {
+    if (args.path) {
+     try { window.Artifacts?.actions?.(card, { path: args.path, cwd }); } catch {}
+    }
+   }
+  }
+  // Every line carries the total of its steps' clocks — the same figure the live line showed
+  // while it worked.
+  for (const line of el.querySelectorAll('.tool-group')) {
+   const total = (line.__items || []).reduce((sum, entry) => sum + (Number(entry.ms) || 0), 0);
+   if (total > 0) { line.__begun = performance.now() - total; line.__ended = performance.now(); }
   }
   // The summaries last, once every line has its steps.
   for (const item of el.querySelectorAll('.tool-group')) this.simpleLabel(item);
@@ -3015,7 +3100,11 @@ class Chat {
    el.append(box);
   }
   el.__entry = entry;
-  if (last) {
+  // A conversation still working elsewhere is NOT finished: the Copy / Quote / Mini chat row
+  // under a random message used to read as "the AI stopped" while it was in fact still
+  // working — the row waits until the run really ends.
+  const working = Boolean(conv?.turn) || Boolean(conv && window.Presence?.isBusy?.(conv.id));
+  if (last && !working) {
    el.append(this.toolbar('assistant', entry.duration || 0));
    // Files attached during the turn wait at its end (collected in restore).
    for (const path of conv?.filesByTurn?.get(entry.turn || entry) || []) {
@@ -3174,12 +3263,16 @@ class Chat {
    badge.textContent = origin === 'app' && device ? `${label} · ${device}` : label;
    el.append(badge);
   }
-  const images = attachments.filter(item => item.image && item.url), files = attachments.filter(item => !item.image);
-  if (images.length) el.append(new MediaSlider(images.map(({ url, width, height, name, note }) => ({ url, width, height, name, note }))).el);
+  // A file that only has a path (a Discord attachment, a browser upload) gets a URL the
+  // browser can open: the server streams it inline, the app reads it from disk. An image
+  // becomes a real preview the user can press to open full size.
+  const urlOf = item => item.url || (item.path ? FileUrl.of(item.path) : '');
+  const images = attachments.filter(item => item.image && urlOf(item)), files = attachments.filter(item => !item.image);
+  if (images.length) el.append(new MediaSlider(images.map(({ url, path, width, height, name, note }) => ({ url: url || FileUrl.of(path), width, height, name, note }))).el);
   if (files.length) {
    const box = document.createElement('div');
    box.className = 'message-files';
-   for (const item of files) box.append(this.fileCard(item));
+   for (const item of files) box.append(this.fileCard(item, origin));
    el.append(box);
   }
   const { quotes, rest } = splitQuotes(text);
@@ -3207,7 +3300,7 @@ class Chat {
   return el;
  }
 
- fileCard(item) {
+ fileCard(item, origin = '') {
   const card = document.createElement('div');
   card.className = 'file-card';
   card.title = item.name;
@@ -3219,7 +3312,9 @@ class Chat {
   name.textContent = item.name;
   const meta = document.createElement('div');
   meta.className = 'file-card-meta';
-  meta.textContent = `${item.info.name} · ${FileKinds.formatSize(item.size)}`;
+  // A file sent from Discord keeps its name and size only: the kind label ("Text · …") is
+  // noise there, the panel already tells the story.
+  meta.textContent = origin === 'discord' ? FileKinds.formatSize(item.size) : `${item.info.name} · ${FileKinds.formatSize(item.size)}`;
   text.append(name, meta);
   if (item.note) {
    const note = document.createElement('div');
@@ -3228,6 +3323,20 @@ class Chat {
    text.append(note);
   }
   card.append(text);
+  // A press opens the file: text through the preview card the cards already use, a picture
+  // in the lightbox. Files that cannot be read here say so instead of doing nothing.
+  if (item.path) {
+   card.classList.add('is-openable');
+   card.tabIndex = 0;
+   card.setAttribute('role', 'button');
+   const open = async () => {
+    const url = FileUrl.of(item.path);
+    if (item.image) { window.Lightbox?.open([{ url, name: item.name }], 0); return; }
+    try { await window.Artifacts?.preview?.({ path: item.path, name: item.name }); } catch {}
+   };
+   card.addEventListener('click', open);
+   card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
+  }
   return card;
  }
 

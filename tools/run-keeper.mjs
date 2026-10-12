@@ -36,6 +36,39 @@ const uid = () => {
  return out.slice(0, 14);
 };
 
+const num = value => Number(value) || 0;
+// The spend the chat already carried, plus the spend of this run: written on every save, so
+// a run must always add to the same base or the total would grow with every keystroke. This
+// one number is why the ~$ under the composer used to snap back to a single run's price.
+function mergeSpend(base, add) {
+ if (!add) return base || null;
+ return {
+  input: num(base?.input) + num(add.input),
+  cached: num(base?.cached) + num(add.cached),
+  written: num(base?.written) + num(add.written),
+  output: num(base?.output) + num(add.output),
+  reasoning: num(base?.reasoning) + num(add.reasoning),
+  context: Math.max(num(base?.context), num(add.context)),
+ };
+}
+
+// Whatever the model wrote about <discord_summary> / <send_discord_message> must never reach
+// the chat text, even when its closing tag never arrived (a cut-off reply). The summary's
+// words are still kept for the finish DM before the raw block is removed.
+function stripDiscordLeftovers(text, keep) {
+ let value = String(text ?? '');
+ const open = /<discord_summary>([\s\S]*?)(?:<\/discord_summary>|$)/i.exec(value);
+ if (open && keep && !keep.discordSummary) keep.discordSummary = String(open[1]).trim().slice(0, 16000);
+ value = value
+  .replace(/<discord_summary>[\s\S]*?<\/discord_summary>/gi, '')
+  .replace(/<send_discord_message>[\s\S]*?<\/send_discord_message>/gi, '')
+  .replace(/<discord_summary>[\s\S]*$/i, '')
+  .replace(/<send_discord_message>[\s\S]*$/i, '')
+  .replace(/\n{3,}/g, '\n\n')
+  .trim();
+ return value;
+}
+
 const withFolder = (file, folder) => (ABSOLUTE_PATH.test(String(file || '')) || !folder
  ? String(file || '')
  : `${String(folder).replace(/[\\/]+$/, '')}/${String(file).replace(/^[\\/]+/, '')}`);
@@ -196,10 +229,14 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
    next.version = next.version || 1;
    next.messages = run.entries;
    next.tokens = Math.round(run.tokens || 0);
-   // The usage the ~$ readout is priced from rode along with the page's saves only: a run
-   // the server kept left the chat's spend untouched, and the context panel then said "no
-   // price for this model" for a model it prices just fine.
-   if (run.spend) next.spend = run.spend;
+   // The chat's own spend stays and this run's usage is added to it: a run the server kept
+   // used to REPLACE the chat's spend with its own, which reset the ~$ price under the
+   // composer to a single message's cost every time.
+   const spend = mergeSpend(run.baseSpend, run.spend);
+   if (spend) next.spend = spend;
+   // Files the agent detached: kept outside the messages, so they stay hidden from the
+   // panel after a reload too.
+   if (run.detached?.length) next.detached = [...new Set([...(Array.isArray(run.baseDetached) ? run.baseDetached : []), ...run.detached])];
    if (run.todos.length) next.todos = run.todos;
    writeJson(chatFile(run.chatId), next);
    touchIndex(run);
@@ -558,6 +595,7 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
       publishSoon(run);
      } else if (data.type === 'reasoning') {
       reasoning += data.delta;
+      if (!run.thinkStart) run.thinkStart = Date.now();
       const part = partThinking(run);
       part.text = tail(part.text + data.delta, 2400);
       part.live = true;
@@ -565,6 +603,12 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
       publishSoon(run);
      } else if (data.type === 'done') {
       clearTimeout(watchdog);
+      // How long the thinking took, kept on the entry so the Thought row shows its clock
+      // again after a reload — a run nobody watched used to lose it.
+      if (run.thinkStart) {
+       run.entry.thinkingMs = (Number(run.entry.thinkingMs) || 0) + (Date.now() - run.thinkStart);
+       run.thinkStart = 0;
+      }
       resolve({
        content: data.result?.content ?? content,
        reasoning: data.result?.reasoning ?? reasoning,
@@ -575,6 +619,10 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
       });
      } else if (data.type === 'error') {
       clearTimeout(watchdog);
+      if (run.thinkStart) {
+       run.entry.thinkingMs = (Number(run.entry.thinkingMs) || 0) + (Date.now() - run.thinkStart);
+       run.thinkStart = 0;
+      }
       const error = Object.assign(new Error(data.aborted ? 'Aborted' : (data.message || 'the model stopped')), {
        name: data.aborted ? 'AbortError' : 'Error',
        aborted: Boolean(data.aborted),
@@ -802,14 +850,23 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
   run.toolName = name;
   const began = Date.now();
   let output;
-  try {
-   host.setSender({ send: () => {}, isDestroyed: () => false });
-   output = await keeperTool(run, id, name, args, run.folder);
-  } catch (error) {
-   output = `Error: ${error.message}`;
-  } finally {
-   run.toolId = '';
-   run.toolName = '';
+  // "Unattach": the agent takes a file back out of the conversation's file list. The file
+  // itself stays on disk; only the task panel forgets it (kept in the chat file, so a
+  // reload does not bring it back).
+  if (name === 'attach_file' && args?.detach === true) {
+   const path = String(args.path || '').trim();
+   if (path) (run.detached ||= []).push(path);
+   output = path ? `Detached ${path} — it is out of this conversation's file list now.` : 'Nothing to detach: pass the file path.';
+  } else {
+   try {
+    host.setSender({ send: () => {}, isDestroyed: () => false });
+    output = await keeperTool(run, id, name, args, run.folder);
+   } catch (error) {
+    output = `Error: ${error.message}`;
+   } finally {
+    run.toolId = '';
+    run.toolName = '';
+   }
   }
   const text = typeof output === 'string' ? output : String(output?.text ?? JSON.stringify(output ?? ''));
   card.state = /^Error/.test(text) ? 'error' : 'done';
@@ -819,6 +876,9 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
    run.files ||= [];
    for (const file of output.files) run.files.push({ ...file, cwd: run.folder });
   }
+  // The checklist as it stood right after this call: the page draws one todo box per call,
+  // in place, so the list does not move around as the work goes on.
+  if (name === 'todo' && Array.isArray(run.todos)) call.todo = run.todos.map(item => ({ text: String(item.text || ''), state: String(item.state || 'idle') }));
   call.ms = card.ms;
   scheduleSave(run, true);
   publishNow(run);
@@ -919,10 +979,20 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
     await compactIfNeeded(run);
     throwIfStopped(run);
     const step = await request(run);
-    const calls = step.toolCalls;
-    run.entry.steps.push(assistantStep(step));
-    if (String(step.content || '').length) run.entry.content = step.content;
-    if (step.reasoning) run.entry.thinking = step.reasoning;
+    // The model's text for this round goes through the same cleaning the stream did: a
+    // complete <discord_summary> block is kept for the finish DM and never written into the
+    // chat (assigning the raw text re-added it after the streaming path had removed it).
+    const stored = assistantStep(step);
+    run.entry.steps.push(stored);
+    // From here on the tool loop uses the STORED calls, so the duration of each step (ms)
+    // and the checklist of a todo call ride into the conversation file with the call itself.
+    const calls = stored.tool_calls || [];
+    if (String(step.content || '').length) {
+     run.entry.content = step.content;
+     flushDiscordBlocks(run);
+     flushDiscordSummary(run);
+    }
+    if (step.reasoning && !String(run.entry.thinking || '').trim()) run.entry.thinking = step.reasoning;
     const part = run.part?.text;
     if (part) part.text = run.entry.content;
     countUsage(run, step);
@@ -943,7 +1013,12 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
     if (parallel.length > 1) await Promise.all(parallel.map(runOne));
     for (let index = 0; index < calls.length; index++) if (outputs[index] === undefined) await runOne(index);
     for (let index = 0; index < calls.length; index++) {
-     run.entry.steps.push({ role: 'tool', tool_call_id: calls[index].id, content: outputs[index] ?? '' });
+     run.entry.steps.push({
+      role: 'tool',
+      tool_call_id: calls[index].id,
+      content: outputs[index] ?? '',
+      ...(Number.isFinite(calls[index].ms) ? { ms: calls[index].ms } : {}),
+     });
     }
     if (images.length) run.entry.steps.push(imageStep(images));
     await flushSave(run);
@@ -974,6 +1049,17 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
    run.entry = null;
   } else if (run.entry) {
    run.entry.duration = Math.max(1, Math.round((Date.now() - run.started) / 1000));
+  }
+  // A thought still ticking when the run ends (a stop, a crash) still gets its time.
+  if (run.entry && run.thinkStart) {
+   run.entry.thinkingMs = (Number(run.entry.thinkingMs) || 0) + (Date.now() - run.thinkStart);
+   run.thinkStart = 0;
+  }
+  // A block whose closing tag never arrived (a cut-off reply) must not reach the chat as raw
+  // text either: the words before the open tag stay, an unfinished summary is kept for the
+  // finish DM, and the raw tags are dropped here.
+  if (run.entry && typeof run.entry.content === 'string' && /<discord_summary|<send_discord_message/i.test(run.entry.content)) {
+   run.entry.content = stripDiscordLeftovers(run.entry.content, run);
   }
   if (error && run.entry) {
    run.entry.error = String(error.message || error).slice(0, 2000);
@@ -1033,10 +1119,13 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
    ended: false,
   };
   const promise = (async () => {
+   const fileBody = readJson(chatFile(run.chatId), null);
+   run.baseSpend = fileBody?.spend || null;
+   run.baseDetached = Array.isArray(fileBody?.detached) ? fileBody.detached : [];
    if (Array.isArray(request.seedEntries)) {
     run.entries = request.seedEntries;
    } else {
-    const body = readJson(chatFile(run.chatId), null);
+    const body = fileBody;
     run.entries = Array.isArray(body?.messages) ? body.messages : [];
     run.todos = Array.isArray(body?.todos) ? body.todos.map(item => ({ text: String(item?.text || ''), state: String(item?.state || 'idle') })) : [];
     if (run.todos.length === 0 && Array.isArray(body?.todos) === false) run.todos = [];

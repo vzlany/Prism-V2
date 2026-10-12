@@ -327,21 +327,35 @@ class Library {
  async conversation(id) {
   const data = await this.store.read(`chats/${id}`).catch(() => null);
   const body = data?.sealed ? await ChatLock.open(this.keys.get(id), data.sealed) : data;
-  return { messages: Array.isArray(body?.messages) ? body.messages : [], tokens: Number(body?.tokens) || 0, spend: body?.spend || null, todos: Array.isArray(body?.todos) ? body.todos : [] };
+  return {
+   messages: Array.isArray(body?.messages) ? body.messages : [],
+   tokens: Number(body?.tokens) || 0,
+   spend: body?.spend || null,
+   todos: Array.isArray(body?.todos) ? body.todos : [],
+   detached: Array.isArray(body?.detached) ? body.detached : [],
+  };
  }
 
  // A protected chat is sealed with the key it has when the save is asked for, so locking right after a reply loses nothing.
- // The todo list rides along; a call that does not pass one keeps whatever the file has.
- saveMessages(id, messages, tokens = 0, spend = null, todos = null) {
+ // The todo list and the files the agent detached ride along; a call that does not pass them keeps whatever the file has.
+ saveMessages(id, messages, tokens = 0, spend = null, todos = null, extras = null) {
   const chat = this.chat(id), key = chat?.lock ? this.keys.get(id) : null;
   if (!chat || (chat.lock && !key)) return Promise.resolve();
   return this.queue(id, async () => {
-   let kept = null;
-   if (todos === null && !key) {
+   let kept = null, keptDetached = null;
+   if ((todos === null || extras === null) && !key) {
     const previous = await this.store.read(`chats/${id}`).catch(() => null);
-    kept = Array.isArray(previous?.todos) ? previous.todos : null;
+    if (todos === null) kept = Array.isArray(previous?.todos) ? previous.todos : null;
+    if (extras === null) keptDetached = Array.isArray(previous?.detached) ? previous.detached : null;
    }
-   const body = { messages, tokens, ...(spend ? { spend } : {}), ...(todos ? { todos } : kept ? { todos: kept } : {}) };
+   const detached = Array.isArray(extras?.detached) && extras.detached.length ? extras.detached : keptDetached;
+   const body = {
+    messages,
+    tokens,
+    ...(spend ? { spend } : {}),
+    ...(todos ? { todos } : kept ? { todos: kept } : {}),
+    ...(detached?.length ? { detached } : {}),
+   };
    return this.store.write(`chats/${id}`, key ? { version: 1, sealed: await ChatLock.seal(key, body) } : { version: 1, ...body });
   });
  }

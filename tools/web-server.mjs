@@ -184,6 +184,30 @@ const server = createServer((req, res) => {
   createReadStream(file).on("error", () => res.destroy()).pipe(res);
   return;
  }
+ if (url.pathname === "/preview") {
+  // A file shown INSIDE a page — a photo someone attached in Discord, an image the panel
+  // opens: streamed inline with a type the browser can render, unlike /file, which downloads.
+  const asked = url.searchParams.get("path") || "";
+  const file = [asked, asked.includes("\\") ? asked.replace(/\\/g, "/") : ""].find(item => item && isAbsolute(item) && existsSync(item) && statSync(item).isFile()) || "";
+  if (!file) return send(404, "no such file", "text/plain");
+  const name = basename(file).replace(/[\r\n"]/g, "");
+  const INLINE = {
+   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", bmp: "image/bmp", svg: "image/svg+xml", ico: "image/x-icon",
+   mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", mkv: "video/x-matroska",
+   mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4", flac: "audio/flac",
+   pdf: "application/pdf", txt: "text/plain; charset=utf-8", md: "text/plain; charset=utf-8", log: "text/plain; charset=utf-8",
+   json: "application/json; charset=utf-8", csv: "text/csv; charset=utf-8",
+  };
+  const type = INLINE[extname(file).slice(1).toLowerCase()] || "application/octet-stream";
+  res.writeHead(200, {
+   "content-type": type,
+   "content-disposition": `inline; filename="${name}"`,
+   "content-length": statSync(file).size,
+   "cache-control": "no-store",
+  });
+  createReadStream(file).on("error", () => res.destroy()).pipe(res);
+  return;
+ }
  if (url.pathname === "/web-bridge.js") return send(200, readFileSync(join(ROOT, "tools", "web-bridge.js")), "text/javascript; charset=utf-8");
  if (url.pathname === "/" || url.pathname === "/index.html") return send(200, page(), "text/html; charset=utf-8");
  const safe = normalize(url.pathname).replace(/^(\.\.[/\\])+/, "");

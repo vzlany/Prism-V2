@@ -423,18 +423,20 @@ class ChatList {
   return item.row;
  }
 
- // Newest first by default; once a folder has been sorted by hand, its order stands.
+ // Newest first by default — a conversation that was written into moves back to the top,
+ // even when it was made days ago ("newest" means last activity, not creation); once a folder
+ // has been sorted by hand, its order stands.
  sorterFor(path) {
   const list = this.library.chats.filter(chat => key(chat.folder) === key(path) && !chat.incognito);
   const manual = list.some(chat => Number.isFinite(chat.order));
-  if (!manual) return (a, b) => (b.created || b.updated || 0) - (a.created || a.updated || 0);
+  if (!manual) return (a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0);
   // A folder sorted by hand keeps that order — but a chat made after the last drag has no
   // place in it yet and belongs on top, newest first, not buried under the dragged ones.
   return (a, b) => {
    const ao = Number.isFinite(a.order), bo = Number.isFinite(b.order);
    if (ao !== bo) return ao ? 1 : -1;
    if (ao) return a.order - b.order;
-   return (b.created || 0) - (a.created || 0);
+   return (b.updated || b.created || 0) - (a.updated || a.created || 0);
   };
  }
 
@@ -525,8 +527,8 @@ class ChatList {
   // A locked chat's title is sealed, so a search never finds it.
   const match = chat => !query || (this.library.titleOf(chat) || '').toLowerCase().includes(query);
   const live = lib.chats.filter(chat => (!chat.subagent || chat.parent) && !chat.incognito && match(chat));
-  const byCreated = (a, b) => (b.created || b.updated || 0) - (a.created || a.updated || 0);
-  const pinned = this.withChildren(live.filter(chat => chat.pinned).sort(byCreated));
+  const byActivity = (a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0);
+  const pinned = this.withChildren(live.filter(chat => chat.pinned).sort(byActivity));
   const manualFolders = lib.folders.some(folder => Number.isFinite(folder.order));
   const folders = lib.folders
    .map(folder => ({ folder, chats: this.withChildren(live.filter(chat => !chat.pinned && key(chat.folder) === key(folder.path)).sort(this.sorterFor(folder.path))) }))

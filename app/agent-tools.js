@@ -103,8 +103,9 @@ const SCHEMAS = [
   new_string: { type: 'string', description: 'The text to put instead' },
   replace_all: { type: 'boolean', description: 'Replace every occurrence instead of exactly one' },
  }, ['path', 'old_string', 'new_string']),
- fn('attach_file', 'Attach a finished file to the chat so the user can download it: a build, an installer, an export, an archive — any file, text or binary. Call it whenever you produced something the user should keep (for example the new version of a program you just built), then mention the attachment in your reply.', {
-  path: { type: 'string', description: 'The file to attach' },
+ fn('attach_file', 'Attach a finished file to the chat so the user can download it: a build, an installer, an export, an archive — any file, text or binary. Call it whenever you produced something the user should keep (for example the new version of a program you just built), then mention the attachment in your reply. Attached files stay in the conversation\'s "All files in task" panel for good; set detach: true with a path to take one back out of that panel when a file should no longer belong to the task (the file itself is never deleted).', {
+  path: { type: 'string', description: 'The file to attach (or, with detach, the file to take out of the task list)' },
+  detach: { type: 'boolean', description: 'true: take this path out of the conversation\'s file panel instead of attaching a file' },
  }, ['path']),
  fn('video_frames', 'Look inside a video: takes still frames from it and shows them to you as pictures, with the duration, the resolution and whether there is sound. Frames are spread evenly over the whole video or over start to end, or taken at exact times. The built-in decoder reads mp4, mov, webm and mkv with H.264, VP8, VP9 or AV1. Start with a few frames over the whole video, then look closer at the moments that matter. To split a video into image files, pass save_to.', {
   path: { type: 'string', description: 'Video file, relative to the project folder or absolute' },
@@ -128,7 +129,7 @@ const SCHEMAS = [
   model: { type: 'string', description: 'Optional: the model the subagent answers with, as provider:id from the catalog. Pick a fast, cheap model (for example GLM-5.3-Flash) for mechanical non-coding work — scanning files, checking mods for malware footprints, bulk extraction — and leave it out for coding, where the chat\'s own model is right.' },
   effort: { type: 'string', description: 'Optional thinking effort for the subagent, one of the model\'s own levels (e.g. none, low, medium, high).' },
  }, ['description', 'prompt']),
- fn('todo', 'Keep the to-do list of a non-trivial task on screen so you (and the user) never lose the thread. Create it once with the steps in order when the work has more than a couple of moves; mark the step you are on with doing, the ones that finished with done and the ones that failed with failed; add or reword steps with edit as you learn more, and view reads it back. The box stays with the conversation and moves to the newest position every time you change it. Small jobs do not need it.', {
+ fn('todo', 'Keep the to-do list of a non-trivial task on screen so you (and the user) never lose the thread. Create it once with the steps in order when the work has more than a couple of moves; mark the step you are on with doing, the ones that finished with done and the ones that failed with failed; add or reword steps with edit as you learn more, and view reads it back. Every call draws its own checklist box right under the tool line that made it — the boxes stay where they were and a new call makes a new box, so never repeat an unchanged list. FINISH the list before you write your final summary: mark every finished step done and every abandoned step failed, so nothing is left as doing when the answer is written. Small jobs do not need it.', {
   action: { type: 'string', enum: ['create', 'view', 'edit', 'done'], description: 'create: set the whole list; edit: add, reword or drop steps; done: mark steps doing/done/failed; view: read it back' },
   items: { type: 'array', items: { type: 'string' }, description: 'create: the steps in order; edit: steps to add' },
   update: { type: 'array', items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] }, description: 'edit: reword a step' },
@@ -429,6 +430,12 @@ function describeTool(name, args, cwd) {
    return { kind: 'command', title: I18n.t('subagent.parallel'), code: String(args.description || ''), ...(what ? { text: what } : {}) };
   }
   case 'agents': return { kind: 'command', title: I18n.t('agents.title'), text: agentActionLabel(args.action, args.id, false), reason: agentActionLabel(args.action, args.id, false) };
+  case 'todo': {
+   const action = String(args.action || 'view');
+   const steps = Array.isArray(args.items) ? args.items.length : 0;
+   const text = action === 'create' && steps ? `${steps} step${steps === 1 ? '' : 's'}` : '';
+   return { kind: 'command', title: I18n.t('todo.title'), ...(text ? { text } : {}) };
+  }
   case 'ask_user': return { kind: 'command', title: I18n.t('ask.title'), code: String(args.question || '') };
   case 'screenshot': return { kind: 'command', title: I18n.t(args.window ? 'approve.screenshotWindow' : 'approve.screenshot'), code: String(args.window ? args.window : '') };
   case 'clipboard': return { kind: 'command', title: I18n.t(String(args.action || '').toLowerCase() === 'write' ? 'approve.clipboardWrite' : 'approve.clipboardRead'), code: String(args.text || '').slice(0, 200) };
@@ -452,7 +459,10 @@ function describeTool(name, args, cwd) {
   default: {
    const mcp = mcpTools.find(tool => tool.name === name);
    if (mcp) return { kind: 'command', title: `MCP · ${mcp.server}`, code: `${mcp.tool}(${JSON.stringify(args, null, 1)})` };
-   return { kind: 'command', title: name, code: JSON.stringify(args) };
+   // A tool without a describe entry still reads like a name, not like a call: "update_ref"
+   // becomes "Update ref".
+   const titled = String(name || 'tool').replace(/[_-]+/g, ' ').trim().replace(/^\w/, char => char.toUpperCase());
+   return { kind: 'command', title: titled, code: JSON.stringify(args) };
   }
  }
 }

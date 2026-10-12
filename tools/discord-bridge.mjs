@@ -296,6 +296,9 @@ function appendUserMessage(record, text, attachments = []) {
    name: String(file.name || "file").slice(0, 120),
    size: Number(file.size) || 0,
    image: /^image\//.test(String(file.type || "")),
+   // The saved path rides along: the app and the website show the photo itself (the panel
+   // opens it full size), not only the name.
+   ...(file.path ? { path: String(file.path) } : {}),
   }));
   messages.push({
    role: "user",
@@ -675,7 +678,7 @@ async function turn(prompt, display = {}) {
    if (state.stopped) return "⏹ stopped";
    let callArgs = {};
    try { callArgs = JSON.parse(call.function.arguments || "{}"); } catch {}
-   status(`🔧 ${call.function.name}`);
+   status(`🔧 ${toolTitle(call.function.name, true)}`);
    const item = { name: call.function.name, args: callArgs };
    const messageId = await display.running?.(item);
    const mirrorPart = display.mirrorTool?.(item);

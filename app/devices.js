@@ -16,9 +16,10 @@ const deviceMeta = device => [
 
 function rowHtml(device, { self = false, failed = '', chip = '', localPc = false, noChip = false } = {}) {
  const name = escapeHtml(device.name || device.id || 'device');
- const chips = noChip ? '' : [
-  chip ? `<span class="device-chip">${escapeHtml(chip)}</span>` : self ? `<span class="device-chip">${escapeHtml(I18n.t('devices.thisPc'))}</span>` : '',
+ const chips = [
+  chip ? `<span class="device-chip">${escapeHtml(chip)}</span>` : !noChip && self ? `<span class="device-chip">${escapeHtml(I18n.t('devices.thisPc'))}</span>` : '',
   device.server && !self ? `<span class="device-chip is-server">${escapeHtml(I18n.t('devices.server'))}</span>` : '',
+  device.server && self && noChip ? `<span class="device-chip is-server">${escapeHtml(I18n.t('devices.server'))}</span>` : '',
  ].join('');
  const meta = deviceMeta(device);
  const offline = !self && !localPc && !device.url ? `<span class="device-offline">${escapeHtml(I18n.t('devices.noWeb'))}</span>` : '';
