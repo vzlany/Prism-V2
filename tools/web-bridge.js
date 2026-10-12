@@ -148,6 +148,13 @@ window.openghost = {
   onEvent: callback => on('llm:event', callback),
   models: (provider, key) => invoke('llm:models', provider, key),
  },
+ // A turn that runs on the server itself, not in this tab: it survives a refresh, a switch
+ // to another conversation or a closed page, and publishes live presence like any other run.
+ run: {
+  start: request => invoke('run:start', request),
+  stop: chatId => invoke('run:stop', chatId),
+  state: chatId => invoke('run:state', chatId),
+ },
  auth: {
   login: async () => ({ connected: false, error: 'sign-in works only in the desktop app' }),
   cancel: async () => ({ connected: false }),

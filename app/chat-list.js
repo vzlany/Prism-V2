@@ -149,8 +149,18 @@ class ChatList {
   this.list.addEventListener('dragend', () => this.clearDrop());
   this.list.addEventListener('dragleave', event => { if (!this.list.contains(event.relatedTarget)) this.clearDrop(); });
   this.list.addEventListener('keydown', event => this.onKey(event));
-  this.list.addEventListener('pointerover', event => this.hover(event.target.closest('.chat-row, .chats-folder-head')));
-  this.list.addEventListener('pointerleave', () => this.hover(null));
+  // The hover highlight and the glide belong to a mouse. A finger fires pointerover and a
+  // pointerleave around every single tap, and that leave used to run hover(null) — which
+  // cancelled a pending delete confirmation between the two taps, so "delete" on a phone
+  // could never go through.
+  this.list.addEventListener('pointerover', event => {
+   if (event.pointerType === 'touch') return;
+   this.hover(event.target.closest('.chat-row, .chats-folder-head'));
+  });
+  this.list.addEventListener('pointerleave', event => {
+   if (event.pointerType === 'touch') return;
+   this.hover(null);
+  });
   setInterval(() => this.clock(), CLOCK);
   this.render();
  }
@@ -806,9 +816,11 @@ class ChatList {
   const next = target && !target.closest('[inert]') ? target : null;
   if (next === this.hovered) return;
   const left = this.hovered && this.rows.get(this.hovered.dataset.id);
-  if (left?.confirm) this.keep(left);
+  // Moving the pointer onto another chat drops the armed delete; leaving to empty space keeps
+  // it — the confirmation is disarmed by its own timer or by picking another row.
+  if (next && left?.confirm) this.keep(left);
   const folder = this.hovered?.classList.contains('chats-folder-head') && this.hovered.parentElement.__group;
-  if (folder?.confirm) this.keepFolder(folder);
+  if (next && folder?.confirm) this.keepFolder(folder);
   this.hovered = next;
   this.wake();
  }

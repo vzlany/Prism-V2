@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { WebSocketServer } from "ws";
 import { createEngineHost } from "./engine-host.mjs";
+import { createKeeper } from "./run-keeper.mjs";
 
 // The addresses a phone on the same network would use: non-internal IPv4, LAN ranges first.
 function lanAddresses() {
@@ -55,8 +56,8 @@ const UpdateCore = requireModule(join(ROOT, "desktop", "update-core.js"));
 const VERSION = UpdateCore.currentVersion(ROOT);
 const instance = Instances.attach({ userData: USER_DATA, role: "web", port: PORT, version: VERSION, root: ROOT });
 // Leave the registry on the way out (the exit codes keep the supervisor's restart logic).
-process.on("SIGTERM", () => { try { instance.stop(); } catch {} process.exit(143); });
-process.on("SIGINT", () => { try { instance.stop(); } catch {} process.exit(130); });
+process.on("SIGTERM", () => { try { keeper.stopAll(); } catch {} try { instance.stop(); } catch {} process.exit(143); });
+process.on("SIGINT", () => { try { keeper.stopAll(); } catch {} try { instance.stop(); } catch {} process.exit(130); });
 
 // --------------------------------------------------------------- http + websocket
 const MIME = {
@@ -216,6 +217,23 @@ for (const level of ["log", "warn", "error"]) {
 // app cannot talk to this server directly, so it mirrors its runs into presence.json and
 // they are merged in here.
 const presence = new Map();
+// Turns started from a page run right here, in this engine, and survive the page (a refresh,
+// a switch, a closed tab). They publish their state into the same presence list, so a page
+// sees them exactly like a run from another device: ghost in the list, live card, stop.
+const keeper = createKeeper({
+ userData: USER_DATA,
+ root: ROOT,
+ host,
+ log: line => console.log(`[keeper] ${line}`),
+ publish: (chatId, info) => {
+  if (info) presence.set(chatId, info);
+  else presence.delete(chatId);
+  broadcastPresence();
+ },
+});
+host.handlers.set("run:start", (event, request) => keeper.start(request));
+host.handlers.set("run:stop", (event, chatId) => keeper.stop(chatId));
+host.handlers.set("run:state", (event, chatId) => keeper.state(chatId));
 let desktopPresence = [];
 const PRESENCE_STALE = 20000;
 function readDesktopPresence() {
@@ -385,8 +403,17 @@ function writeClients() {
 const updateStateFile = join(USER_DATA, "update-state.json");
 let lastUpdateState = "";
 const readUpdateStateFile = () => { try { return JSON.parse(readFileSync(updateStateFile, "utf8")); } catch { return null; } };
-function broadcastUpdateState(force = false) {
+// "Done" is a one-shot notice, not a standing state: a page opening an hour later must not be
+// told the server "just updated" (that made every reload show the same banner). It is handed
+// out only while the update really is fresh.
+const DONE_FRESH = 2 * 60 * 1000;
+const freshUpdateState = () => {
  const state = readUpdateStateFile();
+ if (state?.phase === "done" && Date.now() - (Number(state.at) || 0) > DONE_FRESH) return null;
+ return state;
+};
+function broadcastUpdateState(force = false) {
+ const state = freshUpdateState();
  const key = JSON.stringify(state || null);
  if (!force && key === lastUpdateState) return;
  lastUpdateState = key;
@@ -431,7 +458,7 @@ wss.on("connection", (ws, req) => {
  }
  data.send("presence:event", presenceList());
  data.send("app:status", [appStatus()]);
- data.send("update:state", readUpdateStateFile());
+ data.send("update:state", freshUpdateState());
  ws.on("close", () => {
   for (const id of mine) presence.delete(id);
   if (mine.size) broadcastPresence();

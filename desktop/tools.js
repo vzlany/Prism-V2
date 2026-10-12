@@ -522,10 +522,23 @@ function notifyTool(id, { title = 'Prism V2', text }) {
  return { text: 'Notification shown.' };
 }
 
-async function waitTool(id, { seconds }) {
- const value = Math.min(60, Math.max(0.5, Number(seconds) || 1));
- await new Promise(resolve => setTimeout(resolve, value * 1000));
- return { text: `Waited ${value} seconds.` };
+// A pause between checks (a build, a download, a server starting). Seconds and minutes add
+// up, thirty minutes at most. It is a job like any other: Stop cuts the wait short at once,
+// and the model learns it was the user who stopped it, not an error.
+async function waitTool(id, { seconds, minutes }) {
+ const asked = Math.max(0, Number(seconds) || 0) + Math.max(0, Number(minutes) || 0) * 60;
+ const value = Math.min(1800, Math.max(0.5, asked));
+ const label = value >= 60
+  ? `${(value / 60) % 1 ? (value / 60).toFixed(1) : value / 60} ${value < 120 ? 'minute' : 'minutes'}`
+  : `${value} seconds`;
+ let stop = null;
+ const outcome = await new Promise(resolve => {
+  const timer = setTimeout(() => resolve({ text: `Waited ${label}. Check again now.` }), value * 1000);
+  stop = () => { clearTimeout(timer); resolve({ text: 'The user stopped this wait. Do not wait again for the same thing: say what you were waiting for and go on with whatever the result allows.', stopped: true }); };
+  if (id) jobs.set(id, stop);
+ });
+ if (id) jobs.delete(id);
+ return outcome;
 }
 
 const TOOLS = {

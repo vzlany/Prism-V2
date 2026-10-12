@@ -248,9 +248,10 @@ const SCHEMAS = [
   text: { type: 'string', description: 'The message; short and plain, Discord markdown works, tables do not' },
   files: { type: 'array', items: { type: 'string' }, description: 'Optional file paths to attach (pictures or documents)' },
  }, ['text']),
- fn('wait', 'Wait a number of seconds, 60 at most, before checking something again: a build, a download, a server that is starting.', {
+ fn('wait', 'Wait a number of seconds or minutes before checking something again: a build, a download, a server that is starting. Seconds and minutes add up, thirty minutes at most. The user can stop the wait from the chat; when that happens the result says so — do not wait again for the same thing, say what you were waiting for and go on with whatever the result allows.', {
   seconds: { type: 'integer', description: 'Seconds to wait' },
- }, ['seconds']),
+  minutes: { type: 'number', description: 'Minutes to wait, added to seconds — use it for longer waits' },
+ }, []),
 ];
 
 const BROWSER_FREE = new Set(['browser_snapshot', 'browser_screenshot', 'browser_read', 'browser_wait', 'browser_scroll']);
@@ -412,6 +413,11 @@ function describeTool(name, args, cwd) {
   case 'clipboard': return { kind: 'command', title: I18n.t(String(args.action || '').toLowerCase() === 'write' ? 'approve.clipboardWrite' : 'approve.clipboardRead'), code: String(args.text || '').slice(0, 200) };
   case 'http_request': return { kind: 'web', title: I18n.t('approve.http'), url: `${String(args.method || 'GET').toUpperCase()} ${String(args.url || '')}` };
   case 'open_path': return { kind: 'file', title: I18n.t('approve.open'), path };
+  case 'wait': {
+   const total = Math.min(1800, Math.max(0, Number(args.seconds) || 0) + Math.max(0, Number(args.minutes) || 0) * 60);
+   const text = total >= 60 ? `${Number((total / 60).toFixed(1))} min` : `${Math.round(total)} s`;
+   return { kind: 'command', title: I18n.t('approve.wait'), text };
+  }
   case 'memory_save': return { kind: 'command', title: I18n.t('memory.save'), code: String(args.text || '') };
   case 'memory_forget': return { kind: 'command', title: I18n.t('memory.forget'), code: String(args.id || args.text || '') };
   case 'web_search': return { kind: 'web', title: I18n.t('approve.search'), text: String(args.query || '') };

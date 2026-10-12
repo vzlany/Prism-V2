@@ -350,9 +350,24 @@ class Chat {
   this.tools = 0;
   this.follow = true;
   this.lastTop = 0;
+  // The scroll height at the moment following last settled. A gap that is fully explained by
+  // content growth since then is the spring lagging behind, not the reader leaving.
+  this.grewHeight = 0;
+  // When the thread last grew (the observer sees it before the spring runs): a gap right
+  // after a growth is not the reader leaving either.
+  this.grewAt = 0;
+  this.listHeights = new WeakMap();
+  // A turn this page handed to the app or the server engine stops being "waiting" the moment
+  // presence shows it working somewhere — from then on the run speaks for itself.
+  window.Presence?.on?.(() => {
+   for (const conv of this.conversations.values()) {
+    if (conv.waiting && window.Presence?.isBusy?.(conv.id)) { clearTimeout(conv.waitingTimer); conv.waiting = 0; }
+   }
+  });
   // When the user last scrolled by hand (wheel, finger, keyboard, scrollbar): only then may
   // following switch off. Content-driven scroll events must not count as leaving the bottom.
   this.scrollIntent = 0;
+  this.intentUp = false;
   this.scrollFrame = 0;
   this.followFrame = 0;
   this.followLast = 0;
@@ -368,7 +383,14 @@ class Chat {
   // The spinner that covers the thread while a conversation is read from disk.
   this.loadingEl = main.querySelector('.thread-loading');
   this.loadingTimer = 0;
-  this.resize = new ResizeObserver(() => {
+  this.resize = new ResizeObserver(entries => {
+   // Whatever grew (a thought box unfolding, text arriving, a card appearing): note it. A
+   // gap opening right now is the spring lagging, not the reader leaving the bottom.
+   for (const entry of entries) {
+    const height = entry.target.scrollHeight || entry.contentRect?.height || 0;
+    if (height > (this.listHeights.get(entry.target) || 0) + 0.5) this.grewAt = performance.now();
+    this.listHeights.set(entry.target, height);
+   }
    if (this.follow) {
     if (this.busy || performance.now() >= this.pinUntil) this.followBottom();
     else this.pin();
@@ -401,6 +423,8 @@ class Chat {
     : event.type === 'touchmove' ? (this.touchY != null && event.clientY > this.touchY)
     : event.type === 'keydown' ? ['ArrowUp', 'PageUp', 'Home'].includes(event.key)
     : false;
+   // The direction of the last real gesture: onScroll only unfollows on an upward one.
+   this.intentUp = up;
    if (event.type === 'touchmove') this.touchY = event.clientY;
    if (up) this.leaveBottom();
   };
@@ -1058,6 +1082,7 @@ class Chat {
  pin() {
   this.thread.scrollTop = this.thread.scrollHeight;
   this.lastTop = this.thread.scrollTop;
+  this.grewHeight = this.thread.scrollHeight;
  }
 
  stopFollow() {
@@ -1103,6 +1128,10 @@ class Chat {
    // The desktop app is running: the turn goes there, with its tools and keys, and this page
    // watches it like any other run happening elsewhere (live card, then the saved answer).
    this.delegate(conv, prompt);
+  } else if (this.serverRuns) {
+   // No desktop app in reach: the turn runs in the engine serving this page (the keeper), so
+   // a refresh, a switch to another conversation or a closed tab cannot stop the work.
+   this.runOnServer(conv, prompt, config);
   } else {
    const bubble = this.userMessage(prompt);
    conv.list.append(bubble);
@@ -1112,6 +1141,95 @@ class Chat {
   // Sending is an explicit move: show the message that was just sent, even from further up.
   this.scrollToBottom();
   return true;
+ }
+
+ // Whether turns from this page can run in the server engine itself: every page a build with
+ // the keeper serves has the channel; the app's own window and older engines do not.
+ get serverRuns() {
+  return Boolean(window.openghost?.run?.start);
+ }
+
+ // The config safely shipped to the server engine: plain data only (the same fields a model
+ // call needs), plus the context window for compaction decisions.
+ serverConfig(config) {
+  const windowOf = () => { try { return Number(this.settings.windowOf(config?.model)) || 128000; } catch { return 128000; } };
+  return {
+   provider: config?.provider, key: config?.key, model: config?.model,
+   effort: config?.effort, vision: config?.vision, thinking: config?.thinking, output: config?.output,
+   efforts: config?.efforts, context: windowOf(),
+  };
+ }
+
+ // Hand a prompt to the server engine: the user's message reaches the shared store first (so
+ // the keeper opens the chat with it already there), then the turn starts there. This page
+ // watches it like a run on another device — live card, ghost in the list, the stop button —
+ // and the conversation is saved as it goes, so a refresh loses nothing.
+ async runOnServer(conv, prompt, config) {
+  const bubble = this.userMessage(prompt);
+  conv.list.append(bubble);
+  this.main.classList.remove('is-empty');
+  const entry = { role: 'user', text: prompt.text, attachments: prompt.attachments.map(slim), content: prompt.text, origin: prompt.origin || PLATFORM, ...(prompt.device || FROM_DEVICE ? { device: prompt.device || FROM_DEVICE } : {}) };
+  conv.messages.push(entry);
+  this.nodes.set(entry, bubble);
+  conv.waiting = Date.now();
+  this.onChange();
+  try {
+   entry.content = await userContent(prompt);
+   // Saved before the run starts: the keeper reads the conversation from this very file.
+   await this.library.saveMessages(conv.id, conv.messages, conv.tokens, conv.spend || null, conv.todos?.length ? conv.todos : null);
+   this.library.update(conv.id, { updated: Date.now() });
+   const reply = await window.openghost.run.start({
+    id: `k-${Date.now().toString(36)}`,
+    chatId: conv.id,
+    folder: conv.record?.folder || conv.folder,
+    mode: this.settings.mode,
+    title: conv.record?.title || '',
+    prompt: prompt.text,
+    origin: prompt.origin || PLATFORM,
+    config: this.serverConfig(config),
+    system: await this.system(conv),
+    tools: this.agent(conv) ? AgentTools.schemas : null,
+   });
+   if (!reply?.ok) throw new Error(reply?.error || 'the server refused the run');
+   conv.keeperId = reply.id || '';
+  } catch (error) {
+   // The server would not take it (a locked chat, a missing store record): the turn runs
+   // here instead, so the reply still comes.
+   conv.waiting = 0;
+   const note = document.createElement('div');
+   note.className = 'message-note';
+   note.textContent = I18n.t('chat.serverFallback');
+   conv.list.append(note);
+   this.resume(conv, config);
+   if (conv === this.active) this.followBottom();
+  }
+ }
+
+ // Resume an existing conversation in the server engine (a retry, a delayed pickup on this
+ // page): no new user message is written, the stored history is what the model sees.
+ async resumeOnServer(conv, config) {
+  conv.waiting = Date.now();
+  this.onChange();
+  try {
+   const reply = await window.openghost.run.start({
+    id: `k-${Date.now().toString(36)}`,
+    chatId: conv.id,
+    folder: conv.record?.folder || conv.folder,
+    mode: this.settings.mode,
+    title: conv.record?.title || '',
+    config: this.serverConfig(config),
+    system: await this.system(conv),
+    tools: this.agent(conv) ? AgentTools.schemas : null,
+   });
+   if (!reply?.ok) throw new Error(reply?.error || 'the server refused the run');
+   conv.keeperId = reply.id || '';
+   return true;
+  } catch (error) {
+   conv.waiting = 0;
+   // The server would not take it after all: drive the loop on this page.
+   this.resumeLocally(conv, config);
+   return false;
+  }
  }
 
  // Hand a prompt to the desktop app: the user's message is written to the shared store (so
@@ -1144,7 +1262,7 @@ class Chat {
    if (refused) {
     const note = document.createElement('div');
     note.className = 'message-note';
-    note.textContent = I18n.t('chat.delegateFallback');
+    note.textContent = I18n.t(this.serverRuns ? 'chat.serverFallback' : 'chat.delegateFallback');
     conv.list.append(note);
    }
    this.resume(conv, config);
@@ -1169,7 +1287,9 @@ class Chat {
    const state = await window.openghost?.delegate?.check?.(requestId).catch(() => null);
    if (state && state.exists === false) return;
    runHere(true);
-  }, 25000);
+  // A quiet wait used to last 25 s before this page took over: the hand-off now falls to the
+  // server engine (which keeps the run alive through anything) after a much shorter beat.
+  }, 12000);
   this.onChange();
   userContent(prompt).then(content => {
    entry.content = content;
@@ -1195,6 +1315,8 @@ class Chat {
  async refresh(id) {
   const conv = this.conversations.get(id);
   if (!conv?.record || conv.turn || conv.locked) return;
+  // A hand-off that visibly ended (or never started) is over: the stop button may return.
+  if (conv.waiting && !window.Presence?.isBusy?.(id)) { clearTimeout(conv.waitingTimer); conv.waiting = 0; }
   conv.list.replaceChildren();
   await this.load(conv);
   if (conv === this.active) {
@@ -1218,9 +1340,22 @@ class Chat {
   const conv = this.active;
   if (!conv) return;
   if (conv.turn) { this.abort(conv); return; }
+  // A run the server engine keeps (the keeper): the stop goes straight to it.
+  const info = window.Presence?.info?.(conv.id);
+  if (info?.keeper) {
+   try { window.openghost?.run?.stop?.(conv.id)?.catch?.(() => {}); } catch {}
+   clearTimeout(conv.waitingTimer);
+   conv.waiting = 0;
+   this.onChange();
+   return;
+  }
   if (!window.Presence?.isBusy?.(conv.id) && !conv.waiting) return;
   clearTimeout(conv.waitingTimer);
   conv.waiting = 0;
+  // A request this page just handed out may live in either place: the keeper channel is told
+  // (a no-op when nothing runs there), and the app gets the abort it knows (a no-op too when
+  // the run never reached it).
+  try { window.openghost?.run?.stop?.(conv.id)?.catch?.(() => {}); } catch {}
   window.openghost?.delegate?.send?.({ id: `s-${Date.now().toString(36)}`, type: 'abort', chatId: conv.id, at: Date.now() });
   this.onChange();
  }
@@ -1228,6 +1363,10 @@ class Chat {
  abort(conv) {
   const turn = conv.turn;
   if (!turn) return;
+  // A stop pressed while the agent sits in a `wait` is the user cutting a pause short: the
+  // turn still ends here, but the end-of-turn toast and Discord DM ("done" or "failed") are
+  // silenced — the user just said stop, nothing finished and nothing broke.
+  if (turn.toolName === 'wait') turn.stoppedWait = true;
   turn.controller.abort();
   turn.release?.('abort');
   if (turn.tool) AgentTools.cancel(turn.tool);
@@ -1281,8 +1420,10 @@ class Chat {
   const top = this.thread.scrollTop, distance = this.thread.scrollHeight - top - this.thread.clientHeight;
   // Any real upward scroll leaves the bottom, however small; coming back near the bottom
   // starts following again. Content-driven scroll events (cards folding, older messages
-  // loading) carry no scroll intent, so they never count as the reader scrolling away.
-  if (top < this.lastTop - 1 && performance.now() - this.scrollIntent < 900) this.follow = false;
+  // loading) carry no scroll intent, so they never count as the reader scrolling away — and
+  // a gesture that was itself downward (a wheel nudge at the bottom) must not either, or a
+  // thought box folding above the viewport would read as the reader leaving.
+  if (top < this.lastTop - 1 && this.intentUp === true && performance.now() - this.scrollIntent < 900) this.follow = false;
   else if (distance <= FOLLOW_DISTANCE) this.follow = true;
   this.lastTop = top;
   this.syncBottom();
@@ -1336,11 +1477,17 @@ class Chat {
 
  followBottom() {
   if (!this.follow || this.jumpFrame) return;
-  // Never yank a reader who is not at the bottom. If the viewport drifted away — a momentum
-  // scroll the intent events missed, a drag of the scrollbar, an overscroll bounce — the
-  // follow ends here instead of dragging the page down while new thoughts arrive.
+  // Content that just grew — a thought box unfolding, a tool card appearing, a batch of text
+  // arriving — opens a gap the spring has not closed yet. That is not the reader leaving the
+  // bottom, and treating it as one was why the "scroll down" hint flashed on while the page
+  // sat at the bottom. Only a gap that is NOT explained by growth (or a scroll position
+  // pulled away from our own writes) really ends the follow.
   const distance = this.thread.scrollHeight - this.thread.scrollTop - this.thread.clientHeight;
-  if (distance > FOLLOW_DISTANCE) { this.leaveBottom(); return; }
+  if (distance > FOLLOW_DISTANCE) {
+   const grew = this.thread.scrollHeight > this.grewHeight + 0.5 || performance.now() - this.grewAt < 600;
+   const pulledUp = this.thread.scrollTop < this.followPos - 8;
+   if (!grew || pulledUp) { this.leaveBottom(); return; }
+  }
   // A frame that was scheduled but never ran (the window went hidden before it fired) is
   // stale: it is replaced instead of blocking the follow forever.
   if (this.followFrame && performance.now() - this.followAt < 250) return;
@@ -1361,6 +1508,9 @@ class Chat {
  followStep(now) {
   this.followFrame = 0;
   const thread = this.thread, max = thread.scrollHeight - thread.clientHeight;
+  // The spring itself is the settling point: from here on, the current height is the basis
+  // the next gap is measured against.
+  this.grewHeight = thread.scrollHeight;
   if (!this.follow || reducedMotion()) {
    if (this.follow) thread.scrollTop = max;
    this.followMoving = false;
@@ -1777,6 +1927,18 @@ class Chat {
  }
 
  resume(conv, config) {
+  // On a page the run goes to the server engine, so a resumed turn survives a refresh the
+  // same way a sent one does. Sub-agent conversations keep their own on-page runs.
+  if (this.serverRuns && !conv.subagent && !conv.record?.parent) {
+   this.resumeOnServer(conv, config);
+   return null;
+  }
+  return this.resumeLocally(conv, config);
+ }
+
+ // The old path: the whole loop runs on this page (the app's own window, or an engine that
+ // predates the keeper).
+ resumeLocally(conv, config) {
   const turn = this.begin(conv, config);
   window.Presence?.publish(conv.id, { state: 'running', title: String(conv.record?.title || '').slice(0, 80), model: this.modelOf(conv), started: Date.now() });
   this.publishLive(conv, turn);
@@ -2162,6 +2324,9 @@ class Chat {
   if (conv === this.active) this.followBottom();
   this.publishLive(conv, turn);
   const id = turn.tool = `${conv.id}-${++this.tools}`;
+  // The name is kept beside the id: a stop pressed while this call runs can then tell a
+  // quiet wait from real work (see abort()).
+  turn.toolName = name;
   // Which conversation started this tool call: the subagent tool reads this back, so a run
   // in the background parents its own subagents instead of the chat on screen.
   (this.toolConvs ||= new Map()).set(id, conv.id);
@@ -2239,6 +2404,7 @@ class Chat {
    return `Error: ${error.message}`;
   } finally {
    turn.tool = '';
+   turn.toolName = '';
    this.toolConvs?.delete(id);
   }
  }
@@ -2368,10 +2534,11 @@ class Chat {
    const reason = error && !aborted ? String(error.message || error).replace(/\s+/g, ' ').trim().slice(0, 600) : '';
    const summary = reason || String(entry.content || '').replace(/\s+/g, ' ').trim().slice(0, 300);
    // Subagents stay silent: no Windows toast, no taskbar badge. Only real conversations ring.
-   if (!conv.subagent && !turn.quiet) window.openghost?.notify?.(title, outcome, summary);
+   // A turn stopped during a `wait` stays silent too: the user ended a pause, that is all.
+   if (!conv.subagent && !turn.quiet && !turn.stoppedWait) window.openghost?.notify?.(title, outcome, summary);
    // The Discord switch at the end of the mode menu: a DM with the fuller summary, sent
    // whether or not the toast was shown.
-   if (window.DiscordNotify?.on && !conv.subagent && !turn.quiet) {
+   if (window.DiscordNotify?.on && !conv.subagent && !turn.quiet && !turn.stoppedWait) {
     // The reply goes over as the model wrote it (line breaks and markdown kept, split into
     // Discord-sized messages), with the files the run attached. Never flattened to one line.
     window.openghost?.discord?.dm?.({
@@ -2792,11 +2959,9 @@ class Chat {
   }
   const status = document.createElement('div');
   status.className = 'message-status is-working';
-  // A server shows the quiet triple dots instead of the ghost; the app on a normal machine
-  // keeps its ghost.
-  status.innerHTML = document.documentElement.classList.contains('is-server-mode')
-   ? '<span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span>'
-   : '<ghost-thinking></ghost-thinking>';
+  // The working ghost, on a server too: it says "something is happening" far better than
+  // three quiet dots.
+  status.innerHTML = '<ghost-thinking></ghost-thinking>';
   view.el.append(status);
   view.status = status;
   this.pokeGhost(view);
@@ -2945,11 +3110,8 @@ class Chat {
  assistantMessage(conv) {
   const el = document.createElement('div');
   el.className = 'message is-assistant is-streaming';
-  // Same choice as showGhost: the server's working indicator is the quiet dots, not the ghost.
-  const working = document.documentElement.classList.contains('is-server-mode')
-   ? '<span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span>'
-   : '<ghost-thinking></ghost-thinking>';
-  el.innerHTML = `<div class="message-status">${working}</div><div class="message-content markdown"></div>`;
+  // The same working ghost the local turn uses — servers used to show quiet dots here.
+  el.innerHTML = '<div class="message-status"><ghost-thinking></ghost-thinking></div><div class="message-content markdown"></div>';
   const content = el.querySelector('.message-content');
   const thinking = new ThinkingView();
   el.insertBefore(thinking.el, content);
