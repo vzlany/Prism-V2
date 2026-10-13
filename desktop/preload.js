@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('openghost', {
  notify: (title, body, summary) => ipcRenderer.send('notify', { title, body, summary }),
  store: {
   read: key => ipcRenderer.invoke('store:read', key),
+  readTail: (key, from) => ipcRenderer.invoke('store:read-tail', key, from),
   write: (key, value) => ipcRenderer.invoke('store:write', key, value),
   remove: key => ipcRenderer.invoke('store:remove', key),
   // Another process (prism web) wrote the index: the list re-reads it.

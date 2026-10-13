@@ -106,7 +106,7 @@ new ParallelPanel({
   syncComposer();
  },
 });
-const parallelMeter = new ParallelMeter({ button: document.querySelector('.composer-parallels') });
+const parallelMeter = new ParallelMeter({ button: document.querySelector('.composer-parallels'), chat });
 // On the website (a server's web UI) the button that starts parallel runs is gone: the AI
 // launches its own parallel agents with the subagent tool — with a model and thinking effort
 // of its choosing — so a second way to start runs from here is only noise. The little meter
@@ -287,10 +287,13 @@ function syncLive() {
   // The checklist the run publishes lands in the box the thread already has (it stays under
   // its todo call); only a chat without one gets the mirror's own.
   chat.syncTodoStates(conv, info.todos);
+  chat.markTodosLive(conv, true);
   if (chat.follow) chat.followBottom();
  } else if (liveView) {
   liveView.el.remove();
   liveView = null;
+  // The run is over: any "doing" row stops spinning (the state itself is untouched).
+  chat.markTodosLive(chat.active, false);
  }
  // The task files panel sits below everything — the live card included.
  window.TaskFiles?.refresh?.();

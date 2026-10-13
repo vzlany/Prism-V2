@@ -151,6 +151,10 @@ here is in this repository; nothing else was removed.
   cost is priced from the same rates, and a conversation with no usage yet says that instead.
   A sub-agent's box names the model (and effort) it was launched with, in the conversation
   and in the runs list.
+- **Archive instead of clutter.** The row button puts a conversation away: it leaves the list
+  and waits in **Settings → Archived** with the date it was put away — bring it back, open it,
+  or delete it there. (The old lock button is gone from the list; chats that were locked keep
+  their padlock and open as they always did.)
 - **Prompt settings.** Settings → Prompt holds a **global system prompt** for every model
   (toggleable, with Prism V2's built-in agent rules still in place) and a **per-model
   prompt**; the global one is shared through the store, so a prompt written on the phone is

@@ -638,6 +638,7 @@ class Settings {
   if (name === 'server') this.paintServer();
   else if (name !== 'auto') { clearInterval(this.autoTimer); this.autoTimer = 0; }
   if (name === 'about') this.paintAbout();
+  if (name === 'archived') this.paintArchived();
  }
 
  // Settings -> Auto: starting with Windows (optionally hidden, straight into the tray) and
@@ -1006,6 +1007,56 @@ class Settings {
      row.classList.remove('is-removing');
      line(I18n.t('settings.skills.removeFailed', { error: result?.error || 'unknown error' }), 'error');
     }
+   });
+  }
+ }
+
+ // Settings -> Archived: the conversations put away with the archive button, newest first,
+ // each with when it was archived — read it back (unarchive), open it, or delete it for good.
+ async paintArchived() {
+  const node = this.dialog.querySelector('.settings-archived-page');
+  if (!node) return;
+  let chats = [];
+  try {
+   const index = await window.openghost?.store?.read?.('index');
+   chats = (index?.chats || []).filter(chat => chat?.archived && !chat.incognito);
+  } catch {}
+  chats.sort((a, b) => (Number(b.archivedAt) || 0) - (Number(a.archivedAt) || 0));
+  if (!chats.length) {
+   node.innerHTML = `<p class="settings-hint">${escapeHtml(I18n.t('settings.archived.empty'))}</p>`;
+   return;
+  }
+  const when = time => (Number(time) ? new Date(Number(time)).toLocaleString(I18n.lang, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : I18n.t('settings.archived.unknown'));
+  node.innerHTML = chats.map(chat => `<div class="settings-row is-wide archived-row" data-archived="${escapeHtml(chat.id)}">
+   <div class="settings-text">
+    <span class="settings-label">${escapeHtml(chat.title || chat.id)}</span>
+    <p class="settings-hint">${escapeHtml(I18n.t('settings.archived.when', { time: when(chat.archivedAt) }))} · ${escapeHtml(chat.folder || '')}</p>
+   </div>
+   <div class="settings-control">
+    <button type="button" class="settings-button is-primary" data-archived-restore>${escapeHtml(I18n.t('settings.archived.restore'))}</button>
+    <button type="button" class="settings-button" data-archived-delete>${escapeHtml(I18n.t('settings.archived.delete'))}</button>
+   </div>
+  </div>`).join('');
+  for (const row of node.querySelectorAll('.archived-row')) {
+   const id = row.dataset.archived;
+   row.querySelector('[data-archived-restore]')?.addEventListener('click', async () => {
+    try {
+     const index = await window.openghost?.store?.read?.('index');
+     const target = (index?.chats || []).find(item => item?.id === id);
+     if (target) { target.archived = false; target.archivedAt = 0; target.updated = Date.now(); await window.openghost.store.write('index', index); }
+    } catch {}
+    this.paintArchived();
+   });
+   row.querySelector('[data-archived-delete]')?.addEventListener('click', async () => {
+    const button = row.querySelector('[data-archived-delete]');
+    if (!row.dataset.confirm) { row.dataset.confirm = '1'; if (button) button.textContent = I18n.t('chat.deleteConfirm'); return; }
+    try {
+     const index = await window.openghost?.store?.read?.('index');
+     if (index?.chats) index.chats = index.chats.filter(item => item?.id !== id);
+     await window.openghost.store.write('index', index);
+     await window.openghost.store.remove(`chats/${id}`);
+    } catch {}
+    this.paintArchived();
    });
   }
  }

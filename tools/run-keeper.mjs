@@ -123,6 +123,12 @@ function estimate(messages) {
 }
 
 const textOf = content => typeof content === 'string' ? content : (Array.isArray(content) ? content.filter(part => part?.type === 'text').map(part => part.text).join('\n') : String(content || ''));
+// A thinking box grows downwards: keeping its HEAD means the reader can scroll back through
+// the whole reasoning while it runs (the tail used to fall off the top of the live mirror).
+const head = (text, max) => {
+ const value = String(text || '');
+ return value.length > max ? `${value.slice(0, max)}\n… (${value.length - max} more characters — the full text stays in the saved conversation)` : value;
+};
 const tail = (text, max) => { const value = String(text || ''); return value.length > max ? `…${value.slice(-max)}` : value; };
 const drop = (list, item) => { const at = list.indexOf(item); if (at >= 0) list.splice(at, 1); };
 
@@ -308,7 +314,7 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
    const part = run.parts[i];
    const copy = part.kind === 'text'
     ? { ...part, text: String(part.text || '').slice(0, 20000) }
-    : { ...part, text: part.kind === 'thinking' ? tail(part.text, 6000) : part.text, output: tail(part.output, 2000) };
+    : { ...part, text: part.kind === 'thinking' ? head(part.text, 16000) : part.text, output: tail(part.output, 2000) };
    const size = (copy.text || '').length + (copy.output || '').length + (copy.title || '').length + (copy.summary || '').length;
    if (budget - size < 0 && kept.length) break;
    budget -= size;
@@ -551,7 +557,7 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
 
  async function subagentSystem(run, label, task) {
   const base = await buildSystem({ folder: run.folder, mode: run.mode, model: run.config?.model });
-  return `${base}\n\n# Sub-agent\nYou are a sub-agent launched by Prism V2. You work alone, in its own conversation, on ONE task, and report back to the agent that launched you. The user does not see your messages — your final answer IS your report: complete, specific and self-contained (what you did, what you found, exact paths, commands, results, and whatever the caller still has to know). Never ask questions; if something is missing, say so in the report.\n\nYour task${label ? ` ("${label}")` : ''}: ${task}`;
+  return `${base}\n\n# Sub-agent\nYou are a sub-agent launched by Prism V2. You work alone, in its own conversation, on ONE task, and report back to the agent that launched you. The user does not see your messages — your final answer IS your report: complete, specific and self-contained (what you did, what you found, exact paths, commands, results, and whatever the caller still has to know). Never ask questions; if something is missing, say so in the report.\n\nYour task${label ? ` ("${label}")` : ''}: ${task}\n\nIf you need something only the agent that launched you can answer (a decision, a path, permission), ask it: call the agents tool with action ask and a short message, or write a <write-message_THE-MAIN-CONVERSATION-ID>…</write-message_THE-MAIN-CONVERSATION-ID> block in your reply (that one does not wait). Keep questions short and specific — one is usually enough.`;
  }
 
  // A system prompt for a turn the engine starts itself — a sub-agent, or the conversation

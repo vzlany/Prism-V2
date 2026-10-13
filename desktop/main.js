@@ -979,6 +979,13 @@ ipcMain.handle('file:save', async (event, file, name) => {
  return result.filePath;
 });
 ipcMain.handle('store:read', (event, key) => readStore(key));
+// The tail of a conversation from an entry index on (see the engine host's twin): a page
+// that already holds the earlier part re-reads only what arrived.
+ipcMain.handle('store:read-tail', (event, key, from) => readStore(key).then(body => {
+ if (!body || body.sealed || !Array.isArray(body.messages)) return body;
+ const at = Math.max(0, Math.min(Number(from) || 0, body.messages.length));
+ return { ...body, messages: body.messages.slice(at), from: at, total: body.messages.length };
+}));
 ipcMain.handle('store:write', (event, key, value) => writeStore(key, value));
 ipcMain.handle('store:remove', (event, key) => removeStore(key));
 ipcMain.on('window:titlebar', (event, color) => {

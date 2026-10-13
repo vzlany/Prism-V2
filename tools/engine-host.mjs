@@ -153,6 +153,17 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
  const removeStore = async key => rmSync(storeFile(key), { force: true });
 
  handlers.set("store:read", (event, key) => readStore(key));
+ // The tail of a conversation from an entry index on: a watching page that already holds the
+ // earlier part re-reads only what arrived (a long chat is megabytes; pulling all of it on
+ // every refresh was the lag and the jump at the end of a run).
+ handlers.set("store:read-tail", (event, key, from) => {
+  const data = readStore(key).then(body => {
+   if (!body || body.sealed || !Array.isArray(body.messages)) return body;
+   const at = Math.max(0, Math.min(Number(from) || 0, body.messages.length));
+   return { ...body, messages: body.messages.slice(at), from: at, total: body.messages.length };
+  });
+  return data;
+ });
  handlers.set("store:write", (event, key, value) => writeStore(key, value));
  handlers.set("store:remove", (event, key) => removeStore(key));
  handlers.set("tool:run", (event, id, name, toolArgs, cwd) => Tools.runTool(id, name, toolArgs, cwd, event.sender));

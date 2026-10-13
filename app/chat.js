@@ -569,7 +569,7 @@ class Chat {
   const conv = new Conversation(record);
   conv.subagent = true;
   conv.folder = { path: folder.path, name: folder.name };
-  conv.extraSystem = 'You are a subagent: the main agent handed you one task to complete autonomously. Work with your tools until it is done or you are certain it cannot be, then reply with a short, factual report of what you did, what you found and anything the main agent must know. You cannot ask the user questions; if something would need approval it is refused, so work around it and say so in the report.';
+  conv.extraSystem = 'You are a subagent: the main agent handed you one task to complete autonomously. Work with your tools until it is done or you are certain it cannot be, then reply with a short, factual report of what you did, what you found and anything the main agent must know. You cannot ask the user questions; if something would need approval it is refused, so work around it and say so in the report. If only the agent that launched you can answer something, ask it with the agents tool (action ask) or a <write-message_ID>…</write-message_ID> block in your reply, and keep the question short.';
   this.conversations.set(record.id, conv);
   this.attach(conv);
   // Subagents are hidden from the chat list, so the Runs tab is where they are watched. The
@@ -811,6 +811,13 @@ class Chat {
   return Boolean(conv?.list?.querySelector('.todo-card'));
  }
 
+ // A checklist box wears the live class while the chat actually works: the "doing" spinner
+ // rides on it, so a run that ended can never leave a row spinning forever.
+ markTodosLive(conv, live) {
+  if (!conv?.list) return;
+  for (const card of conv.list.querySelectorAll('.todo-card')) card.classList.toggle('is-live', Boolean(live));
+ }
+
  syncTodoStates(conv, todos) {
   const list = (Array.isArray(todos) ? todos : []).filter(item => item?.text);
   if (!list.length || !window.TodoCard) return;
@@ -821,6 +828,7 @@ class Chat {
   const fresh = new window.TodoCard(list);
   fresh.el.__todoKey = key;
   fresh.el.classList.add('is-snapshot');
+  fresh.el.classList.toggle('is-live', old.classList.contains('is-live'));
   old.replaceWith(fresh.el);
  }
 
@@ -1441,6 +1449,14 @@ class Chat {
 
  // A turn that was running on another page has finished: read the conversation again so its
  // answer shows up here without a manual reload.
+ // Whether two stored entries are the same as far as the screen cares: role, turn and the
+ // sizes of what they carry. The overlap check of the tail refresh rides on it.
+ sameEntry(a, b) {
+  if (!a || !b || a.role !== b.role) return false;
+  const size = entry => [String(entry.content || '').length, String(entry.thinking || '').length, (entry.steps || []).length, String(entry.turn || '')].join('|');
+  return size(a) === size(b);
+ }
+
  async refresh(id) {
   const conv = this.conversations.get(id);
   if (!conv?.record || conv.turn || conv.locked) return;
@@ -1451,6 +1467,46 @@ class Chat {
   const active = conv === this.active;
   const following = this.follow;
   const anchor = active && !following ? this.anchor() : null;
+  // Fast path: ask only for what arrived since an overlap of the entries already held. A long
+  // conversation is megabytes; reading it whole, sending it whole and parsing it whole on
+  // every refresh was the lag — and emptying the list was the jump at the end of a run.
+  if (active && conv.messages.length && this.library.conversationTail) {
+   const overlap = Math.min(3, conv.messages.length);
+   const tail = await this.library.conversationTail(id, conv.messages.length - overlap).catch(() => null);
+   if (tail && tail.from === conv.messages.length - overlap && tail.total >= conv.messages.length) {
+    const known = conv.messages.slice(tail.from);
+    const same = tail.messages.slice(0, overlap).length === overlap
+     && tail.messages.slice(0, overlap).every((entry, k) => this.sameEntry(entry, known[k]));
+    if (same) {
+     const first = this.nodes.get(known[0]);
+     for (const entry of known) this.nodes.get(entry)?.remove();
+     conv.messages = [...conv.messages.slice(0, tail.from), ...tail.messages];
+     if (tail.tokens) conv.tokens = tail.tokens;
+     if (tail.spend) conv.spend = tail.spend;
+     if (tail.todos?.length) conv.todos = tail.todos;
+     conv.window = conv.window || { entries: [], ends: new Map(), from: 0 };
+     conv.window.entries = conv.window.entries.filter(entry => !known.includes(entry));
+     const frag = document.createDocumentFragment();
+     for (let index = tail.from; index < conv.messages.length; index++) {
+      const entry = conv.messages[index];
+      if (!this.drawable(entry)) continue;
+      conv.window.entries.push(entry);
+      this.renderEntry(conv, entry, frag);
+     }
+     if (first?.isConnected) first.before(frag);
+     else conv.list.append(frag);
+     settle(conv.list);
+     // Following stays on the bottom — pinned, not sprung (the spring moving a long list is
+     // what read as "scrolls down fast"). A reader up in the conversation keeps their place.
+     if (following) { this.follow = true; this.pin(); this.followPos = this.thread.scrollTop; }
+     else if (anchor) this.anchorRestore(anchor);
+     this.renderTodos(conv);
+     window.PathChips?.enhance(conv.list, conv.record?.folder);
+     this.onChange();
+     return;
+    }
+   }
+  }
   // The swap below empties the list for a moment and the browser clamps the scroll to the
   // top: a long conversation flashed its top for the length of the reload. The list is
   // hidden for exactly that moment and shown again once the reader's place is back.
@@ -1461,7 +1517,7 @@ class Chat {
    await this.load(conv);
    if (active) {
     this.main.classList.toggle('is-empty', !conv.list.childElementCount);
-    if (following) { this.follow = true; this.followBottom(); }
+    if (following) { this.follow = true; this.pin(); this.followPos = this.thread.scrollTop; }
     else if (anchor) this.anchorRestore(anchor);
    }
   } catch (error) {
@@ -2029,10 +2085,67 @@ class Chat {
   return null;
  }
 
+ // The conversation a sub-agent call belongs to: the live one from the tool id map, and for
+ // a restored line the child chat created at the same position among this chat's children.
+ subagentTarget(conv, toolId = '', callId = '') {
+  const live = toolId && this.subagents?.get(toolId);
+  if (live) return live;
+  const children = this.library.chats.filter(chat => !chat.incognito && chat.parent === conv?.id).sort((a, b) => (a.created || 0) - (b.created || 0));
+  if (!children.length) return '';
+  if (!callId) return children[children.length - 1].id;
+  const calls = [];
+  for (const entry of conv?.messages || []) {
+   for (const step of entry.steps || []) {
+    for (const call of step.tool_calls || []) if (call.function?.name === 'subagent') calls.push(call.id);
+   }
+  }
+  const at = calls.indexOf(callId);
+  return (children[Math.max(0, Math.min(at, children.length - 1))] || {}).id || '';
+ }
+
+ // A sub-agent gets a line of its own (the user's rule: sub-agents never merge with the
+ // ordinary stretch): blue spinner while it works, the past tense when done, and an Open
+ // button into its conversation.
+ subagentLine(view, args, toolId) {
+  const line = this.groupElement();
+  line.classList.add('is-subagent');
+  line.__begun = performance.now();
+  const icon = line.querySelector('.tool-group-icon');
+  if (icon) {
+   const spinner = document.createElement('span');
+   spinner.className = 'tool-spinner';
+   spinner.setAttribute('aria-hidden', 'true');
+   icon.replaceWith(spinner);
+  }
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'tool-open';
+  open.textContent = I18n.t('subagent.open');
+  open.addEventListener('click', event => {
+   event.stopPropagation();
+   const target = this.subagentTarget(this.active, toolId, String(args.callId || ''));
+   if (target) this.open(target);
+  });
+  const time = line.querySelector('.tool-group-time');
+  if (time) time.before(open); else line.querySelector('.tool-group-head')?.append(open);
+  view.content.after(line);
+  const item = {
+   name: 'subagent',
+   state: 'running',
+   started: performance.now(),
+   bucket: null,
+   label: { running: I18n.t('subagent.started'), done: I18n.t('subagent.finished') },
+  };
+  line.__items = [item];
+  this.simpleLabel(line);
+  return { group: line, item };
+ }
+
  simpleGroup(view, name, args = {}) {
   // A todo call never joins the summarized line: its own checklist box belongs right under
   // the call that made it, so the line would separate the two.
-  if (!window.Effects?.simple || name === 'subagent' || name === 'todo') return null;
+  if (!window.Effects?.simple || name === 'todo') return null;
+  if (name === 'subagent') return this.subagentLine(view, args, arguments[3] || '');
   let group = view.__simpleGroup;
   if (group && (!group.isConnected || group.parentElement !== view.el)) group = null;
   // Anything that landed after the line breaks it: a subagent box, a picture, a note.
@@ -2164,7 +2277,11 @@ class Chat {
  // watching the same chat (the phone on `prism web`) draws this as a live card.
  liveSnapshot(conv, turn) {
   const clip = (text, max) => String(text || '').slice(0, max);
-  const tail = (text, max) => {
+  const head = (text, max) => {
+ const value = String(text || '');
+ return value.length > max ? `${value.slice(0, max)}\n… (${value.length - max} more characters — the full text stays in the saved conversation)` : value;
+};
+const tail = (text, max) => {
    const value = String(text || '');
    return value.length > max ? `…${value.slice(-max)}` : value;
   };
@@ -2638,13 +2755,14 @@ class Chat {
     handed = true;
    }
   }
+  const id = turn.tool = `${conv.id}-${++this.tools}`;
   const described = name === 'ask_user' ? null : AgentTools.describe(name, args, cwd);
   // The raw arguments ride along: a card can be opened while the call still runs, and what
   // the model actually sent is part of what it shows.
   const card = described ? new ToolCard({ ...described, tool: name, args }) : null;
   // Simple visuals: ordinary calls join the timeline line above them; subagent boxes stay
   // whole and a fresh line starts after them.
-  const simple = card ? this.simpleGroup(view, name, args) : null;
+  const simple = card ? this.simpleGroup(view, name, args, id) : null;
   if (card) {
    (simple ? simple.group.querySelector('.tool-group-body') : view.el).append(card.el);
    // The live mirror reads these back, so a card on another device wears the same icon, and
@@ -2660,7 +2778,6 @@ class Chat {
   }
   if (conv === this.active) this.followBottom();
   this.publishLive(conv, turn);
-  const id = turn.tool = `${conv.id}-${++this.tools}`;
   // The name is kept beside the id: a stop pressed while this call runs can then tell a
   // quiet wait from real work (see abort()).
   turn.toolName = name;
@@ -3333,6 +3450,21 @@ class Chat {
   for (const line of el.querySelectorAll('.tool-group')) {
    const total = (line.__items || []).reduce((sum, entry) => sum + (Number(entry.ms) || 0), 0);
    if (total > 0) { line.__begun = performance.now() - total; line.__ended = performance.now(); }
+  }
+  // A fresh entry of the same turn continues the line above it when nothing but the calls
+  // sits between them (one line per stretch, not one per round) — the same rule simpleGroup
+  // applies live. A sub-agent line, a thought or written text stays a boundary.
+  if (simple) {
+   for (const group of el.querySelectorAll(':scope > .tool-group')) {
+    if (group.classList.contains('is-subagent')) continue;
+    const host = this.previousGroup({ el });
+    if (!host || host.classList.contains('is-subagent')) continue;
+    const body = host.querySelector('.tool-group-body');
+    if (!body) continue;
+    for (const item of group.__items || []) host.__items.push(item);
+    for (const card of group.querySelectorAll('.tool-group-body > .tool')) body.append(card);
+    group.remove();
+   }
   }
   // The summaries last, once every line has its steps.
   for (const item of el.querySelectorAll('.tool-group')) this.simpleLabel(item);

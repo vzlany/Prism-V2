@@ -239,14 +239,18 @@ class ChatList {
   const meta = element('span', 'chat-meta');
   const time = element('span', 'chat-time');
   const actions = element('span', 'chat-actions');
-  const lock = action('chat-action is-lock', 'lock', Glyphs.padlock), pin = action('chat-action', 'pin', Glyphs.pin), remove = action('chat-action is-delete', 'delete', Glyphs.trash);
+  // The padlock action is gone: the row button is Archive now — the conversation leaves the
+  // list and waits in Settings -> Archived, where it can be read back. A chat that was locked
+  // before keeps its padlock mark and opens as always.
+  const archive = action('chat-action is-archive', 'archive', Glyphs.archive), pin = action('chat-action', 'pin', Glyphs.pin), remove = action('chat-action is-delete', 'delete', Glyphs.trash);
   const rename = action('chat-action', 'rename', Glyphs.pencil);
   label(rename, I18n.t('chat.rename'));
   label(remove, I18n.t('chat.delete'));
-  actions.append(rename, lock, pin, remove);
+  label(archive, I18n.t(chat?.archived ? 'chat.unarchive' : 'chat.archive'));
+  actions.append(rename, archive, pin, remove);
   meta.append(time, actions);
   row.append(mark, title, meta);
-  return { row, mark, title, time, rename, lock, pin, remove, input: null, ghost: null, arrow: null, pinned: null, guarded: null, locked: null, veil: 0, confirm: false, timer: 0 };
+  return { row, mark, title, time, rename, archive, pin, remove, input: null, ghost: null, arrow: null, pinned: null, guarded: null, locked: null, veil: 0, confirm: false, timer: 0 };
  }
 
  paint(item, chat) {
@@ -271,8 +275,8 @@ class ChatList {
   item.row.style.setProperty('--chat-depth', String(Math.max(1, depth)));
   // A chat with runs under it gets the fold arrow; finished runs fold themselves away.
   this.arrow(item, Boolean(this.childrenOf.get(chat.id)?.length), !this.folded.has(chat.id));
-  // Locking waits for the reply to finish, the same as changing the model.
-  item.lock.disabled = busy;
+  // Archiving waits for the reply to finish, the same as changing the model.
+  item.archive.disabled = busy;
  }
 
  // A run started from a chat is drawn as that chat's child, right below it. A run can start
@@ -347,8 +351,7 @@ class ChatList {
   if (locked) item.row.setAttribute('aria-label', I18n.t('chat.locked'));
   else item.row.removeAttribute('aria-label');
   if (item.guarded !== guarded || item.locked !== locked) {
-   item.lock.classList.toggle('is-on', guarded);
-   label(item.lock, I18n.t(!guarded ? 'chat.lock' : locked ? 'chat.unlock' : 'chat.protected'));
+   label(item.archive, I18n.t(chat.archived ? 'chat.unarchive' : 'chat.archive'));
   }
   // A sealed title can only change while the chat is open, so a locked chat hides the pencil.
   item.rename.disabled = locked;
@@ -526,7 +529,7 @@ class ChatList {
   const lib = this.library, query = this.query.trim().toLowerCase(), seen = new Set();
   // A locked chat's title is sealed, so a search never finds it.
   const match = chat => !query || (this.library.titleOf(chat) || '').toLowerCase().includes(query);
-  const live = lib.chats.filter(chat => (!chat.subagent || chat.parent) && !chat.incognito && match(chat));
+  const live = lib.chats.filter(chat => (!chat.subagent || chat.parent) && !chat.incognito && !chat.archived && match(chat));
   const byActivity = (a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0);
   const pinned = this.withChildren(live.filter(chat => chat.pinned).sort(byActivity));
   const manualFolders = lib.folders.some(folder => Number.isFinite(folder.order));
@@ -639,7 +642,7 @@ class ChatList {
    else if (button.dataset.action === 'pin') this.togglePin(id);
    else if (button.dataset.action === 'rename') this.renameChat(id);
    else if (button.dataset.action === 'delete') this.askDelete(id);
-   else if (button.dataset.action === 'lock') this.onLock?.(id, button.closest('.chat-row'));
+   else if (button.dataset.action === 'archive') this.toggleArchive(id);
    return;
   }
   const head = event.target.closest('.chats-folder-head');
@@ -667,6 +670,14 @@ class ChatList {
   if (!folder) return;
   if (folder.collapsed) this.library.toggleFolder(folder.path);
   this.onNewChat({ path: folder.path, name: folder.name });
+ }
+
+ // Archive: the conversation leaves the list and waits in Settings -> Archived (with the
+ // date it was put away); unarchiving from there brings it back to its folder.
+ toggleArchive(id) {
+  const chat = this.library.chat(id);
+  if (!chat) return;
+  this.library.update(id, chat.archived ? { archived: false, archivedAt: 0 } : { archived: true, archivedAt: Date.now() });
  }
 
  togglePin(id) {

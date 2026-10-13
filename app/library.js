@@ -341,6 +341,26 @@ class Library {
   };
  }
 
+ // Only what arrived since entry `from`: the tail read a watching page uses so a long
+ // conversation is not pulled whole on every refresh. null when the store cannot answer.
+ async conversationTail(id, from) {
+  try {
+   const data = await this.store.readTail(`chats/${id}`, Math.max(0, Number(from) || 0));
+   if (!data || data.sealed) return null;
+   return {
+    messages: Array.isArray(data.messages) ? data.messages : [],
+    from: Number(data.from) || 0,
+    total: Number(data.total) || 0,
+    tokens: Number(data.tokens) || 0,
+    spend: data.spend || null,
+    todos: Array.isArray(data.todos) ? data.todos : [],
+    detached: Array.isArray(data.detached) ? data.detached : [],
+   };
+  } catch {
+   return null;
+  }
+ }
+
  // A protected chat is sealed with the key it has when the save is asked for, so locking right after a reply loses nothing.
  // The todo list and the files the agent detached ride along; a call that does not pass them keeps whatever the file has.
  saveMessages(id, messages, tokens = 0, spend = null, todos = null, extras = null) {

@@ -187,6 +187,7 @@ window.openghost = {
  },
  store: {
   read: key => invoke('store:read', key),
+  readTail: (key, from) => invoke('store:read-tail', key, from),
   write: (key, value) => invoke('store:write', key, value),
   remove: key => invoke('store:remove', key),
   onChange: callback => on('store:changed', callback),

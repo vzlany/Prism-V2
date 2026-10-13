@@ -236,8 +236,11 @@ const clock = started => {
 // counted apart from parallel runs ("2 sub-agents · 1 running") — with a living three-dot
 // pulse. Clicking it brings the Runs tab forward.
 class ParallelMeter {
- constructor({ button }) {
+ constructor({ button, chat = null }) {
   this.button = button;
+  // The meter belongs to the conversation on screen: a sub-agent of another chat must not
+  // make every conversation wear "1 sub-agent".
+  this.chat = chat;
   this.refresh();
   // Event-driven, with a slow safety poll: the runs and presence emitters cover every change
   // the meter shows, and the poll only makes sure a missed event can never leave it stale.
@@ -249,8 +252,20 @@ class ParallelMeter {
 
  counts() {
   let agents = 0, runs = 0;
+  const active = this.chat?.active;
+  const mine = id => {
+   if (!active) return true;
+   if (id === active.id) return true;
+   let parent = this.chat.library?.chat(id)?.parent;
+   for (let hops = 0; parent && hops < 12; hops++) {
+    if (parent === active.id) return true;
+    parent = this.chat.library?.chat(parent)?.parent;
+   }
+   return false;
+  };
   for (const run of window.ParallelRuns.runs) {
    if (run.status !== 'running') continue;
+   if (!mine(run.id)) continue;
    if (run.subagent) agents++;
    else runs++;
   }
