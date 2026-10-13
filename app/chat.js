@@ -2336,7 +2336,7 @@ const tail = (text, max) => {
  publishLive(conv, turn) {
   if (!window.Presence?.publish || !turn) return;
   clearTimeout(turn.liveTimer);
-  const wait = 35 - (performance.now() - (turn.liveAt || 0));
+  const wait = 120 - (performance.now() - (turn.liveAt || 0));
   if (wait > 0) {
    turn.liveTimer = setTimeout(() => this.publishLive(conv, turn), wait);
    return;
