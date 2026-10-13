@@ -105,16 +105,11 @@ class TaskFiles {
   const icon = document.createElement('span');
   icon.className = 'task-file-icon';
   icon.innerHTML = FileKinds.icon(FileKinds.describe(file.name));
-  const name = document.createElement('span');
-  name.className = 'task-file-name';
-  name.textContent = file.name;
-  row.append(icon, name);
-  if (file.size) {
-   const size = document.createElement('span');
-   size.className = 'task-file-size';
-   size.textContent = FileKinds.formatSize(file.size);
-   row.append(size);
-  }
+  const size = document.createElement('span');
+  size.className = 'task-file-size';
+  if (file.size) size.textContent = FileKinds.formatSize(file.size);
+  else if (file.path) this.measure(file, size);
+  row.append(icon, this.name(file), size);
   const actions = document.createElement('span');
   actions.className = 'task-file-actions';
   if (file.path) {
@@ -122,10 +117,15 @@ class TaskFiles {
    actions.append(
     this.action('taskfiles.preview', 'Preview', () => {
      if (image) { window.Lightbox?.open([{ url: FileUrl.of(file.path), name: file.name }], 0); return; }
-     window.Artifacts?.preview?.({ path: file.path, name: file.name })?.catch?.(() => {});
+     // The chat's own folder travels along: a relative path resolves against it and a chat
+     // without one still reads the file through the folder the file itself lives in.
+     window.Artifacts?.preview?.({ path: file.path, name: file.name, cwd: this.cwd() })?.catch?.(() => {});
     }),
-    this.action('taskfiles.download', 'Download', () => {
-     window.Artifacts?.save?.({ path: file.path, name: file.name });
+    this.action('taskfiles.download', 'Download', button => {
+     // The card's download button, exactly: "Downloading…" while it works, a short green
+     // "Downloaded" once the bytes are on their way — and the plain label again when the
+     // server refused the path instead of claiming a file nobody received.
+     window.Artifacts?.runDownload?.(button, () => window.Artifacts?.save?.({ path: file.path, name: file.name, cwd: this.cwd() }));
     }),
    );
   }
@@ -146,9 +146,53 @@ class TaskFiles {
    this.signature = '';
    this.refresh();
   });
+  // A touch screen has no hover, so the × shows on the row the finger has pressed — the same
+  // deal as the conversation list. The press lands on the row (an unarmed × is no target), so
+  // the second tap is the one that removes this very file.
+  row.addEventListener('click', () => {
+   for (const other of this.listNode?.querySelectorAll('.task-file.is-armed') || []) if (other !== row) other.classList.remove('is-armed');
+   row.classList.add('is-armed');
+  });
   actions.append(remove);
   row.append(actions);
   return row;
+ }
+
+ // The panel belongs to the conversation on screen, and its folder is the base every relative
+ // attachment path was made against — the same one the message chips use.
+ cwd() {
+  const conv = this.conv;
+  return conv?.record?.folder || conv?.folder?.path || '';
+ }
+
+ // The end of a long name is what tells files apart: the head gives way with an ellipsis, the
+ // extension never does.
+ name(file) {
+  const name = document.createElement('span');
+  name.className = 'task-file-name';
+  const dot = file.name.lastIndexOf('.');
+  const head = document.createElement('span');
+  head.className = 'task-file-name-head';
+  head.textContent = dot > 0 && file.name.length - dot <= 12 ? file.name.slice(0, dot) : file.name;
+  name.append(head);
+  if (head.textContent.length < file.name.length) {
+   const tail = document.createElement('span');
+   tail.className = 'task-file-name-tail';
+   tail.textContent = file.name.slice(head.textContent.length);
+   name.append(tail);
+  }
+  return name;
+ }
+
+ // An attach_file call keeps only the path — the size of the tool's own answer never reaches
+ // the record. The host still knows the real bytes, so a row without a stored size asks for
+ // it and writes it in when it arrives.
+ async measure(file, node) {
+  let info = null;
+  try { info = await window.openghost?.path?.info?.(file.path, this.cwd()); } catch {}
+  const bytes = Number(info?.size) || 0;
+  if (!bytes || !node.isConnected) return;
+  node.textContent = FileKinds.formatSize(bytes);
  }
 
  action(labelKey, fallback, onClick) {
@@ -156,7 +200,7 @@ class TaskFiles {
   button.type = 'button';
   button.className = 'task-file-action';
   button.textContent = I18n.has(labelKey) ? I18n.t(labelKey) : fallback;
-  button.addEventListener('click', event => { event.stopPropagation(); onClick(); });
+  button.addEventListener('click', event => { event.stopPropagation(); onClick(button); });
   return button;
  }
 }

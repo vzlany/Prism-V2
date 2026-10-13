@@ -166,7 +166,7 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   const full = fullPath(target, cwd);
   try {
    const stat = statSync(full);
-   return { path: full, exists: true, dir: stat.isDirectory(), image: /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(full), name: full.split(/[\\/]/).pop() || full };
+   return { path: full, exists: true, dir: stat.isDirectory(), image: /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(full), name: full.split(/[\\/]/).pop() || full, size: stat.isFile() ? stat.size : 0 };
   } catch {
    return { path: full, exists: false, dir: false, image: false, name: full.split(/[\\/]/).pop() || full };
   }

@@ -9684,17 +9684,18 @@ html.is-simple .thread-list > .message{content-visibility:visible}
 .task-file:focus-visible{outline:none;box-shadow:0 0 0 2px var(--focus-ring)}
 .task-file-icon{flex:none;display:grid;place-items:center;width:18px;height:22px}
 .task-file-icon .file-icon{width:17px;height:21px}
-.task-file-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:rgba(var(--fg-rgb),.88)}
-.task-file-size{flex:none;font-family:var(--mono-font);font-size:10.5px;color:var(--fg-tertiary)}
-.task-file-x{flex:none;display:grid;place-items:center;width:22px;height:22px;padding:0;border:0;border-radius:7px;background:none;color:var(--fg-tertiary);font-size:14px;line-height:1;opacity:0;cursor:pointer;transition:opacity .15s ease,background-color .15s ease,color .15s ease}
-.task-file:hover .task-file-x,.task-file-x:focus-visible{opacity:1}
+.task-file-name{flex:0 1 auto;min-width:0;display:flex;align-items:baseline;overflow:hidden;font-size:13px;color:rgba(var(--fg-rgb),.88)}
+.task-file-name-head{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-file-name-tail{flex:none;white-space:nowrap}
+.task-file-size{flex:none;margin-right:auto;font-family:var(--mono-font);font-size:10.5px;color:var(--fg-tertiary)}
+.task-file-x{flex:none;display:grid;place-items:center;width:22px;height:22px;padding:0;border:0;border-radius:7px;background:none;color:var(--fg-tertiary);font-size:14px;line-height:1;opacity:0;pointer-events:none;cursor:pointer;transition:opacity .15s ease,background-color .15s ease,color .15s ease}
+.task-file:hover .task-file-x,.task-file:focus-within .task-file-x{opacity:1;pointer-events:auto}
 .task-file-x:hover{background:rgba(var(--danger-rgb),.14);color:rgb(255,170,170)}
 .task-files-more{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;margin-top:3px;padding:6px 0 4px;border:0;border-radius:10px;background:none;color:var(--fg-secondary);font:inherit;font-size:12px;cursor:pointer}
 .task-files-more:hover{background:rgba(var(--fg-rgb),.05);color:rgba(var(--fg-rgb),.85)}
 .task-files-more[hidden]{display:none}
 .task-files-chevron{width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg) translate(-1px,-1px);transition:transform .18s ease}
 .task-files-more[aria-expanded="true"] .task-files-chevron{transform:rotate(225deg) translate(-1px,-1px)}
-@media (max-width:600px){.task-file-x{opacity:.6}}
 
 /* Prism V2: the input of a tool call, in its card — readable while the call still runs */
 .tool-input-label{margin:2px 0 4px;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-tertiary)}
@@ -9721,8 +9722,17 @@ html.is-simple .thread-list > .message{content-visibility:visible}
 .task-file-actions{flex:none;display:inline-flex;align-items:center;gap:6px;margin-left:6px}
 .task-file-action{border:0;border-radius:8px;padding:3px 9px;background:rgba(var(--fg-rgb),.07);color:rgba(var(--fg-rgb),.78);font:inherit;font-size:11px;line-height:1.6;cursor:pointer;white-space:nowrap;transition:background-color .15s ease,color .15s ease}
 .task-file-action:hover,.task-file-action:focus-visible{background:rgba(var(--fg-rgb),.14);color:rgba(var(--fg-rgb),.98)}
-.task-file-x{opacity:.55}
-.task-file:hover .task-file-x,.task-file-x:focus-visible{opacity:1}
+
+/* The × belongs to the row the reader is pointing at — like the chat list. On a touch screen
+   there is no hover, so it waits for the row itself to be pressed, and until then it is no
+   target at all: a finger can never delete a file whose button it has not seen. */
+@media (hover: none),(pointer: coarse){
+ .task-file-x,
+ .task-file:hover .task-file-x,
+ .task-file:focus-within .task-file-x{opacity:0;pointer-events:none}
+ .task-file:active .task-file-x{opacity:1}
+ .task-file.is-armed .task-file-x{opacity:1;pointer-events:auto}
+}
 
 /* Prism V2: a send queued while another run works — already in the thread, waiting its turn. */
 .message-note.is-queued{margin:6px 0 0;padding:4px 10px;border-radius:9px;background:rgba(138,180,255,.10);box-shadow:inset 0 0 0 1px rgba(138,180,255,.20);color:rgba(var(--fg-rgb),.72);font-size:12px;display:inline-block}

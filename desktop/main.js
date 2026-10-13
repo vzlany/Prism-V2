@@ -929,7 +929,7 @@ ipcMain.handle('path:info', async (event, target, cwd) => {
  const full = path.isAbsolute(target) ? target : (typeof cwd === 'string' && cwd ? path.join(cwd, target) : target);
  try {
   const stat = await fs.promises.stat(full);
-  return { path: full, exists: true, dir: stat.isDirectory(), image: /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(full), name: path.basename(full) };
+  return { path: full, exists: true, dir: stat.isDirectory(), image: /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(full), name: path.basename(full), size: stat.isFile() ? stat.size : 0 };
  } catch {
   return { path: full, exists: false, dir: false, image: false, name: path.basename(full) };
  }

@@ -13,10 +13,16 @@ const nameOf = path => String(path || '').split(/[\\/]/).pop() || 'file';
 // said "Downloaded".
 const isAbsolute = path => /^([a-zA-Z]:[\\/]|\\\\|\/)/.test(String(path || ''));
 const full = (path, cwd) => (path && cwd && !isAbsolute(path) ? `${String(cwd).replace(/[\\/]+$/, '')}/${String(path).replace(/^[\\/]+/, '')}` : path);
+// read_file runs inside a project folder, and a chat may have none — the folder of the file
+// itself works just as well for a Preview and keeps an attached file readable outside any
+// project. Without it a plain .md answered "binary": the tool refused to run and read() could
+// not tell that refusal from a real binary.
+const workdir = (path, cwd) => (isAbsolute(cwd) ? cwd : isAbsolute(path) ? String(path).replace(/[\\/][^\\/]*$/, '') || '/' : cwd);
 
 async function read(path, cwd) {
+ const real = full(path, cwd);
  try {
-  const out = await window.openghost?.tools?.run?.(`art-${Date.now().toString(36)}`, 'read_file', { path: full(path, cwd) }, cwd);
+  const out = await window.openghost?.tools?.run?.(`art-${Date.now().toString(36)}`, 'read_file', { path: real }, workdir(real, cwd));
   if (typeof out === 'string') return out;
   if (out && typeof out.text === 'string') return out.text;
   return null;
@@ -86,10 +92,10 @@ async function runDownload(button, run) {
 window.Artifacts = {
  // A file from a path, in the same preview card the tool cards use: text renders (markdown
  // does too), binaries say to use Download instead.
- async preview({ path, name } = {}) {
+ async preview({ path, name, cwd } = {}) {
   if (!path) return null;
   const label = name || nameOf(path);
-  const text = await read(path);
+  const text = await read(path, cwd);
   previewModal(label, text == null ? I18n.t('artifact.binary') : text);
   return true;
  },
@@ -108,11 +114,18 @@ window.Artifacts = {
  },
 
  // The same download a card's button runs, for callers that have only a path — the files
- // panel's Download button on every device.
- save({ path, name } = {}) {
+ // panel's Download button on every device. A relative path resolves against the chat's
+ // folder here, exactly like a card's own Download does.
+ save({ path, name, cwd } = {}) {
   if (!path) return null;
-  return download(path, name || nameOf(path));
+  const real = full(path, cwd);
+  return download(real, name || nameOf(real));
  },
+
+ // The card's download button, for any caller with a button of its own: a spinner while the
+ // save dialog or the browser is busy, then a short "Downloaded" — and the plain label back
+ // when the file never went out (a refused path, a missing file).
+ runDownload,
 
  // A finished file the agent attached with attach_file: a small chip under the card with the
  // name, its size, a Preview when it is text, and a Download that copies the real bytes.
