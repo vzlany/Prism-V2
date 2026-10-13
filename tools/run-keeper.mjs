@@ -1055,6 +1055,16 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
     publishNow(run);
     if (!calls.length) {
      if (run.queue?.length) { run.queue.length = 0; closePart(run); openPart(run); publishNow(run); continue; }
+     // A round with no text and no answer is a model hiccup: ask once, plainly, instead of
+     // finishing a turn in which nothing was said.
+     const said = String(step.content || '').trim();
+     if (!said && !run.entry.steps.some(stepEntry => stepEntry.role === 'tool') && (run.emptyNudges || 0) < 1) {
+      run.emptyNudges = (run.emptyNudges || 0) + 1;
+      log(`an empty answer for ${run.chatId} — asking the model again`);
+      run.entries.push({ role: 'user', text: 'You ended without any text. Answer now, in plain words.', content: 'You ended without any text. Answer now, in plain words.', origin: 'system', system: true });
+      run.entry.steps.pop();
+      continue;
+     }
      finishRun(run, null);
      return;
     }

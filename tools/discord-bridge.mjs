@@ -661,13 +661,21 @@ async function turn(prompt, display = {}) {
   }
   if (!calls.length) {
    const answer = content.trim();
-   // One silent retry when a model returns nothing at all: a hiccup, not a real answer.
-   if (!answer && !posted && !retried) { retried = true; continue; }
+   // A model that ends a round with no text at all is a hiccup (it happens with reasoning
+   // models): tell it plainly and let it answer again — twice — instead of handing the user
+   // "(the model sent an empty reply)" while the work it just did is invisible.
+   if (!answer && !posted && retried < 2) {
+    retried++;
+    status(`↻ empty answer, asking again (${retried}/2)…`);
+    state.messages.push({ role: "user", content: "You ended your reply without any text. Answer the last request now, in plain words — do not send an empty message." });
+    state.messages.push({ role: "assistant", content: "(empty)" });
+    continue;
+   }
    const assistant = { role: "assistant", content };
    if (keepReasoning && thought) assistant.reasoning_content = thought;
    state.messages.push(assistant);
    savedState();
-   if (!answer) return posted ? "" : "(the model sent an empty reply)";
+   if (!answer) return posted ? "" : "(the model sent an empty reply twice — ask again, or switch models with /model)";
    return answer;
   }
   const assistant = { role: "assistant", content, tool_calls: calls };

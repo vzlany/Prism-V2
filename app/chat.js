@@ -2459,7 +2459,19 @@ const tail = (text, max) => {
    this.save(conv);
    turn.controller.signal.throwIfAborted();
    if (turn.queue.length) { await this.takeQueue(conv, turn); continue; }
-   if (!calls.length) return finish;
+   if (!calls.length) {
+    // Nothing said and nothing asked for: a hiccup, not an answer — ask once, plainly.
+    const said = String(part.entry.content || '').trim();
+    if (!said && !entry.steps.some(stepEntry => stepEntry.role === 'tool') && !turn.emptyNudge) {
+     turn.emptyNudge = true;
+     entry.steps.pop();
+     conv.messages.push({ role: 'user', text: 'You ended without any text. Answer now, in plain words.', content: 'You ended without any text. Answer now, in plain words.' });
+     this.closePart(conv, part);
+     this.openPart(conv, turn);
+     continue;
+    }
+    return finish;
+   }
    // A fresh message for the next step, so its thinking sits after these command cards
    // instead of piling into one block at the top of the turn.
    this.closePart(conv, part);

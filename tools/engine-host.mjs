@@ -247,8 +247,21 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
   if (webPort > 0) {
    if (landed) {
     const version = String(prior.version || startedVersion || "");
-    writeUpdateState({ phase: "done", version, chatId: prior.chatId || "", announced: false });
-    announceUpdate(version, prior.chatId || "").catch(() => {});
+    // No chat on record (an automatic update, or one started from Settings): the note and
+    // the carry-on go to the newest conversation the user was in, so an update never lands
+    // in silence — the agent there says it is back and finishes its work.
+    let chatId = String(prior.chatId || "");
+    if (!chatId) {
+     try {
+      const index = JSON.parse(readFileSync(join(USER_DATA, "store", "index.json"), "utf8"));
+      const newest = (index?.chats || [])
+       .filter(item => item && !item.incognito && !item.subagent && !item.archived && !item.parent)
+       .sort((a, b) => (Number(b.updated) || 0) - (Number(a.updated) || 0))[0];
+      chatId = String(newest?.id || "");
+     } catch {}
+    }
+    writeUpdateState({ phase: "done", version, chatId, announced: false });
+    announceUpdate(version, chatId).catch(() => {});
    } else if (prior?.phase === "downloading" || prior?.phase === "installing") writeUpdateState({ phase: "idle", version: prior.version || "" });
   }
  }
