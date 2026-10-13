@@ -124,6 +124,7 @@ function estimate(messages) {
 
 const textOf = content => typeof content === 'string' ? content : (Array.isArray(content) ? content.filter(part => part?.type === 'text').map(part => part.text).join('\n') : String(content || ''));
 const tail = (text, max) => { const value = String(text || ''); return value.length > max ? `…${value.slice(-max)}` : value; };
+const drop = (list, item) => { const at = list.indexOf(item); if (at >= 0) list.splice(at, 1); };
 
 function assistantStep({ content, reasoning, toolCalls = [], native }) {
  const message = { role: 'assistant', content: content || '' };
@@ -353,20 +354,23 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  }
 
  // -------------------------------------------------- live parts
+ // Every part carries a stable id: a watching page keys its mirrored boxes by it, so a fold a
+ // reader made survives the parts list shifting under it (a long run drops its oldest lines).
+ const partId = run => `p${run.partSeq = (run.partSeq || 0) + 1}`;
  function openPart(run) {
   run.entry = { role: 'assistant', content: '', steps: [], turn: run.id };
   run.entries.push(run.entry);
   // The thinking box exists from the start (empty): a watching page gets the live card — the
   // ghost and the "thinking" label — in the very first publish, instead of nothing at all
   // while the model is still silent.
-  run.part = { thinking: { kind: 'thinking', text: '', live: true }, card: null, text: null };
+  run.part = { thinking: { id: partId(run), kind: 'thinking', text: '', live: true }, card: null, text: null };
   run.parts.push(run.part.thinking);
  }
 
  function partThinking(run) {
   if (!run.part?.thinking) {
    run.part ||= {};
-   run.part.thinking = { kind: 'thinking', text: '', live: true };
+   run.part.thinking = { id: partId(run), kind: 'thinking', text: '', live: true };
    run.parts.push(run.part.thinking);
   }
   return run.part.thinking;
@@ -375,7 +379,7 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  function partText(run) {
   if (!run.part?.text) {
    run.part ||= {};
-   run.part.text = { kind: 'text', text: '' };
+   run.part.text = { id: partId(run), kind: 'text', text: '' };
    run.parts.push(run.part.text);
   }
   return run.part.text;
@@ -635,12 +639,17 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
       publishSoon(run);
      } else if (data.type === 'done') {
       clearTimeout(watchdog);
+      // Reasoning that never streamed live (providers that hand it over only with the final
+      // result) still gets a clock: an upper bound, measured from the model call itself, so a
+      // reopened row is never the only one without a time.
+      if (!run.thinkStart && reasoning && run.requestStart) run.thinkStart = run.requestStart;
       // How long the thinking took, kept on the entry so the Thought row shows its clock
       // again after a reload — a run nobody watched used to lose it.
       if (run.thinkStart) {
        run.entry.thinkingMs = (Number(run.entry.thinkingMs) || 0) + (Date.now() - run.thinkStart);
        run.thinkStart = 0;
       }
+      run.requestStart = 0;
       resolve({
        content: data.result?.content ?? content,
        reasoning: data.result?.reasoning ?? reasoning,
@@ -651,10 +660,13 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
       });
      } else if (data.type === 'error') {
       clearTimeout(watchdog);
+      // A partial answer that already carried reasoning gets the same upper-bound clock.
+      if (!run.thinkStart && reasoning && run.requestStart) run.thinkStart = run.requestStart;
       if (run.thinkStart) {
        run.entry.thinkingMs = (Number(run.entry.thinkingMs) || 0) + (Date.now() - run.thinkStart);
        run.thinkStart = 0;
       }
+      run.requestStart = 0;
       const error = Object.assign(new Error(data.aborted ? 'Aborted' : (data.message || 'the model stopped')), {
        name: data.aborted ? 'AbortError' : 'Error',
        aborted: Boolean(data.aborted),
@@ -732,6 +744,9 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
  async function request(run) {
   const messages = [{ role: 'system', content: run.system || '' }, ...historyOf(run)];
   const tries = 4, pause = 5000;
+  // Where this model call began: the fallback clock for reasoning that only arrives with the
+  // final result (see the 'done' handler in stream()).
+  run.requestStart = Date.now();
   // Where the entry and its live parts stood before this step: a retry after half a
   // streamed answer rewinds to exactly here, so the answer is written once, not twice.
   const before = {
@@ -866,6 +881,8 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
   if (approval && run.mode !== 'full') return APPROVAL_NOTE;
   const described = (() => { try { return AgentTools?.describe?.(name, args, run.folder) || {}; } catch { return {}; } })();
   const card = {
+   id: partId(run),
+   callId: call.id,
    kind: 'tool',
    tool: name,
    toolKind: described.kind || 'command',
@@ -1037,24 +1054,38 @@ export function createKeeper({ host, userData, root, log = () => {}, publish = (
     }
     const images = [];
     const outputs = new Array(calls.length);
+    // The answers are written the moment each call finishes, not at the end of the round: a
+    // stop, a reload or an update restart right after a tool ran used to lose its answer, and
+    // the step came back from the file reading "cut off" although it had succeeded. Steps
+    // pushed by parallel runs land in whatever order they finish and are put back in call
+    // order below, before the next round hands them to the model.
+    const answered = new Array(calls.length);
     const runOne = async index => {
      const call = calls[index];
      const output = run.stopped ? CANCELLED : await useTool(run, call);
      outputs[index] = typeof output === 'string' ? output : output?.text;
      if (output?.images?.length) images.push(...output.images);
+     const step = {
+      role: 'tool',
+      tool_call_id: call.id,
+      content: outputs[index] ?? '',
+      ...(Number.isFinite(call.ms) ? { ms: call.ms } : {}),
+     };
+     answered[index] = step;
+     run.entry.steps.push(step);
+     await scheduleSave(run, true);
     };
     // Several subagents in one round work at the same time, like the app's parallel runs.
     const parallel = [];
     for (let index = 0; index < calls.length; index++) if (calls[index].function?.name === 'subagent') parallel.push(index);
     if (parallel.length > 1) await Promise.all(parallel.map(runOne));
     for (let index = 0; index < calls.length; index++) if (outputs[index] === undefined) await runOne(index);
-    for (let index = 0; index < calls.length; index++) {
-     run.entry.steps.push({
-      role: 'tool',
-      tool_call_id: calls[index].id,
-      content: outputs[index] ?? '',
-      ...(Number.isFinite(calls[index].ms) ? { ms: calls[index].ms } : {}),
-     });
+    // Call order for the model: providers read the answers by tool_call_id, but a stable order
+    // is what the file and every reader of it expect.
+    const written = answered.filter(Boolean);
+    if (written.length) {
+     for (const step of written) drop(run.entry.steps, step);
+     run.entry.steps.push(...written);
     }
     if (images.length) run.entry.steps.push(imageStep(images));
     await flushSave(run);

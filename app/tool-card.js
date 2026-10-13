@@ -201,12 +201,16 @@ class ToolCard {
 
  setResult(output, error = false) {
   this.el.classList.remove('is-running');
+  this.el.classList.remove('is-unfinished');
   this.el.classList.add(error ? 'is-error' : 'is-done');
   this.state = error ? 'error' : 'done';
   // The line speaks in the past tense the moment the call is over ("Editing a file" →
   // "Edited a file"); a model's own reason, when there is one, is left as it is.
   if (this.titleEl) this.titleEl.textContent = this.titleOf();
   if (this.reasonEl && !this.info.reason) this.reasonEl.textContent = String(this.titleOf() || '').slice(0, 90);
+  // One output per card: a re-set (the live mirror confirming a saved answer) replaces the
+  // old text — the "cut off" note included — instead of stacking a second copy under it.
+  this.inner.querySelector('.tool-output')?.remove();
   const text = String(output ?? '');
   const shown = text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n… (${text.length - OUTPUT_CHARS} more characters)` : text;
   if (shown.trim()) {
@@ -237,6 +241,18 @@ class ToolCard {
    this.photos.append(button);
   });
   if (this.photos.childElementCount && this.photos.parentElement !== this.el) this.el.append(this.photos);
+ }
+
+ // A call the file answered with nothing, but the live mirror still carries as running (the
+ // page read the chat mid-step): show it working again instead of the "cut off" note.
+ resume() {
+  this.el.classList.remove('is-done', 'is-error', 'is-unfinished');
+  this.el.classList.add('is-running');
+  this.state = 'running';
+  if (this.titleEl) this.titleEl.textContent = this.titleOf();
+  if (this.reasonEl && !this.info.reason) this.reasonEl.textContent = String(this.titleOf() || '').slice(0, 90);
+  this.inner.querySelector('.tool-output.is-unfinished')?.remove();
+  this.sync();
  }
 
  // How long the step took, shown beside a Simple visuals line.

@@ -22,7 +22,8 @@ class LiveView {
   this.body = document.createElement('div');
   this.body.className = 'live-body';
   this.el.append(head, this.body);
-  this.nodes = [];
+  this.byKey = new Map();
+  this.order = [];
   // Set by the page: when the thread already carries checklist boxes, they are updated in
   // place and the mirror must not draw a second one that jumps under the live head.
   this.showTodos = true;
@@ -32,25 +33,65 @@ class LiveView {
   // No words next to the ghost while it is thinking: the row is just the ghost, exactly like
   // the app's own working indicator. "Working"/"Writing" still name what is happening.
   this.label.textContent = info.status === 'thinking' ? '' : I18n.t(STATUS[info.status] || 'live.working');
-  const parts = Array.isArray(info.parts) ? info.parts : [];
-  for (let i = 0; i < parts.length; i++) {
-   const part = parts[i];
-   let node = this.nodes[i];
-   if (!node || node.kind !== part.kind) {
-    for (let k = i; k < this.nodes.length; k++) this.nodes[k].el.remove();
-    this.nodes.length = i;
+  // A new run on the same chat starts a fresh card: nothing from the previous run may be
+  // patched with this one's data (the ids are only unique inside a run).
+  if (info.started !== this.started) {
+   this.started = info.started;
+   for (const node of (this.byKey || new Map()).values()) node.el.remove();
+   this.byKey = new Map();
+   this.order = [];
+   this.todoKey = '';
+  }
+  const parts = (Array.isArray(info.parts) ? info.parts : []).filter(part => !this.already(part));
+  // Keyed by the part's own id: a long run drops its oldest lines, and a box keyed to the
+  // part it belongs to keeps the fold the reader made instead of being rebuilt open.
+  const byKey = this.byKey ||= new Map();
+  const order = [];
+  for (const [index, part] of parts.entries()) {
+   const key = String(part.id || `i${index}`);
+   let node = byKey.get(key);
+   if (node && node.kind !== part.kind) {
+    node.el.remove();
+    byKey.delete(key);
+    node = null;
+   }
+   if (!node) {
     node = this.build(part);
-    this.nodes.push(node);
+    byKey.set(key, node);
     this.body.append(node.el);
    }
    this.paint(node, part);
+   order.push(node);
   }
-  for (let k = parts.length; k < this.nodes.length; k++) this.nodes[k].el.remove();
-  if (this.nodes.length > parts.length) this.nodes.length = parts.length;
+  const alive = new Set(order);
+  for (const [key, node] of [...byKey]) {
+   if (alive.has(node)) continue;
+   node.el.remove();
+   byKey.delete(key);
+  }
+  // The lines only ever grow, so a mismatch means the oldest ones just dropped: put the rest
+  // back in their order instead of rebuilding the whole card every publish.
+  if (order.length !== (this.order?.length || 0) || order.some((node, at) => node !== this.order[at])) {
+   for (const node of order) this.body.append(node.el);
+  }
+  this.order = order;
   this.todos(info.todos);
   // The checklist is the "where is it now" line and stays the LAST thing in the card: new
   // tool cards and text used to land under it and bury it mid-card.
   if (this.todoCard?.el?.parentElement === this.body && this.body.lastElementChild !== this.todoCard.el) this.body.append(this.todoCard.el);
+ }
+
+ // What the thread on screen already carries (set by the page): a call whose card is already
+ // there is not drawn a second time, and neither is text or reasoning the saved copy holds —
+ // a page that reloaded mid-run used to show every step twice, subagent boxes included.
+ already(part) {
+  const shown = this.shown;
+  if (!shown) return false;
+  if (part.kind === 'tool') return Boolean(part.callId) && shown.calls?.has(part.callId);
+  const text = String(part.text || '');
+  if (!text) return false;
+  const saved = part.kind === 'thinking' ? shown.thinking : shown.content;
+  return (saved || []).some(full => full === text || full.endsWith(text) || text.startsWith(full));
  }
 
  // The device's todo checklist, drawn from the live mirror: checkmarks move while it works,

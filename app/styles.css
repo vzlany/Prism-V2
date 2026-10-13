@@ -9094,6 +9094,12 @@ html.is-simple .tool:not(.is-parallel) .tool-body{display:none}
 html.is-simple .tool:not(.is-parallel).is-open.is-touched .tool-body{display:block}
 html.is-simple .tool:not(.is-parallel).is-error .tool-body{display:block}
 html.is-simple .tool.is-error:not(.is-parallel) .tool-reason{color:rgb(var(--danger-rgb))}
+/* A step that ran but whose answer never reached the file (a stop, an update restart) is
+   unfinished, not failed: a warning voice, and its note stays visible like an error's. */
+html.is-simple .tool:not(.is-parallel).is-unfinished .tool-body{display:block}
+html.is-simple .tool.is-unfinished:not(.is-parallel) .tool-reason{color:rgb(var(--warn-rgb))}
+.tool.is-unfinished .tool-status{background:rgb(var(--warn-rgb))}
+.tool-output.is-unfinished{color:rgba(var(--fg-rgb),.55)}
 html.is-simple .tool-group.has-error .tool-group-label{background:none;background-clip:border-box;-webkit-background-clip:border-box;color:rgb(var(--danger-rgb));animation:none}
 
 /* The todo box: one rounded card that stays with the conversation. Gray ring = not started,

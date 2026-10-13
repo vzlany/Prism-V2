@@ -279,7 +279,11 @@ function syncLive() {
   if (liveView.el.parentElement !== conv.list) conv.list.append(liveView.el);
   // The card grows and folds as the run moves along; a reader up in the thread keeps their place.
   liveView.showTodos = !chat.hasTodoBoxes(conv);
+  // Steps the thread already carries (the page read the file after they were saved) are not
+  // mirrored again; their cards pick up the live state instead.
+  liveView.shown = chat.liveShown(conv);
   chat.holdView(() => liveView.update(info));
+  chat.applyLiveParts(conv, info.parts);
   // The checklist the run publishes lands in the box the thread already has (it stays under
   // its todo call); only a chat without one gets the mirror's own.
   chat.syncTodoStates(conv, info.todos);

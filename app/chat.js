@@ -240,6 +240,23 @@ function estimate(messages) {
 
 const textOf = content => typeof content === 'string' ? content : (content || []).filter(part => part.type === 'text').map(part => part.text).join('\n');
 
+// A tool's own report of the checklist ("Todo (1/2 done):\n[x] Boil water …") reads back into
+// box items: how a chat written before per-call snapshots still gets its boxes in place.
+const TODO_SIGN = { x: 'done', '~': 'doing', '!': 'failed' };
+function todoFromOutput(text) {
+ const items = [];
+ for (const line of String(text || '').split('\n')) {
+  const match = /^\[([ x~!])\]\s+(.*)$/.exec(line.trim());
+  if (match) items.push({ text: match[2].trim(), state: TODO_SIGN[match[1]] || 'idle' });
+ }
+ return items.length ? items : null;
+}
+const todoCallOf = messages => {
+ let found = null;
+ for (const entry of messages || []) for (const step of entry.steps || []) for (const call of step.tool_calls || []) if (call.function?.name === 'todo') found = call;
+ return found;
+};
+
 function transcript(entries) {
  const out = [];
  for (const entry of entries) {
@@ -805,6 +822,42 @@ class Chat {
   fresh.el.__todoKey = key;
   fresh.el.classList.add('is-snapshot');
   old.replaceWith(fresh.el);
+ }
+
+ // What a reloaded thread already shows, for the live mirror: a call whose card is on screen
+ // must not be drawn a second time, and neither is text or reasoning the saved copy holds.
+ // Cached — the file copy only changes when the thread is read or rebuilt again.
+ liveShown(conv) {
+  if (!conv) return null;
+  if (conv.shown) return conv.shown;
+  const calls = new Set();
+  const thinking = [];
+  const content = [];
+  for (const entry of conv.messages || []) {
+   if (entry.role !== 'assistant') continue;
+   if (entry.thinking) thinking.push(String(entry.thinking));
+   if (entry.content) content.push(String(entry.content));
+   for (const step of entry.steps || []) for (const call of step.tool_calls || []) if (call.id) calls.add(call.id);
+  }
+  conv.shown = { calls, thinking, content };
+  return conv.shown;
+ }
+
+ // The thread's own cards learn what the mirror knows: a call that was still running when the
+ // page read the file gets its answer — or at least its "running" look back — instead of the
+ // "cut off" note, the moment the live parts carry it.
+ applyLiveParts(conv, parts) {
+  if (!conv?.callCards?.size) return;
+  for (const part of parts || []) {
+   if (part.kind !== 'tool' || !part.callId) continue;
+   const card = conv.callCards.get(part.callId);
+   if (!card?.el?.isConnected) continue;
+   if (part.state === 'running') card.resume?.();
+   else {
+    card.setResult(part.output || '', part.state === 'error');
+    if (part.ms) card.setDuration(part.ms);
+   }
+  }
  }
 
  // Sends the same prompt to several models at once: one chat per model, all running together.
@@ -2116,12 +2169,18 @@ class Chat {
    return value.length > max ? `…${value.slice(-max)}` : value;
   };
   const parts = [];
-  for (const part of turn.parts) {
+  for (const [at, part] of turn.parts.entries()) {
    const { entry, view } = part;
-   if (entry.thinking) parts.push({ kind: 'thinking', text: tail(entry.thinking, 2400), live: Boolean(view.thinking?.live) });
+   // Stable ids: a watching page keys its mirrored boxes by them, so a fold survives the
+   // parts list shifting, and each card carries its call id so a step already in the thread
+   // is not drawn a second time.
+   if (entry.thinking) parts.push({ id: `t${at}th`, kind: 'thinking', text: tail(entry.thinking, 2400), live: Boolean(view.thinking?.live) });
+   let cardAt = 0;
    for (const card of view.el.querySelectorAll(':scope > .tool, :scope > .tool-group .tool-group-body > .tool')) {
     const state = card.classList.contains('is-error') ? 'error' : card.classList.contains('is-done') ? 'done' : 'running';
     parts.push({
+     id: `t${at}c${cardAt++}`,
+     callId: card.dataset.callId || '',
      kind: 'tool',
      // The real tool, so the mirror draws the very same card (icon, title, kind).
      tool: card.dataset.toolName || '',
@@ -2134,7 +2193,7 @@ class Chat {
      output: tail(card.querySelector('.tool-output')?.textContent || '', 1200),
     });
    }
-   if (entry.content && entry.content.trim()) parts.push({ kind: 'text', text: clip(entry.content, 8000) });
+   if (entry.content && entry.content.trim()) parts.push({ id: `t${at}x`, kind: 'text', text: clip(entry.content, 8000) });
   }
   const last = parts[parts.length - 1] || null;
   const status = last?.kind === 'text' ? 'writing' : last?.kind === 'tool' && last.state === 'running' ? 'working' : 'thinking';
@@ -2250,21 +2309,31 @@ class Chat {
    const { part, calls, finish } = await this.request(conv, turn);
    const images = [];
    const outputs = new Array(calls.length);
+   // Each answer is written the moment its tool finishes, not at the end of the round: a stop
+   // or a reload right after a tool ran used to lose its answer, and the card came back from
+   // the file reading "cut off" although the step had succeeded. Parallel runs push in
+   // whatever order they finish; they are put back in call order before the next round.
+   const answered = new Array(calls.length);
    const runOne = async index => {
     const call = calls[index];
     const result = turn.controller.signal.aborted ? TOOL_NOTES.cancelled : await this.useTool(conv, turn, part.view, call);
     outputs[index] = typeof result === 'string' ? result : result.text;
     if (result.images?.length) images.push(...result.images);
+    const step = { role: 'tool', tool_call_id: call.id, content: outputs[index] ?? '', ...(Number.isFinite(call.ms) ? { ms: call.ms } : {}) };
+    answered[index] = step;
+    part.entry.steps.push(step);
+    this.save(conv);
    };
    const parallel = [];
    for (let index = 0; index < calls.length; index++) if (calls[index].function?.name === 'subagent') parallel.push(index);
    if (parallel.length > 1) await Promise.all(parallel.map(runOne));
    for (let index = 0; index < calls.length; index++) if (outputs[index] === undefined) await runOne(index);
-   for (let index = 0; index < calls.length; index++) {
-    const output = outputs[index] ?? '';
-    part.entry.steps.push({ role: 'tool', tool_call_id: calls[index].id, content: output, ...(Number.isFinite(calls[index].ms) ? { ms: calls[index].ms } : {}) });
-    conv.tokens += Math.ceil(output.length / CONTEXT.chars);
+   const written = answered.filter(Boolean);
+   if (written.length) {
+    for (const step of written) drop(part.entry.steps, step);
+    part.entry.steps.push(...written);
    }
+   for (let index = 0; index < calls.length; index++) conv.tokens += Math.ceil((outputs[index] ?? '').length / CONTEXT.chars);
    if (images.length) {
     const step = imageStep(images);
     part.entry.steps.push(step);
@@ -2578,9 +2647,11 @@ class Chat {
   const simple = card ? this.simpleGroup(view, name, args) : null;
   if (card) {
    (simple ? simple.group.querySelector('.tool-group-body') : view.el).append(card.el);
-   // The live mirror reads these back, so a card on another device wears the same icon.
+   // The live mirror reads these back, so a card on another device wears the same icon, and
+   // the call's own id lets a page that reloaded mid-run pair the two copies of the step.
    card.el.dataset.toolKind = described.kind || 'command';
    card.el.dataset.toolName = name;
+   card.el.dataset.callId = call.id;
    if (simple) {
     simple.item.card = card;
     // The chevron only shows once the line has a step to open.
@@ -2678,6 +2749,7 @@ class Chat {
     if (card && snapshot.length) {
      const box = new TodoCard(snapshot);
      box.el.classList.add('is-snapshot');
+     if (call.id) box.el.dataset.callId = call.id;
      const holder = card.el.closest('.tool-group') || card.el;
      // Inserting a box mid-thread must not move what the reader is looking at.
      this.holdView(() => holder.after(box.el));
@@ -3007,6 +3079,12 @@ class Chat {
 
  restore(conv) {
   this.attach(conv);
+  // The newest todo call of the chat: the single box a reopened old thread still gets from
+  // the conversation's stored list when its own snapshot never reached the file (see
+  // restoredMessage), and the cards the live mirror looks up by call id.
+  conv.lastTodoCall = todoCallOf(conv.messages);
+  conv.callCards = new Map();
+  conv.shown = null;
   const ends = new Map();
   for (const entry of conv.messages) if (entry.role === 'assistant' && entry.content?.trim()) ends.set(entry.turn || entry, entry);
   // Files attached during a turn are drawn under its last message, not where the tool ran,
@@ -3153,6 +3231,9 @@ class Chat {
    const thinking = new ThinkingView();
    thinking.write(entry.thinking, false);
    thinking.setTime(entry.thinkingMs);
+   // A thought read from the file is finished work: it comes back folded whatever the live
+   // rules left behind, and a tap opens or closes it like any other.
+   thinking.setOpen(false);
    el.insertBefore(thinking.el, content);
   }
   const cwd = conv?.record?.folder || '';
@@ -3182,9 +3263,24 @@ class Chat {
    }
    // A call whose tool step never reached the file (the turn was stopped mid-step — an
    // update restart, a stop, a crash) used to come back as a card with no result, which read
-   // as "Running" forever. Say what happened instead.
+   // as "Running" forever. Say what happened instead — and say it as unfinished, not failed:
+   // the step ran, only its answer never made it to disk, and a live mirror may still fill it
+   // in (data-call-id is how the mirror finds this very card).
    const answered = call.__output !== undefined && call.__output !== null;
-   card.setResult(answered ? call.__output : I18n.t('tool.unfinished'), !answered);
+   if (answered) {
+    // A real failure answers with "Error: …" (the same rule the keeper stamps its cards
+    // with) — that one keeps its red; everything else is an ordinary result.
+    card.setResult(call.__output, /^Error[: ]/.test(String(call.__output)));
+   } else {
+    card.setResult(I18n.t('tool.unfinished'));
+    card.el.classList.add('is-unfinished');
+    card.inner.querySelector('.tool-output')?.classList.add('is-unfinished');
+    if (!card.touched && card.hasBody()) { card.open = true; card.sync(); }
+   }
+   if (call.id && conv) {
+    card.el.dataset.callId = call.id;
+    (conv.callCards ||= new Map()).set(call.id, card);
+   }
    // How long the step took: read from the tool step or from the call itself, so a run
    // nobody watched (the server engine) still shows its "(3.4s)" after a reload.
    const ms = Number.isFinite(call.__ms) ? call.__ms : (Number.isFinite(call.ms) ? call.ms : 0);
@@ -3209,14 +3305,22 @@ class Chat {
     el.append(card.el);
    }
    // The checklist a todo call left behind: one box per call, right under it, kept exactly
-   // where it was — a reload must not move it to the newest position or replace it.
-   if (isTodo && Array.isArray(call.todo) && call.todo.length) {
-    const box = new TodoCard(call.todo);
-    box.el.classList.add('is-snapshot');
-    const holder = card.el.closest('.tool-group') || card.el;
-    let ref = holder;
-    while (ref.nextElementSibling?.classList?.contains('todo-card')) ref = ref.nextElementSibling;
-    ref.after(box.el);
+   // where it was — a reload must not move it to the newest position or replace it. Data from
+   // before the per-call snapshots still gets its box: from the tool's own report, and for the
+   // newest call of the chat from the stored list, so a reopened thread never loses the box.
+   if (isTodo) {
+    const items = (Array.isArray(call.todo) && call.todo.length ? call.todo : null)
+     || todoFromOutput(call.__output)
+     || (conv && call === conv.lastTodoCall && conv.todos?.length ? conv.todos : null);
+    if (items?.length) {
+     const box = new TodoCard(items);
+     box.el.classList.add('is-snapshot');
+     if (call.id) box.el.dataset.callId = call.id;
+     const holder = card.el.closest('.tool-group') || card.el;
+     let ref = holder;
+     while (ref.nextElementSibling?.classList?.contains('todo-card')) ref = ref.nextElementSibling;
+     ref.after(box.el);
+    }
    }
    if (call.function?.name === 'write_file' || call.function?.name === 'edit_file') {
     if (args.path) {
