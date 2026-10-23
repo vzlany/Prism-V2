@@ -11,6 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const core = require('./update-core');
 const Server = require('./server');
+const UpdateNote = require('./update-note');
 
 const DELAY = 3500;               // let the window settle before the first check
 const PERIOD = 10 * 60 * 1000;    // check every ten minutes, so an update is offered promptly
@@ -108,6 +109,12 @@ async function install(info, { gate } = {}) {
  win?.setProgressBar(-1);
  if (gate && !gate()) return { deferred: true };
  announce({ state: 'installing', version: info.version });
+ // Say it in the chat before the window goes away: after the restart there is nobody left to
+ // report the update it just did.
+ const told = UpdateNote.write({ userData: userData(), from: current(), to: info.version, platform: process.platform });
+ if (told) {
+  try { require('./discord').send('Prism V2 updated', 'completed', told.text, [], ''); } catch {}
+ }
  if (process.platform === 'linux') {
   const root = installRoot();
   const applied = core.applyLinux({ root, tarFile: file });

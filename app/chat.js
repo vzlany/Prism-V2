@@ -871,15 +871,35 @@ class Chat {
 
  // The thread's own cards learn what the mirror knows: a call that was still running when the
  // page read the file gets its answer — or at least its "running" look back — instead of the
- // "cut off" note, the moment the live parts carry it.
+ // "cut off" note, the moment the live parts carry it. The thought box is part of that: a page
+ // refreshed mid-reasoning used to come back with a folded Thought row and no sign of the
+ // sentence being written, because the saved copy already held it and the mirror therefore
+ // skipped it. Now the box itself is put back to work.
  applyLiveParts(conv, parts) {
-  if (!conv?.callCards?.size) return;
+  if (!conv) return;
+  const thinking = [...(parts || [])].reverse().find(part => part.kind === 'thinking' && part.live);
+  const box = conv.lastThinking;
+  if (box?.el?.isConnected) {
+   if (thinking) {
+    // The mirror only carries the head of a long thought: never let it shorten a box that
+    // already shows more, just mark it live again and open it.
+    const live = String(thinking.text || ''), shown = String(box.text || '');
+    box.write(live.length >= shown.length ? live : shown, true);
+   } else if (box.live) {
+    box.finish();
+   }
+  }
+  if (!conv.callCards?.size) return;
   for (const part of parts || []) {
    if (part.kind !== 'tool' || !part.callId) continue;
    const card = conv.callCards.get(part.callId);
    if (!card?.el?.isConnected) continue;
-   if (part.state === 'running') card.resume?.();
-   else {
+   if (part.state === 'running') {
+    card.resume?.();
+    // A step that is working right now is shown working: the restored card came back as a
+    // folded "unfinished" line, and a reader watching the phone never saw it open again.
+    if (!card.touched && card.hasBody?.()) { card.open = true; card.sync?.(); }
+   } else {
     card.setResult(part.output || '', part.state === 'error');
     if (part.ms) card.setDuration(part.ms);
    }
@@ -3395,8 +3415,10 @@ const tail = (text, max) => {
    thinking.write(entry.thinking, false);
    thinking.setTime(entry.thinkingMs);
    // A thought read from the file is finished work: it comes back folded whatever the live
-   // rules left behind, and a tap opens or closes it like any other.
+   // rules left behind, and a tap opens or closes it like any other. The live mirror takes it
+   // back over (applyLiveParts) when the run is in fact still going.
    thinking.setOpen(false);
+   if (conv) conv.lastThinking = thinking;
    el.insertBefore(thinking.el, content);
   }
   const cwd = conv?.record?.folder || '';

@@ -277,6 +277,10 @@ function syncLive() {
  if (conv && info) {
   if (!liveView) liveView = new LiveView();
   if (liveView.el.parentElement !== conv.list) conv.list.append(liveView.el);
+  // The card is the newest thing in the thread, always: a tail refresh that appended the
+  // answer under it left the live lines sitting in the middle of the conversation until the
+  // page was reloaded a second time.
+  else if (conv.list.lastElementChild !== liveView.el) conv.list.append(liveView.el);
   // The card grows and folds as the run moves along; a reader up in the thread keeps their place.
   liveView.showTodos = !chat.hasTodoBoxes(conv);
   // Steps the thread already carries (the page read the file after they were saved) are not
