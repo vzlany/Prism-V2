@@ -661,6 +661,9 @@ class Settings {
    row('settings.auto.web', 'settings.auto.webHint', `<div class="mcp-add-row">${toggle('auto-web', auto.web)}<input class="settings-key auto-port" type="number" min="1" max="65535" value="${auto.port}" ${auto.web ? '' : 'disabled'}><button type="button" class="settings-button" data-auto-open ${auto.webRunning || auto.web ? '' : 'disabled'}>${escapeHtml(I18n.t('settings.auto.open'))}</button></div>`),
    row('settings.auto.bot', 'settings.auto.botHint', `<div class="mcp-add-row">${toggle('auto-bot', auto.bot)}<span class="auto-bot-state ${auto.botRunning ? 'is-on' : ''}">${escapeHtml(I18n.t(auto.botRunning ? 'settings.auto.botRunning' : 'settings.auto.botStopped'))}</span></div>`),
    row('settings.auto.awake', 'settings.auto.awakeHint', toggle('auto-awake', auto.awake !== false)),
+   auto.background
+    ? `<p class="settings-hint auto-background">${escapeHtml(I18n.t('settings.auto.backgroundRoles', { roles: auto.background.roles.join(', '), pid: auto.background.pid }))} ${escapeHtml(I18n.t('settings.auto.background'))}</p>`
+    : '',
    row('settings.auto.net', 'settings.auto.netHint', `<div data-auto-net></div>`),
    `<p class="settings-status" data-provider="auto" role="status"></p>`,
   ].join('');

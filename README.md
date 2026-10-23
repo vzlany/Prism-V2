@@ -385,10 +385,39 @@ the per-user WindowsApps folder; an existing `prism` on PATH is never touched). 
 a checkout instead, `npm link` does the same.
 
 The web mode reuses the desktop engines behind an Electron stand-in: tools, models, MCP
-servers and memory all work. Caveats: there is no built-in browser panel (webviews need
-Electron), ChatGPT sign-in is desktop-only, and the Go key is entered per browser profile.
-Anyone who can reach the port can run tools on that computer, so leave it on `127.0.0.1`
-unless you mean it.
+servers and memory all work. Caveats: there is no built-in browser *panel* (webviews need
+Electron) — the browser tools run headless instead, see below — ChatGPT sign-in is
+desktop-only, and the Go key is entered per browser profile. Anyone who can reach the port
+can run tools on that computer, so leave it on `127.0.0.1` unless you mean it.
+
+## The agent's browser without a window
+
+The panel on the right of the desktop app needs a window and someone looking at it. Everywhere
+else — the website on a phone, `prism web`, `prism server` under systemd, a Discord DM — the
+same `browser_*` tools drive a real Chromium that Prism launches headless: no window, no tab
+on any screen, only the agent sees the page. It keeps its own profile in
+`<userData>/browser-profile`, so a site signed in once stays signed in between runs.
+
+```sh
+prism browser install   # adds Playwright + Chromium (~150 MB) to ~/.prism/browser
+prism browser           # says which engine Prism would use
+```
+
+Prism looks for Playwright in `PRISM_PLAYWRIGHT`, the install's `node_modules`, and
+`~/.prism/browser/node_modules`; with none of them the tool says so plainly instead of
+pretending the browser is desktop-only. The desktop app keeps using the panel — a shared
+browser the user can watch and take over — and only falls back to the headless engine when
+there is no panel to drive.
+
+## One Prism per machine
+
+Opening the app while a background engine already runs — the systemd service, a web server
+left in a terminal, a bot that outlived its app — shows the interface and starts nothing:
+without this a second web server fought for port 8787 and a second bot for `bot-lock.json`.
+Every engine announces itself in `<userData>/instances.json` (role, port, version, build
+root); a window that finds a live `server`, `web` or `bridge` entry joins it, and Settings →
+Auto says which process is doing the serving. `prism web` opened by hand behaves the same
+way, and only an engine from another build or version is ever stopped.
 
 ## prism discord
 

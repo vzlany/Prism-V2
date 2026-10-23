@@ -80,6 +80,12 @@ const FORMAT_GUIDE = window.FormatGuide || [];
 window.PrismFormat = { guide: FORMAT_GUIDE };
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// A phone has no wheel and no room for a spring. There, content that grows while the reader is
+// at the bottom is pinned in the same frame: chasing it down over a few hundred milliseconds
+// is what looked like the page jumping up and then racing back to the bottom whenever a tool
+// line appeared. A desktop keeps the spring, where it reads as a smooth follow.
+const COARSE = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+const instantFollow = () => reducedMotion() || Boolean(COARSE?.matches);
 // Where this window runs from: a message written on the phone shows on the desktop as
 // "Website", one written in Discord shows everywhere as "Discord", and so on. A message is
 // never labelled in the place it was written.
@@ -390,6 +396,18 @@ class Chat {
    this.pin();
    this.syncBottom();
   });
+  // Late layout moves the bottom by a few pixels after the first paint: a web font swapping
+  // in, an attachment picture arriving, the phone's address bar or keyboard changing the
+  // viewport. A thread that is following is put back on the bottom once that settles, instead
+  // of being left a few pixels short of it until the next delivery.
+  const repin = () => {
+   if (!this.follow) return;
+   this.pin();
+   this.syncBottom();
+  };
+  document.fonts?.ready?.then(repin).catch(() => {});
+  window.addEventListener('load', repin, { once: true });
+  window.visualViewport?.addEventListener('resize', repin);
   // Passive, and coalesced to one frame: a fast scroll fires far more often than the list
   // needs, and onScroll reads heights and can insert older messages.
   thread.addEventListener('scroll', () => {
@@ -1143,7 +1161,11 @@ class Chat {
  }
 
  pin() {
-  this.thread.scrollTop = this.thread.scrollHeight;
+  // A pinned thread that is already at the bottom is left alone: writing the same few pixels
+  // again fires a scroll event, and on a phone that echo is the whole "it moves by itself"
+  // circle — the observer pins, the scroll event answers, the observer pins again.
+  const max = this.thread.scrollHeight - this.thread.clientHeight;
+  if (Math.abs(this.thread.scrollTop - max) > 0.5) this.thread.scrollTop = max;
   this.lastTop = this.thread.scrollTop;
   this.grewHeight = this.thread.scrollHeight;
  }
@@ -1843,6 +1865,18 @@ class Chat {
   // A frame that was scheduled but never ran (the window went hidden before it fired) is
   // stale: it is replaced instead of blocking the follow forever.
   if (this.followFrame && performance.now() - this.followAt < 250) return;
+  // Touch: no spring at all. The view is put on the bottom in the same frame the content grew,
+  // so a tool line appearing never reads as the page jumping up and then racing back down.
+  if (instantFollow()) {
+   const end = this.thread.scrollHeight - this.thread.clientHeight;
+   if (Math.abs(this.thread.scrollTop - end) > 0.5) this.thread.scrollTop = end;
+   this.followPos = this.thread.scrollTop;
+   this.followVel = 0;
+   this.followMoving = false;
+   this.lastTop = this.thread.scrollTop;
+   this.grewHeight = this.thread.scrollHeight;
+   return;
+  }
   if (!this.followMoving) {
    this.followPos = this.thread.scrollTop;
    this.followVel = 0;

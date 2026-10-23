@@ -1219,6 +1219,11 @@ body.is-resizing-sidebar .main {
   overscroll-behavior: contain;
   scrollbar-width: none;
   scroll-padding-bottom: calc(var(--composer-space, 140px) + 16px);
+  /* Prism keeps the reader's place itself (anchorRestore and the follow spring). The browser's
+     own scroll anchoring runs on top of that and nudges the view a few pixels every time a
+     node is inserted or removed above it — a tool line arriving, a thought folding — which is
+     what made the page jump on a phone. One owner of the scroll position, and it is this one. */
+  overflow-anchor: none;
 }
 
 .thread::-webkit-scrollbar {

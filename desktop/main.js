@@ -357,6 +357,25 @@ function serverMode(auto = readAuto()) {
  return auto.server === true || (process.platform === 'linux' && Boolean(auto.web) && Boolean(auto.bot));
 }
 
+// --------------------------------------------------------------- one engine per machine
+// A background engine already does the serving — `prism server` under systemd, or a web
+// server left running from a terminal. Opening the window on top of it must add the interface
+// and nothing else: a second web server fights for port 8787 and a second bot fights for the
+// lock file, so the user would end up with two of everything and no idea which one answered.
+// The registry every engine writes (desktop/instances.js) is what says who is already there.
+function backgroundEngines() {
+ try {
+  const Instances = require('./instances');
+  return Instances.background(app.getPath('userData'), { exclude: [webChild?.pid, botChild?.pid] });
+ } catch {
+  return null;
+ }
+}
+
+// What this window borrows instead of starting: filled by startWeb/startBot, read by the
+// Auto page so it can say where the server and the bot really come from.
+let adopted = { web: null, bot: null };
+
 // --------------------------------------------------------------- other devices
 // The beacon advertises this install; picking another device opens its web UI in its own
 // window (no preload: the remote page talks to ITS engine, so chats, instructions and skills
@@ -557,6 +576,14 @@ function stopWeb() {
 }
 function startWeb(auto = readAuto()) {
  if (webChild || !auto.web) return;
+ // Someone else already serves this machine: show the window, leave the server where it is.
+ const running = backgroundEngines();
+ if (running && (running.roles.includes('server') || running.roles.includes('web'))) {
+  if (adopted.web !== running.pid) console.log(`[auto] a background engine (pid ${running.pid}) already serves the web UI — this window joins it instead of starting a second one`);
+  adopted.web = running.pid;
+  return;
+ }
+ adopted.web = null;
  const script = path.join(ROOT, 'tools', 'web-server.mjs');
  try {
   webChild = spawn(process.execPath, [script, '--port', String(webPort(auto)), '--host', '0.0.0.0', '--no-open', ...(PROFILE ? ['--profile', PROFILE] : [])], {
@@ -590,6 +617,14 @@ function stopBot() {
 }
 function startBot(auto = readAuto()) {
  if (botChild || !auto.bot) return;
+ // One bot per machine: a second one would fight over bot-lock.json and answer nothing.
+ const running = backgroundEngines();
+ if (running && (running.roles.includes('server') || running.roles.includes('bot'))) {
+  if (adopted.bot !== running.pid) console.log(`[auto] a background engine (pid ${running.pid}) already runs the Discord bot — this window joins it instead of starting a second one`);
+  adopted.bot = running.pid;
+  return;
+ }
+ adopted.bot = null;
  const script = path.join(ROOT, 'tools', 'discord-bridge.mjs');
  try {
   botChild = spawn(process.execPath, [script, ...(PROFILE ? ['--profile', PROFILE] : [])], {
@@ -605,10 +640,27 @@ function startBot(auto = readAuto()) {
   console.log('[auto] could not start the discord bot:', error.message);
  }
 }
+// The Auto page reads one object: what this install is set to do, what is actually running
+// here right now, and whether what is running belongs to a background engine instead of this
+// window (then the switches say "on" but this app does not own the processes).
+function autoState(auto = readAuto()) {
+ return {
+  login: !!auto.login,
+  hidden: !!auto.hidden,
+  web: !!auto.web,
+  bot: !!auto.bot,
+  server: serverMode(auto),
+  awake: auto.awake !== false,
+  port: webPort(auto),
+  webRunning: Boolean(webChild) || Boolean(adopted.web),
+  botRunning: Boolean(botChild) || Boolean(adopted.bot),
+  owned: { web: Boolean(webChild), bot: Boolean(botChild) },
+  background: adopted.web || adopted.bot ? backgroundEngines() : null,
+ };
+}
 ipcMain.handle('auto:get', event => {
  if (!fromApp(event)) return null;
- const auto = readAuto();
- return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, server: serverMode(auto), awake: auto.awake !== false, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
+ return autoState();
 });
 // The web server lists its live connections in web-clients.json (it may also be running
 // from a terminal, not started by this app): the Auto page shows the port and the devices.
@@ -645,7 +697,7 @@ ipcMain.handle('auto:set', (event, patch) => {
   deviceBeacon.port = auto.web ? webPort(auto) : 0;
   deviceBeacon.server = serverMode(auto);
  }
- return { login: !!auto.login, hidden: !!auto.hidden, web: !!auto.web, bot: !!auto.bot, server: serverMode(auto), awake: auto.awake !== false, port: webPort(auto), webRunning: Boolean(webChild), botRunning: Boolean(botChild) };
+ return autoState(auto);
 });
 
 // --------------------------------------------------------------- devices (other Prism apps)
@@ -1181,6 +1233,8 @@ if (process.argv.includes('--create-shortcut')) {
   } catch (error) {
    console.log('[instances] registry unavailable:', error.message);
   }
+  const background = backgroundEngines();
+  if (background) console.log(`[auto] ${background.roles.join(' + ')} already running in the background (pid ${background.pid}) — this window adds the interface only`);
   startWeb();
   startBot();
   // Old trees from an earlier Linux self-update are cleared once nothing runs from them.

@@ -52,6 +52,29 @@ if (command === "discord") {
  process.exit(run("node", [join(root, "tools", "discord-bridge.mjs"), ...args.slice(1)]))
 }
 
+if (command === "browser") {
+ // The agent's own browser, for a machine with no panel: a real Chromium it drives headless,
+ // so browser_* tools work from the website, from `prism server` and from Discord.
+ const action = args[1] || "status";
+ const folder = join(process.env.HOME || process.env.USERPROFILE || root, ".prism", "browser");
+ if (action === "install") {
+  console.log(`Installing the browser engine into ${folder} …`)
+  const installed = run("npm", ["install", "--no-audit", "--no-fund", "--prefix", folder, "playwright"], { stdio: "inherit" })
+  if (installed !== 0) { console.error("Could not install Playwright. Check that npm is on PATH and the network works."); process.exit(installed) }
+  const bin = join(folder, "node_modules", ".bin", process.platform === "win32" ? "playwright.cmd" : "playwright")
+  const browser = run(bin, ["install", "chromium"], { cwd: folder, stdio: "inherit" })
+  if (browser !== 0) { console.error("Playwright is installed but Chromium did not download. Run it again with a working network."); process.exit(browser) }
+  console.log(`Done. Prism finds it in ${join(folder, "node_modules", "playwright")} — no setting needed.`)
+  process.exit(0)
+ }
+ const found = [join(folder, "node_modules", "playwright"), join(root, "node_modules", "playwright"), process.env.PRISM_PLAYWRIGHT || ""]
+  .find(file => file && existsSync(file))
+ console.log(found
+  ? `Browser engine: ${found}\nPrism uses it for the browser_* tools wherever no panel exists (website, prism server, Discord).`
+  : `No browser engine installed.\nRun "prism browser install" to add Chromium (about 150 MB), or set PRISM_PLAYWRIGHT to an existing Playwright.`)
+ process.exit(found ? 0 : 1)
+}
+
 if (command === "import") {
  if (!has("bun") && !existsSync(join(root, "node_modules"))) {
   console.error("prism import needs Bun. Install it from https://bun.sh and try again.")
@@ -61,7 +84,7 @@ if (command === "import") {
 }
 
 if (command === "--help" || command === "help") {
- console.log("prism            open the desktop app\nprism web        serve Prism V2 to the browser (terminal logs activity)\nprism server     web + Discord bot together, headless (Linux server)\nprism discord    talk to Prism V2 from Discord DMs (works from any network)\nprism import     bring OpenCode chats into Prism V2")
+ console.log("prism            open the desktop app\nprism web        serve Prism V2 to the browser (terminal logs activity)\nprism server     web + Discord bot together, headless (Linux server)\nprism discord    talk to Prism V2 from Discord DMs (works from any network)\nprism browser    install or show the headless browser the tools drive (prism browser install)\nprism import     bring OpenCode chats into Prism V2")
  process.exit(0)
 }
 

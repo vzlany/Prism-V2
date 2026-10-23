@@ -11,6 +11,7 @@ const { net, clipboard, shell: electronShell, Notification, desktopCapturer, nat
 const netFetch = (input, init) => (net?.fetch ? net.fetch(input, init) : globalThis.fetch(input, init));
 const Media = require('./media');
 const Browser = require('./browser');
+const HeadlessBrowser = require('./headless-browser');
 const Server = require('./server');
 
 const IS_WIN = process.platform === 'win32';
@@ -565,8 +566,13 @@ const TOOLS = {
 
 async function runTool(id, name, args, cwd, sender) {
  if (name.startsWith('browser_')) {
+  const payload = args && typeof args === 'object' ? args : {};
   try {
-   return await cancellable(String(id || ''), signal => Browser.run(name, args && typeof args === 'object' ? args : {}, sender, signal));
+   // The panel is the browser of the desktop app's window. Everything else — `prism web`,
+   // `prism server` under systemd, the Discord bot — has no window to put one in, so the same
+   // tools drive a headless browser instead: a real Chromium, no window, only the agent sees it.
+   if (Browser.usable()) return await cancellable(String(id || ''), signal => Browser.run(name, payload, sender, signal));
+   return await cancellable(String(id || ''), signal => HeadlessBrowser.run(name, payload, signal));
   } catch (error) {
    return { error: explain(error) };
   }

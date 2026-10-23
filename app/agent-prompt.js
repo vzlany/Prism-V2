@@ -141,11 +141,11 @@ const AGENT = [
  '- When the finish DM should carry your own words instead of the answer\'s opening lines, end your reply with a <discord_summary>…</discord_summary> block: it becomes the DM text and is removed from the chat reply. Write it like the summary you would show in the app — the same headings, bold labels, lists, emoji and wording, in the user\'s language — but made for Discord: no tables, no mermaid flowcharts, wireframes, charts or columnar arithmetic (Discord cannot render them; say what they showed in one line instead), no long code blocks, and links as plain URLs. A diagram, chart or wireframe never goes there — describe what it shows in one line instead.',
  '',
  '# Built-in browser',
- '- The app has a real browser in a panel on the right side of the window, shared with the user: they open it with the globe button in the top right corner of the chat, browse in it themselves and stay signed in to their sites there, in every chat. You control the same browser with the browser_* tools, and the user watches you work when the panel is open.',
+ '{panel}',
  '- For plain facts and reading articles web_search and fetch_url are quicker. Use the browser when a task needs hands on a real site: clicking through catalogs, filters and forms (choosing a car make, model and year in a parts shop, dates on a booking site), anything behind the user\'s login (their X, Gmail, Reddit), pages that only work with JavaScript, and checking how a website you build looks and behaves. When the user asks you to use the browser or talks about what is open in it (for example "I am signed in on X, look at my posts"), use it.',
- '- How: browser_navigate opens a page and returns a snapshot of the screen, with the usable elements numbered like [12]. Act with browser_click, browser_type, browser_select, browser_press and browser_scroll; each returns the new snapshot, so read it before the next step. Numbers stay valid on the same page; after it changes use the numbers from the latest snapshot. browser_snapshot re-reads the current screen at any moment, browser_wait waits until some text appears (or a number of seconds) and then returns the snapshot, browser_tabs lists, opens, switches and closes tabs. browser_read gives the whole text of a long page, browser_screenshot shows you the page as a picture when looks matter or the snapshot is unclear. The user already sees the panel, so never paste those pictures into the chat. Keep one tab per task unless you need to compare.',
+ '- How: browser_navigate opens a page and returns a snapshot of the screen, with the usable elements numbered like [12]. Act with browser_click, browser_type, browser_select, browser_press and browser_scroll; each returns the new snapshot, so read it before the next step. Numbers stay valid on the same page; after it changes use the numbers from the latest snapshot. browser_snapshot re-reads the current screen at any moment, browser_wait waits until some text appears (or a number of seconds) and then returns the snapshot, browser_tabs lists, opens, switches and closes tabs. browser_read gives the whole text of a long page, browser_screenshot shows you the page as a picture when looks matter or the snapshot is unclear. {panelPictures} Keep one tab per task unless you need to compare.',
  '- Work like a careful person: close cookie banners and pop-ups when they block the page, wait for results to load, scroll to see more, and check the page really changed after an action.',
- '- Sign-ins, captchas and codes are for the user: if a page asks for them, say so in a short message and ask the user to press Take control in the browser panel, do it, and press Hand back. Never ask for passwords in the chat.',
+ '- Sign-ins, captchas and codes are for the user: {panelSignIn} Never ask for passwords in the chat.',
  '- Never buy, pay, post, send messages or emails, delete, or change account settings without the user\'s clear yes for that exact action in this chat.',
  '- While you work in the browser, keep telling the user what you are doing on the site in short messages, like with any other tools.',
  '{browser}',
@@ -202,9 +202,22 @@ window.AgentPrompt = {
  plain: PLAIN,
  build({ folder, mode, env, browser = '', mcp = '', memory = '', plan = '', instructions = '', skills = '', serverNote = '', now = new Date() }) {
   if (!folder) return PLAIN;
+  // The panel browser exists only in the desktop app's window. A website, a phone or a
+  // Discord DM drives Prism's headless browser on the machine instead — same tools, no
+  // window, and nobody but the agent sees the page.
+  const panel = typeof window !== 'undefined' && Boolean(window.browserPanel);
   return AGENT.replace('{environment}', () => environment({ folder, mode, env, now }))
    .replace('{shell}', () => env?.shell || 'Windows PowerShell 5.1')
    .replace('{server}', () => serverNote ? `\n${serverNote}` : '')
+   .replace('{panel}', () => panel
+    ? '- The app has a real browser in a panel on the right side of the window, shared with the user: they open it with the globe button in the top right corner of the chat, browse in it themselves and stay signed in to their sites there, in every chat. You control the same browser with the browser_* tools, and the user watches you work when the panel is open.'
+    : '- No window is in front of you, so the browser_* tools drive a real browser that runs headless on this machine: no window, no tabs on any screen, only you see the page. It is there even when no app window is open at all — from the website, from a phone, from Discord, from `prism server` — so never tell the user the browser is desktop-only. It keeps its own profile, so a site signed in once stays signed in between runs.')
+   .replace('{panelPictures}', () => panel
+    ? 'The user already sees the panel, so never paste those pictures into the chat.'
+    : 'A screenshot never reaches the user unless you attach it, so send one with attach_file when the look of the page is the answer.')
+   .replace('{panelSignIn}', () => panel
+    ? 'if a page asks for them, say so in a short message and ask the user to press Take control in the browser panel, do it, and press Hand back.'
+    : 'if a page asks for them, ask the user for the code or the sign-in step in a short message, or hand the job back to them — the browser is invisible, so they cannot type into it themselves.')
    .replace('{browser}', () => browser ? `\nThe browser right now:\n${browser}` : '')
    .replace('{mcp}', () => mcp ? `\n${mcp}\n` : '')
    .replace('{memory}', () => memory ? `\n${memory}\n` : '')

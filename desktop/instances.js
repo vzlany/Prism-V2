@@ -181,4 +181,23 @@ const isForeignBuild = (entry, { root, version }) => {
  return Boolean(entryVersion && ownVersion && entryVersion !== ownVersion);
 };
 
-module.exports = { userDataFor, attach, list, stopEntry, stopEntryAsync, sweep, verified, isForeignBuild, file };
+// The engine that is already doing this machine's serving: `prism server` under systemd, a web
+// server left running in a terminal, a bot that outlived its app. A window opening on top of it
+// brings the interface and must start nothing of its own — a second web server fights for the
+// port and a second bot for the lock file — so this is what tells it to join instead.
+function background(userData, { roles = ['server', 'web', 'bridge'], exclude = [] } = {}) {
+ const skip = new Set([process.pid, ...exclude.filter(Boolean).map(Number)]);
+ const live = list(userData).filter(entry => !skip.has(entry.pid) && roles.includes(entry.role) && verified(entry));
+ if (!live.length) return null;
+ const pick = role => live.find(entry => entry.role === role) || null;
+ const server = pick('server'), web = pick('web'), bot = pick('bridge');
+ const first = server || web || bot;
+ return {
+  pid: first.pid,
+  roles: [server && 'server', web && 'web', bot && 'bot'].filter(Boolean),
+  port: Number(server?.port || web?.port) || 0,
+  version: first.version || '',
+ };
+}
+
+module.exports = { userDataFor, attach, list, stopEntry, stopEntryAsync, sweep, verified, isForeignBuild, background, file };

@@ -637,14 +637,16 @@ function frames(result) {
 }
 
 async function browser(name, args, id, cwd) {
+ // The panel browser needs the desktop app's window. Without one — the website, a phone, a
+ // Discord DM — the same tools run Prism's headless browser on the machine instead.
  const panel = window.browserPanel;
- if (!panel) return 'Error: the built-in browser is only available in the desktop app';
- const result = await panel.run(name, args, { id, cwd });
+ if (!panel && !bridge) return 'Error: the browser is only available in the desktop app';
+ const result = panel ? await panel.run(name, args, { id, cwd }) : await bridge.run(id, name, args, cwd);
  if (!result || result.error) return `Error: ${result?.error || 'the browser did not answer'}`;
  if (result.refs) refs = result.refs;
- if (result.image) return { text: result.text, images: [{ label: 'Screenshot of the built-in browser', url: result.image }] };
+ if (result.image) return { text: result.text, images: [{ label: panel ? 'Screenshot of the built-in browser' : 'Screenshot of the agent browser', url: result.image }] };
  if (result.html !== undefined) return page({ url: result.url, status: 200, type: 'text/html', text: result.html }, args.start);
- const tabs = name === 'browser_tabs' ? '' : panel.tabsLine();
+ const tabs = name === 'browser_tabs' ? '' : (panel?.tabsLine?.() || '');
  return tabs ? `${tabs}\n${result.text}` : result.text;
 }
 

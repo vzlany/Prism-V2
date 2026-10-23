@@ -641,4 +641,11 @@ function setShown(value) {
  shown = { open: !!value?.open, id: Number(value?.id) || 0 };
 }
 
-module.exports = { PARTITION, setup, guard, adopt, run, setShown };
+// Is the panel browser part of this process? The desktop app calls setup() when its window is
+// ready; a headless engine (prism web, prism server, the Discord bot) loads this module behind
+// the Electron stand-in and never does. The tool router asks this to pick a browser.
+function usable() {
+ return ready;
+}
+
+module.exports = { PARTITION, setup, guard, adopt, run, setShown, usable, INSTALL };
