@@ -458,16 +458,10 @@ export function createEngineHost({ profile = "", webPort = 0 } = {}) {
    const Server = require(join(ROOT, "desktop", "server.js"));
    Server.ensureLinuxAutostart(installRoot);
   } catch {}
-  // The word the user asked for: an update that runs on its own must say so. The note is
-  // written into the chat store now, while this process still exists to write it, and the new
-  // build reads it as an ordinary chat when it comes back.
-  try {
-   const UpdateNote = require(join(ROOT, "desktop", "update-note.js"));
-   const told = UpdateNote.write({ userData: USER_DATA, from: current, to: applied.version || release.version, why: "automatically", platform: process.platform });
-   if (told) console.log(`[update] ${told.text}`);
-  } catch (error) {
-   console.log(`[update] could not leave the note: ${error.message}`);
-  }
+  // The word the user asked for is the boot announcement (see announceUpdate): an update that
+  // runs on its own must say so in the conversation it interrupted. The server already has
+  // that path, so nothing extra is written here — only the log line, which says what landed.
+  console.log(`[update] v${applied.version || release.version} is on disk — announcing it at boot`);
   const up = supervised();
   writeUpdateState({ phase: up ? "restarting" : "done", version: applied.version || release.version, chatId });
   if (up) {

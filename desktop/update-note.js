@@ -9,11 +9,7 @@
 // atomically, so a reader on another device never catches half a note.
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-
-const TITLE = 'Prism V2 updates';
-const MARK = 'updates';
 
 const readJson = (file, fallback = null) => {
  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
@@ -26,8 +22,6 @@ const writeJson = (file, value) => {
  fs.writeFileSync(temp, JSON.stringify(value));
  fs.renameSync(temp, file);
 };
-
-const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 function note({ from = '', to = '', why = 'automatically', platform = process.platform, at = Date.now(), restart = true } = {}) {
  if (!to) return null;
@@ -48,46 +42,37 @@ function note({ from = '', to = '', why = 'automatically', platform = process.pl
  };
 }
 
-// Appends the note to the updates chat, creating it the first time. Returns what was written,
-// so a caller can also put the same line on Discord.
-function write({ userData, from = '', to = '', why = 'automatically', platform = process.platform, at = Date.now() } = {}) {
+// Appends the note to the conversation the user was in (or the newest one), the way a normal
+// message reads there — the request was a message in the chat, not a separate log.
+function write({ userData, chatId = '', from = '', to = '', why = 'automatically', platform = process.platform, at = Date.now() } = {}) {
  const made = note({ from, to, why, platform, at });
  if (!made || !userData) return null;
  const store = path.join(userData, 'store');
  const indexFile = path.join(store, 'index.json');
- const index = readJson(indexFile, null) || { version: 1, folders: [], chats: [] };
- if (!Array.isArray(index.chats)) index.chats = [];
- let chat = index.chats.find(item => item && item[MARK] === true);
+ const index = readJson(indexFile, null);
+ if (!index) return null;
+ const chats = Array.isArray(index.chats) ? index.chats : [];
+ // Where the user is: the chat the update was started from, else the newest one they used.
+ let chat = chats.find(item => item && chatId && item.id === chatId);
  if (!chat) {
-  chat = {
-   id: newId(),
-   title: TITLE,
-   folder: process.env.HOME || os.homedir() || '',
-   created: at,
-   updated: at,
-   pinned: true,
-   named: true,
-   model: '',
-   mode: 'auto',
-   order: -1,
-   [MARK]: true,
-  };
-  index.chats.unshift(chat);
+  chat = chats
+   .filter(item => item && !item.incognito && !item.subagent && !item.archived && !item.parent)
+   .sort((a, b) => (Number(b.updated) || 0) - (Number(a.updated) || 0))[0];
  }
- chat.updated = at;
- // The note is the newest line, and the chat is the newest chat: pinned, it sits at the top
- // of the list instead of being buried under the work it interrupted.
- writeJson(indexFile, index);
+ if (!chat?.id) return null;
  const file = path.join(store, 'chats', `${chat.id}.json`);
- const body = readJson(file, null) || { version: 1, messages: [] };
- if (!Array.isArray(body.messages)) body.messages = [];
+ const body = readJson(file, null);
+ if (!body || body.sealed || !Array.isArray(body.messages)) return null;
  // An update that restarts twice (a supervisor and the app, or a retried install) must not
  // write the same note twice: the version on the last line is what says it is the same one.
  const last = body.messages[body.messages.length - 1];
  if (last?.update === String(to)) return made;
  body.messages.push(made.entry);
  writeJson(file, body);
- return made;
+ // The conversation jumps back to the top of the list, where the user will look for it.
+ chat.updated = at;
+ writeJson(indexFile, index);
+ return { ...made, chatId: chat.id };
 }
 
-module.exports = { write, note, TITLE };
+module.exports = { write, note };
